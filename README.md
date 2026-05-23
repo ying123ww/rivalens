@@ -33,6 +33,11 @@ flowchart TB
     SchemaBuilder --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
     Reviewer --> MsgReview["AgentMessage(type=review)"]
+    MsgPlan --> MsgGuard["Pydantic payload validation"]
+    MsgEvidence --> MsgGuard
+    MsgSchema --> MsgGuard
+    MsgAnalysis --> MsgGuard
+    MsgReview --> MsgGuard
 
     Planner --> Toolkit["ResearchToolkit\nagent-facing research tools"]
     Collector --> Toolkit
@@ -83,11 +88,29 @@ flowchart LR
 evidence collection tool. The final report is produced only after schema
 extraction, analysis, and review have run over traceable evidence.
 
-Agents also exchange structured messages through `CompetitorAnalysisState.messages`.
-Each `AgentMessage` contains `sender`, `receiver`, `type`, `payload`,
-`artifact_ids`, `evidence_ids`, and `created_at`, giving the workflow a
-function-calling-like collaboration surface instead of relying only on free-form
-text.
+## Structured Agent Messages
+
+Agents exchange validated JSON messages through
+`CompetitorAnalysisState.messages`. Each `AgentMessage` contains `sender`,
+`receiver`, `type`, `payload`, `artifact_ids`, `evidence_ids`, and `created_at`.
+The payload is validated before it is appended to state, using a dedicated
+Pydantic schema for each message type:
+
+```text
+plan     -> PlanMessagePayload
+evidence -> EvidenceMessagePayload
+schema   -> SchemaMessagePayload
+analysis -> AnalysisMessagePayload
+review   -> ReviewMessagePayload
+revision -> RevisionMessagePayload
+report   -> ReportMessagePayload
+publish  -> PublishMessagePayload
+```
+
+Downstream agents consume the latest validated message addressed to them with
+`latest_message_for(...)`. This makes each DAG edge behave more like a
+function-calling contract: the shared state remains observable, but the handoff
+between agents has explicit typed inputs instead of arbitrary free-form text.
 
 ## Research Modes
 

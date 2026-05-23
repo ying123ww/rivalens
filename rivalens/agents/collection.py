@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from rivalens.agents.messages import create_agent_message
+from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState
 
@@ -13,8 +13,10 @@ class CollectionAgent:
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
-        query = task.get("query", "")
-        competitors = state.get("competitors") or task.get("competitors") or []
+        plan_message = latest_message_for(state, receiver="collection", message_type="plan", sender="planner")
+        plan_payload = plan_message.get("payload", {}) if plan_message else {}
+        query = plan_payload.get("query") or task.get("query", "")
+        competitors = plan_payload.get("competitors") or state.get("competitors") or task.get("competitors") or []
         deep = bool(task.get("deep_research", True))
         verbose = bool(task.get("verbose", True))
 
@@ -85,7 +87,11 @@ class CollectionAgent:
                 {
                     "agent": "collection",
                     "action": "collect_public_evidence",
-                    "input": {"query": query, "competitors": competitors},
+                    "input": {
+                        "query": query,
+                        "competitors": competitors,
+                        "message_id": plan_message.get("id") if plan_message else None,
+                    },
                     "output": {"evidence_count": len(evidence_items), "research_runs": len(contexts)},
                 }
             ],

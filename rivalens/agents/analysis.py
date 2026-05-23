@@ -1,6 +1,6 @@
 """Analysis agent that turns evidence into traceable claims."""
 
-from rivalens.agents.messages import create_agent_message
+from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.research import ResearchToolkit
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
 
@@ -12,7 +12,14 @@ class AnalysisAgent:
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
         verbose = bool(task.get("verbose", True))
-        product_facts = state.get("product_facts", [])
+        schema_message = latest_message_for(
+            state,
+            receiver="analysis",
+            message_type="schema",
+            sender="schema_builder",
+        )
+        schema_payload = schema_message.get("payload", {}) if schema_message else {}
+        product_facts = state.get("product_facts") or schema_payload.get("facts", [])
         claims: list[AnalysisClaim] = []
 
         focused_research = await self.research_toolkit.focused_analysis(
@@ -66,7 +73,10 @@ class AnalysisAgent:
                 {
                     "agent": "analysis",
                     "action": "derive_traceable_claims",
-                    "input": {"fact_count": len(product_facts)},
+                    "input": {
+                        "fact_count": len(product_facts),
+                        "message_id": schema_message.get("id") if schema_message else None,
+                    },
                     "output": {"claim_count": len(claims), "research_mode": focused_research["mode"]},
                 }
             ],

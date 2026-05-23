@@ -1,6 +1,6 @@
 """Schema-building agent for competitor knowledge facts."""
 
-from rivalens.agents.messages import create_agent_message
+from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState, ProductFact
 
@@ -12,6 +12,12 @@ class SchemaBuilderAgent:
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
         verbose = bool(task.get("verbose", True))
+        evidence_message = latest_message_for(
+            state,
+            receiver="schema_builder",
+            message_type="evidence",
+            sender="collection",
+        )
         evidence_items = state.get("evidence_items", [])
         facts: list[ProductFact] = []
 
@@ -65,7 +71,10 @@ class SchemaBuilderAgent:
                 {
                     "agent": "schema_builder",
                     "action": "extract_competitor_knowledge_facts",
-                    "input": {"evidence_count": len(evidence_items)},
+                    "input": {
+                        "evidence_count": len(evidence_items),
+                        "message_id": evidence_message.get("id") if evidence_message else None,
+                    },
                     "output": {"fact_count": len(facts), "research_mode": schema_research["mode"]},
                 }
             ],

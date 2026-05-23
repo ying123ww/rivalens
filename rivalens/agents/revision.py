@@ -1,12 +1,19 @@
 """Revision agent that responds to review findings."""
 
-from rivalens.agents.messages import create_agent_message
+from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
 
 
 class RevisionAgent:
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
-        findings = state.get("quality_findings", [])
+        review_message = latest_message_for(
+            state,
+            receiver="reviser",
+            message_type="review",
+            sender="quality",
+        )
+        review_payload = review_message.get("payload", {}) if review_message else {}
+        findings = state.get("quality_findings") or review_payload.get("findings", [])
         claims = state.get("analysis_claims", [])
         blocked_ids = {finding.get("target_id") for finding in findings if finding.get("severity") == "high"}
 
@@ -39,7 +46,11 @@ class RevisionAgent:
                 {
                     "agent": "reviser",
                     "action": "revise_claims_from_review_feedback",
-                    "input": {"finding_count": len(findings), "claim_count": len(claims)},
+                    "input": {
+                        "finding_count": len(findings),
+                        "claim_count": len(claims),
+                        "message_id": review_message.get("id") if review_message else None,
+                    },
                     "output": {"claim_count": len(revised_claims), "note": note},
                 }
             ],

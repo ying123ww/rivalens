@@ -20,7 +20,15 @@ class PlanningAgent:
             if isinstance(competitor, str):
                 normalized.append({"name": competitor})
             else:
-                normalized.append(competitor)
+                normalized.append(
+                    {
+                        "name": competitor.get("name", ""),
+                        "product": competitor.get("product", ""),
+                        "website": competitor.get("website", ""),
+                        "category": competitor.get("category", ""),
+                        "notes": competitor.get("notes", ""),
+                    }
+                )
 
         outline = await self.research_toolkit.generate_outline(query=query, verbose=verbose)
         research_artifacts = state.get("research_artifacts", []) + [

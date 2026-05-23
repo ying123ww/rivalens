@@ -2,6 +2,8 @@
 
 from typing import Any, Literal, TypedDict
 
+from pydantic import BaseModel, ConfigDict, Field
+
 
 EvidenceType = Literal[
     "official_site",
@@ -75,20 +77,116 @@ class AgentEvent(TypedDict, total=False):
     cost: float
 
 
+AgentMessageType = Literal[
+    "plan",
+    "evidence",
+    "schema",
+    "analysis",
+    "review",
+    "revision",
+    "report",
+    "publish",
+]
+
+
+class StrictPayloadModel(BaseModel):
+    """Base class for JSON payloads exchanged between agents."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CompetitorPayload(StrictPayloadModel):
+    name: str
+    product: str | None = None
+    website: str | None = None
+    category: str | None = None
+    notes: str | None = None
+
+
+class ProductFactPayload(StrictPayloadModel):
+    id: str
+    competitor: str = ""
+    dimension: str
+    value: str
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+
+
+class AnalysisClaimPayload(StrictPayloadModel):
+    id: str
+    dimension: str
+    claim: str
+    competitors: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+    confidence: float = 0.5
+
+
+class QualityFindingPayload(StrictPayloadModel):
+    id: str
+    severity: Literal["low", "medium", "high"]
+    target_id: str
+    message: str
+    recommendation: str
+
+
+class PlanMessagePayload(StrictPayloadModel):
+    query: str
+    competitors: list[CompetitorPayload] = Field(default_factory=list)
+    suggested_outline: str = ""
+
+
+class EvidenceMessagePayload(StrictPayloadModel):
+    evidence_count: int = Field(ge=0)
+    research_runs: int = Field(ge=0)
+
+
+class SchemaMessagePayload(StrictPayloadModel):
+    fact_count: int = Field(ge=0)
+    facts: list[ProductFactPayload] = Field(default_factory=list)
+
+
+class AnalysisMessagePayload(StrictPayloadModel):
+    claim_count: int = Field(ge=0)
+    claims: list[AnalysisClaimPayload] = Field(default_factory=list)
+
+
+class ReviewMessagePayload(StrictPayloadModel):
+    finding_count: int = Field(ge=0)
+    findings: list[QualityFindingPayload] = Field(default_factory=list)
+    accepted: bool
+
+
+class RevisionMessagePayload(StrictPayloadModel):
+    note: str
+    claim_count: int = Field(ge=0)
+
+
+class ReportMessagePayload(StrictPayloadModel):
+    report_length: int = Field(ge=0)
+
+
+class PublishMessagePayload(StrictPayloadModel):
+    markdown: str
+
+
+AgentMessagePayload = (
+    PlanMessagePayload
+    | EvidenceMessagePayload
+    | SchemaMessagePayload
+    | AnalysisMessagePayload
+    | ReviewMessagePayload
+    | RevisionMessagePayload
+    | ReportMessagePayload
+    | PublishMessagePayload
+)
+
+
 class AgentMessage(TypedDict, total=False):
     id: str
     sender: str
     receiver: str
-    type: Literal[
-        "plan",
-        "evidence",
-        "schema",
-        "analysis",
-        "review",
-        "revision",
-        "report",
-        "publish",
-    ]
+    type: AgentMessageType
     payload: dict[str, Any]
     artifact_ids: list[str]
     evidence_ids: list[str]
