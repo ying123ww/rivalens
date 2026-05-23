@@ -1,5 +1,6 @@
 """Schema-building agent for competitor knowledge facts."""
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState, ProductFact
 
@@ -37,20 +38,28 @@ class SchemaBuilderAgent:
                 }
             )
 
+        artifact = {
+            "id": "artifact_schema_extraction_1",
+            "agent": "schema_builder",
+            "mode": schema_research["mode"],
+            "query": schema_research["query"],
+            "report": schema_research["report"],
+            "context": schema_research["context"],
+            "costs": schema_research["costs"],
+        }
+        message = create_agent_message(
+            sender="schema_builder",
+            receiver="analysis",
+            message_type="schema",
+            payload={"fact_count": len(facts), "facts": facts},
+            artifact_ids=[artifact["id"]],
+            evidence_ids=[evidence_id for fact in facts for evidence_id in fact.get("evidence_ids", [])],
+        )
+
         return {
             "product_facts": facts,
-            "research_artifacts": state.get("research_artifacts", [])
-            + [
-                {
-                    "id": "artifact_schema_extraction_1",
-                    "agent": "schema_builder",
-                    "mode": schema_research["mode"],
-                    "query": schema_research["query"],
-                    "report": schema_research["report"],
-                    "context": schema_research["context"],
-                    "costs": schema_research["costs"],
-                }
-            ],
+            "research_artifacts": state.get("research_artifacts", []) + [artifact],
+            "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
                 {

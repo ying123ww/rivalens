@@ -2,6 +2,7 @@
 
 from .competitive import (
     AgentEvent,
+    AgentMessage,
     AnalysisClaim,
     Competitor,
     CompetitorAnalysisState,
@@ -13,6 +14,7 @@ from .competitive import (
 
 __all__ = [
     "AgentEvent",
+    "AgentMessage",
     "AnalysisClaim",
     "Competitor",
     "CompetitorAnalysisState",

@@ -1,5 +1,6 @@
 """Report writer for structured competitor analysis output."""
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.schema import CompetitorAnalysisState
 
 
@@ -36,6 +37,16 @@ class ReportWriterAgent:
 
         return {
             "report": "\n".join(lines),
+            "messages": state.get("messages", [])
+            + [
+                create_agent_message(
+                    sender="writer",
+                    receiver="publisher",
+                    message_type="report",
+                    payload={"report_length": sum(len(line) for line in lines)},
+                    evidence_ids=[evidence_id for claim in claims for evidence_id in claim.get("evidence_ids", [])],
+                )
+            ],
             "agent_events": state.get("agent_events", [])
             + [
                 {

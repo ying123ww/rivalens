@@ -1,5 +1,6 @@
 """Quality agent for citation and traceability checks."""
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState, QualityFinding
 
@@ -29,20 +30,29 @@ class QualityAgent:
                     }
                 )
 
+        artifact = {
+            "id": "artifact_quality_source_discovery_1",
+            "agent": "quality",
+            "mode": verification["mode"],
+            "query": verification["query"],
+            "report": verification["report"],
+            "context": verification["context"],
+            "costs": verification["costs"],
+        }
+        receiver = "reviser" if findings else "writer"
+        message = create_agent_message(
+            sender="quality",
+            receiver=receiver,
+            message_type="review",
+            payload={"finding_count": len(findings), "findings": findings},
+            artifact_ids=[artifact["id"]],
+            evidence_ids=[evidence_id for claim in state.get("analysis_claims", []) for evidence_id in claim.get("evidence_ids", [])],
+        )
+
         return {
             "quality_findings": findings,
-            "research_artifacts": state.get("research_artifacts", [])
-            + [
-                {
-                    "id": "artifact_quality_source_discovery_1",
-                    "agent": "quality",
-                    "mode": verification["mode"],
-                    "query": verification["query"],
-                    "report": verification["report"],
-                    "context": verification["context"],
-                    "costs": verification["costs"],
-                }
-            ],
+            "research_artifacts": state.get("research_artifacts", []) + [artifact],
+            "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
                 {

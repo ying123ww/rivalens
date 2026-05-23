@@ -1,5 +1,6 @@
 """Planning agent for competitor-analysis tasks."""
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.research import ResearchToolkit
 from rivalens.schema import Competitor, CompetitorAnalysisState
 
@@ -33,10 +34,23 @@ class PlanningAgent:
                 "costs": outline["costs"],
             }
         ]
+        artifact_id = research_artifacts[-1]["id"]
+        message = create_agent_message(
+            sender="planner",
+            receiver="collection",
+            message_type="plan",
+            payload={
+                "query": query,
+                "competitors": normalized,
+                "suggested_outline": outline["report"],
+            },
+            artifact_ids=[artifact_id],
+        )
 
         return {
             "competitors": normalized,
             "research_artifacts": research_artifacts,
+            "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
                 {

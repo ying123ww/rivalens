@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState
 
@@ -62,9 +63,23 @@ class CollectionAgent:
                 }
             )
 
+        evidence_ids = [item.get("id", "") for item in evidence_items]
+        message = create_agent_message(
+            sender="collection",
+            receiver="schema_builder",
+            message_type="evidence",
+            payload={
+                "evidence_count": len(evidence_items),
+                "research_runs": len(contexts),
+            },
+            artifact_ids=[artifact.get("id", "") for artifact in research_artifacts if artifact.get("agent") == "collection"],
+            evidence_ids=evidence_ids,
+        )
+
         return {
             "evidence_items": evidence_items,
             "research_artifacts": research_artifacts,
+            "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
                 {

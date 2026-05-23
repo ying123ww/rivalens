@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.schema import CompetitorAnalysisState
 
 
@@ -16,6 +17,15 @@ class PublisherAgent:
 
         return {
             "published_artifacts": {"markdown": str(report_path)},
+            "messages": state.get("messages", [])
+            + [
+                create_agent_message(
+                    sender="publisher",
+                    receiver="end",
+                    message_type="publish",
+                    payload={"markdown": str(report_path)},
+                )
+            ],
             "agent_events": state.get("agent_events", [])
             + [
                 {

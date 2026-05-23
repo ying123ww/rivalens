@@ -1,5 +1,6 @@
 """Revision agent that responds to review findings."""
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
 
 
@@ -23,6 +24,16 @@ class RevisionAgent:
             "analysis_claims": revised_claims,
             "quality_findings": [],
             "revision_notes": state.get("revision_notes", []) + [note],
+            "messages": state.get("messages", [])
+            + [
+                create_agent_message(
+                    sender="reviser",
+                    receiver="writer",
+                    message_type="revision",
+                    payload={"note": note, "claim_count": len(revised_claims)},
+                    evidence_ids=[evidence_id for claim in revised_claims for evidence_id in claim.get("evidence_ids", [])],
+                )
+            ],
             "agent_events": state.get("agent_events", [])
             + [
                 {

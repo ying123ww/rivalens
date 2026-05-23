@@ -28,6 +28,12 @@ flowchart TB
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
+    Planner --> MsgPlan["AgentMessage(type=plan)"]
+    Collector --> MsgEvidence["AgentMessage(type=evidence)"]
+    SchemaBuilder --> MsgSchema["AgentMessage(type=schema)"]
+    Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
+    Reviewer --> MsgReview["AgentMessage(type=review)"]
+
     Planner --> Toolkit["ResearchToolkit\nagent-facing research tools"]
     Collector --> Toolkit
     SchemaBuilder --> Toolkit
@@ -51,6 +57,7 @@ flowchart TB
     State --> Facts["ProductFact"]
     State --> Claims["AnalysisClaim"]
     State --> QA["QualityFinding"]
+    State --> Messages["AgentMessage[]"]
     State --> Artifacts["research_artifacts / agent_events"]
 ```
 
@@ -75,6 +82,12 @@ flowchart LR
 `rivalens.research.ResearchEngine` search and deep-research capability as an
 evidence collection tool. The final report is produced only after schema
 extraction, analysis, and review have run over traceable evidence.
+
+Agents also exchange structured messages through `CompetitorAnalysisState.messages`.
+Each `AgentMessage` contains `sender`, `receiver`, `type`, `payload`,
+`artifact_ids`, `evidence_ids`, and `created_at`, giving the workflow a
+function-calling-like collaboration surface instead of relying only on free-form
+text.
 
 ## Research Modes
 

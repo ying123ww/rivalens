@@ -75,6 +75,26 @@ class AgentEvent(TypedDict, total=False):
     cost: float
 
 
+class AgentMessage(TypedDict, total=False):
+    id: str
+    sender: str
+    receiver: str
+    type: Literal[
+        "plan",
+        "evidence",
+        "schema",
+        "analysis",
+        "review",
+        "revision",
+        "report",
+        "publish",
+    ]
+    payload: dict[str, Any]
+    artifact_ids: list[str]
+    evidence_ids: list[str]
+    created_at: str
+
+
 class ResearchArtifact(TypedDict, total=False):
     id: str
     agent: str
@@ -89,6 +109,7 @@ class ResearchArtifact(TypedDict, total=False):
 
 class CompetitorAnalysisState(TypedDict, total=False):
     task: dict[str, Any]
+    messages: list[AgentMessage]
     competitors: list[Competitor]
     evidence_items: list[EvidenceItem]
     product_facts: list[ProductFact]

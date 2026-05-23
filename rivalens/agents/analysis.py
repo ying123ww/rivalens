@@ -1,5 +1,6 @@
 """Analysis agent that turns evidence into traceable claims."""
 
+from rivalens.agents.messages import create_agent_message
 from rivalens.research import ResearchToolkit
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
 
@@ -38,20 +39,28 @@ class AnalysisAgent:
                 }
             )
 
+        artifact = {
+            "id": "artifact_focused_analysis_1",
+            "agent": "analysis",
+            "mode": focused_research["mode"],
+            "query": focused_research["query"],
+            "report": focused_research["report"],
+            "context": focused_research["context"],
+            "costs": focused_research["costs"],
+        }
+        message = create_agent_message(
+            sender="analysis",
+            receiver="quality",
+            message_type="analysis",
+            payload={"claim_count": len(claims), "claims": claims},
+            artifact_ids=[artifact["id"]],
+            evidence_ids=[evidence_id for claim in claims for evidence_id in claim.get("evidence_ids", [])],
+        )
+
         return {
             "analysis_claims": claims,
-            "research_artifacts": state.get("research_artifacts", [])
-            + [
-                {
-                    "id": "artifact_focused_analysis_1",
-                    "agent": "analysis",
-                    "mode": focused_research["mode"],
-                    "query": focused_research["query"],
-                    "report": focused_research["report"],
-                    "context": focused_research["context"],
-                    "costs": focused_research["costs"],
-                }
-            ],
+            "research_artifacts": state.get("research_artifacts", []) + [artifact],
+            "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
                 {
