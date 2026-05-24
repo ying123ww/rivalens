@@ -18,11 +18,13 @@ from rivalens.schema import (
     ReviewMessagePayload,
     RevisionMessagePayload,
     SchemaMessagePayload,
+    SchemaSelectionMessagePayload,
 )
 
 
 PAYLOAD_MODELS: dict[AgentMessageType, type[BaseModel]] = {
     "plan": PlanMessagePayload,
+    "schema_selection": SchemaSelectionMessagePayload,
     "evidence": EvidenceMessagePayload,
     "schema": SchemaMessagePayload,
     "analysis": AnalysisMessagePayload,

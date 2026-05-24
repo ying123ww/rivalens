@@ -13,10 +13,14 @@ class CollectionAgent:
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
-        plan_message = latest_message_for(state, receiver="collection", message_type="plan", sender="planner")
-        plan_payload = plan_message.get("payload", {}) if plan_message else {}
-        query = plan_payload.get("query") or task.get("query", "")
-        competitors = plan_payload.get("competitors") or state.get("competitors") or task.get("competitors") or []
+        schema_message = latest_message_for(
+            state,
+            receiver="collection",
+            message_type="schema_selection",
+            sender="schema_selection",
+        )
+        query = task.get("query", "")
+        competitors = state.get("competitors") or task.get("competitors") or []
         deep = bool(task.get("deep_research", True))
         verbose = bool(task.get("verbose", True))
 
@@ -68,7 +72,7 @@ class CollectionAgent:
         evidence_ids = [item.get("id", "") for item in evidence_items]
         message = create_agent_message(
             sender="collection",
-            receiver="schema_builder",
+            receiver="knowledge_structuring",
             message_type="evidence",
             payload={
                 "evidence_count": len(evidence_items),
@@ -90,7 +94,8 @@ class CollectionAgent:
                     "input": {
                         "query": query,
                         "competitors": competitors,
-                        "message_id": plan_message.get("id") if plan_message else None,
+                        "message_id": schema_message.get("id") if schema_message else None,
+                        "active_schema_id": state.get("active_knowledge_schema", {}).get("id"),
                     },
                     "output": {"evidence_count": len(evidence_items), "research_runs": len(contexts)},
                 }

@@ -20,20 +20,23 @@ flowchart TB
     User["User / product team"] --> Workflow["rivalens.workflows\nLangGraph DAG"]
 
     Workflow --> Planner["PlanningAgent\nscope, competitors, dimensions"]
+    Workflow --> Selector["SchemaSelectionAgent\nindustry routing + active schema"]
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
-    Workflow --> SchemaBuilder["SchemaBuilderAgent\nEvidenceItem -> ProductFact"]
-    Workflow --> Analyst["AnalysisAgent\nProductFact -> AnalysisClaim"]
+    Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
+    Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
     Workflow --> Reviewer["QualityAgent\ntraceability and coverage review"]
     Workflow --> Reviser["RevisionAgent\nrespond to review findings"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
     Planner --> MsgPlan["AgentMessage(type=plan)"]
+    Selector --> MsgSelection["AgentMessage(type=schema_selection)"]
     Collector --> MsgEvidence["AgentMessage(type=evidence)"]
-    SchemaBuilder --> MsgSchema["AgentMessage(type=schema)"]
+    Knowledge --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
     Reviewer --> MsgReview["AgentMessage(type=review)"]
     MsgPlan --> MsgGuard["Pydantic payload validation"]
+    MsgSelection --> MsgGuard
     MsgEvidence --> MsgGuard
     MsgSchema --> MsgGuard
     MsgAnalysis --> MsgGuard
@@ -41,7 +44,7 @@ flowchart TB
 
     Planner --> Toolkit["ResearchToolkit\nagent-facing research tools"]
     Collector --> Toolkit
-    SchemaBuilder --> Toolkit
+    Knowledge --> Toolkit
     Analyst --> Toolkit
     Reviewer --> Toolkit
 
@@ -50,8 +53,9 @@ flowchart TB
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
 
     Planner --> State["CompetitorAnalysisState"]
+    Selector --> State
     Collector --> State
-    SchemaBuilder --> State
+    Knowledge --> State
     Analyst --> State
     Reviewer --> State
     Reviser --> State
@@ -59,7 +63,8 @@ flowchart TB
     Publisher --> State
 
     State --> Evidence["EvidenceItem"]
-    State --> Facts["ProductFact"]
+    State --> ActiveSchema["ActiveKnowledgeSchema"]
+    State --> KnowledgeState["CompetitorKnowledge"]
     State --> Claims["AnalysisClaim"]
     State --> QA["QualityFinding"]
     State --> Messages["AgentMessage[]"]
@@ -73,8 +78,9 @@ multi-agent DAG is:
 
 ```mermaid
 flowchart LR
-    A["scope_planner\nPlanningAgent"] --> B["source_collection\nCollectionAgent"]
-    B --> C["schema_extraction\nSchemaBuilderAgent"]
+    A["scope_planner\nPlanningAgent"] --> S["schema_selection\nSchemaSelectionAgent"]
+    S --> B["source_collection\nCollectionAgent"]
+    B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
     C --> D["dimension_analysis\nAnalysisAgent"]
     D --> E["reviewer\nQualityAgent"]
     E -->|quality_findings present| F["reviser\nRevisionAgent"]
@@ -83,10 +89,12 @@ flowchart LR
     G --> H["publisher\nPublisherAgent"]
 ```
 
-`source_collection` uses `ResearchToolkit.collect_evidence()`, which wraps
-`rivalens.research.ResearchEngine` search and deep-research capability as an
-evidence collection tool. The final report is produced only after schema
-extraction, analysis, and review have run over traceable evidence.
+`schema_selection` first freezes an `ActiveKnowledgeSchema` from the schema
+registry. `source_collection` then uses `ResearchToolkit.collect_evidence()`,
+which wraps `rivalens.research.ResearchEngine` search and deep-research
+capability as an evidence collection tool. The final report is produced only
+after evidence has been structured into `CompetitorKnowledge`, analyzed, and
+reviewed over traceable evidence.
 
 ## Structured Agent Messages
 
@@ -98,6 +106,7 @@ Pydantic schema for each message type:
 
 ```text
 plan     -> PlanMessagePayload
+schema_selection -> SchemaSelectionMessagePayload
 evidence -> EvidenceMessagePayload
 schema   -> SchemaMessagePayload
 analysis -> AnalysisMessagePayload
@@ -138,12 +147,13 @@ are useful as capability channels, but they are still too mechanical:
   has not provided analysis dimensions, but it should not always run.
 - `CollectionAgent -> collect_evidence() -> research_report/deep` is the most
   natural mapping and should remain the primary evidence-gathering path.
-- `SchemaBuilderAgent -> extract_schema() -> custom_report` is plausible for
-  structured extraction, but its output is not yet parsed as the source of truth.
-  The current source of truth remains `EvidenceItem -> ProductFact`.
+- `KnowledgeStructuringAgent -> extract_schema() -> custom_report` is plausible
+  for structured extraction, but its current deterministic assembly is still
+  basic. The source of truth is now `EvidenceItem -> CompetitorKnowledge`, not
+  a generic `ProductFact` fallback.
 - `AnalysisAgent -> focused_analysis() -> detailed_report` can support complex
   analysis, but running it by default risks recreating a long-form report path
-  instead of reasoning from normalized facts.
+  instead of reasoning from `CompetitorKnowledge`.
 - `QualityAgent -> discover_sources() -> resource_report` is the weakest current
   mapping. Quality review should first audit existing claims and evidence; it
   should only request more source discovery when it finds a coverage or citation

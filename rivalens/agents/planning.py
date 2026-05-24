@@ -45,7 +45,7 @@ class PlanningAgent:
         artifact_id = research_artifacts[-1]["id"]
         message = create_agent_message(
             sender="planner",
-            receiver="collection",
+            receiver="schema_selection",
             message_type="plan",
             payload={
                 "query": query,

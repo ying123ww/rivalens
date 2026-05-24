@@ -1,0 +1,1378 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rivalens 当前 Schema 与 Agent 状态</title>
+  <style>
+    :root {
+      --bg: #f5f7f8;
+      --paper: #ffffff;
+      --ink: #18212d;
+      --muted: #627083;
+      --line: #d9e0e6;
+      --green: #15745f;
+      --blue: #2f67a1;
+      --orange: #a9661f;
+      --red: #a13f43;
+      --green-soft: #e5f3ef;
+      --blue-soft: #e8f0f8;
+      --orange-soft: #f8efe3;
+      --red-soft: #f8e8e9;
+      --shadow: 0 16px 40px rgba(24, 33, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.58;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px clamp(18px, 4vw, 46px);
+      background: rgba(245, 247, 248, 0.93);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-weight: 780;
+    }
+
+    .logo {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      color: #fff;
+      background: var(--green);
+      border-radius: 7px;
+      font-weight: 820;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 14px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .nav a {
+      text-decoration: none;
+    }
+
+    .nav a:hover {
+      color: var(--ink);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, 0.82fr);
+      gap: clamp(24px, 5vw, 58px);
+      align-items: center;
+      padding: clamp(36px, 7vw, 76px) clamp(18px, 4vw, 46px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--green);
+      font-size: 14px;
+      font-weight: 780;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 820px;
+      font-size: clamp(34px, 5vw, 66px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 780px;
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: clamp(17px, 2vw, 21px);
+    }
+
+    .hero-card {
+      padding: 20px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-card h2 {
+      margin: 0 0 14px;
+      font-size: 18px;
+    }
+
+    .status-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .status-list li {
+      display: grid;
+      grid-template-columns: 94px minmax(0, 1fr);
+      gap: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .status-list li:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 26px;
+      padding: 0 9px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 780;
+      white-space: nowrap;
+    }
+
+    .done {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .partial {
+      color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .missing {
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .next {
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    section {
+      padding: 42px clamp(18px, 4vw, 46px);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 36px);
+      letter-spacing: 0;
+    }
+
+    .note {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      min-width: 0;
+      padding: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .card code,
+    pre code {
+      color: var(--blue);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.94em;
+      overflow-wrap: anywhere;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+
+    .step {
+      min-height: 138px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .step small {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 15px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: minmax(190px, 0.8fr) minmax(0, 1.3fr) minmax(190px, 0.9fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .arch-column {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .arch-title {
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .arch-box {
+      min-height: 78px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .arch-box strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .arch-box span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .arch-box.core {
+      background: var(--green-soft);
+    }
+
+    .arch-box.industry {
+      background: var(--blue-soft);
+    }
+
+    .arch-box.review {
+      background: var(--orange-soft);
+    }
+
+    .arch-center {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      box-shadow: var(--shadow);
+    }
+
+    .arch-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+    }
+
+    .arrow-note {
+      display: grid;
+      place-items: center;
+      min-height: 34px;
+      color: var(--muted);
+      font-size: 13px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .logic-figure {
+      overflow-x: auto;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .logic-figure svg {
+      display: block;
+      width: 100%;
+      min-width: 920px;
+      height: auto;
+    }
+
+    .svg-title {
+      font-size: 17px;
+      font-weight: 800;
+      fill: var(--ink);
+    }
+
+    .svg-label {
+      font-size: 14px;
+      font-weight: 760;
+      fill: var(--ink);
+    }
+
+    .svg-small {
+      font-size: 12px;
+      fill: var(--muted);
+    }
+
+    .svg-box {
+      fill: #fff;
+      stroke: #cbd5df;
+      stroke-width: 1.2;
+      rx: 8;
+    }
+
+    .svg-core {
+      fill: var(--green-soft);
+      stroke: #8bbcaf;
+    }
+
+    .svg-industry {
+      fill: var(--blue-soft);
+      stroke: #91b4d6;
+    }
+
+    .svg-review {
+      fill: var(--orange-soft);
+      stroke: #d7b27e;
+    }
+
+    .svg-output {
+      fill: #eef1f3;
+      stroke: #b8c4ce;
+    }
+
+    .svg-danger {
+      fill: var(--red-soft);
+      stroke: #d99da0;
+    }
+
+    .svg-arrow {
+      stroke: #566577;
+      stroke-width: 2;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .svg-feedback {
+      stroke: var(--red);
+      stroke-width: 2;
+      fill: none;
+      stroke-dasharray: 6 5;
+      marker-end: url(#arrow-red);
+    }
+
+    .svg-lane {
+      fill: #fbfcfd;
+      stroke: #dde4ea;
+      stroke-width: 1;
+      rx: 10;
+    }
+
+    .lineage {
+      display: grid;
+      gap: 12px;
+    }
+
+    .lineage-row {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .lineage-label {
+      display: grid;
+      place-items: center;
+      min-height: 82px;
+      padding: 12px;
+      color: #fff;
+      background: var(--blue);
+      border-radius: 8px;
+      font-weight: 780;
+      text-align: center;
+    }
+
+    .lineage-items {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+    }
+
+    .lineage-card {
+      min-height: 82px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .lineage-card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .lineage-card span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .schema-layers {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .layer {
+      min-height: 220px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .layer h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .layer ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .layer li {
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfd;
+    }
+
+    .step:nth-child(1) {
+      border-top: 4px solid var(--blue);
+    }
+
+    .step:nth-child(2) {
+      border-top: 4px solid var(--orange);
+    }
+
+    .step:nth-child(3) {
+      border-top: 4px solid var(--green);
+    }
+
+    .step:nth-child(4) {
+      border-top: 4px solid var(--red);
+    }
+
+    .step:nth-child(5) {
+      border-top: 4px solid var(--blue);
+    }
+
+    .compare {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 14px;
+      overflow: auto;
+      background: #101820;
+      color: #d9e6ef;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.48;
+    }
+
+    pre code {
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      min-width: 880px;
+    }
+
+    th,
+    td {
+      padding: 14px 15px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    th {
+      background: #ecf1f3;
+      color: #303b48;
+      font-weight: 780;
+      font-size: 13px;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    td strong {
+      color: var(--ink);
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 16px;
+    }
+
+    .callout {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--green);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .callout p {
+      margin: 8px 0 0;
+      color: var(--muted);
+    }
+
+    footer {
+      padding: 28px clamp(18px, 4vw, 46px) 44px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .compare,
+      .decision {
+        grid-template-columns: 1fr;
+      }
+
+      .architecture,
+      .schema-layers {
+        grid-template-columns: 1fr;
+      }
+
+      .arch-row {
+        grid-template-columns: repeat(2, minmax(150px, 1fr));
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: grid;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .topbar {
+        position: static;
+        display: grid;
+      }
+
+      .nav {
+        justify-content: flex-start;
+      }
+
+      .status-list li {
+        grid-template-columns: 1fr;
+      }
+
+      .lineage-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">R</span>
+      <span>Rivalens 当前情况说明</span>
+    </div>
+    <nav class="nav" aria-label="页面导航">
+      <a href="#current">当前已有</a>
+      <a href="#problem">主要问题</a>
+      <a href="#target">目标 Schema</a>
+      <a href="#industry">行业适配</a>
+      <a href="#references">参考模式</a>
+      <a href="#agents">Agent 构建</a>
+      <a href="#next">下一步</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">当前代码状态 + 推荐演进方向</p>
+        <h1>Rivalens 现在已经切到行业感知的业务知识 Schema 主线</h1>
+        <p class="lead">
+          当前系统已经能让 Agent 通过 typed message 协作；但题目要求的是竞品知识结构化，
+          也就是功能树、定价模型、用户画像这些领域对象必须成为主线。
+        </p>
+      </div>
+      <aside class="hero-card">
+        <h2>一句话判断</h2>
+        <ul class="status-list">
+          <li><span class="tag done">已完成</span><span>AgentMessage 已经按类型验证 payload。</span></li>
+          <li><span class="tag done">已完成</span><span>新增 ActiveKnowledgeSchema、CompetitorKnowledge 和行业扩展结构。</span></li>
+          <li><span class="tag done">已完成</span><span>新增 SchemaSelectionAgent 和 schema_registry。</span></li>
+          <li><span class="tag next">下一步</span><span>让 KnowledgeStructuringAgent 的抽取更精细，并补 ReportDocument。</span></li>
+        </ul>
+      </aside>
+    </section>
+
+    <section id="current">
+      <div class="section-head">
+        <h2>当前已有结构</h2>
+        <p class="note">
+          现在代码已经从泛化事实表切到“先选行业 schema，再结构化竞品知识”的主线。
+        </p>
+      </div>
+      <div class="flow" aria-label="当前数据流">
+        <div class="step">
+          <small>01 当前已有</small>
+          <strong>EvidenceItem</strong>
+          <span>保存来源、标题、URL、摘要、摘录、采集时间和置信度。</span>
+        </div>
+        <div class="step">
+          <small>02 当前已有</small>
+          <strong>ActiveKnowledgeSchema</strong>
+          <span>由 SchemaSelectionAgent 选择行业、core fields 和 industry extensions。</span>
+        </div>
+        <div class="step">
+          <small>03 当前已有</small>
+          <strong>CompetitorKnowledge</strong>
+          <span>把证据填入功能树、定价模型、用户画像和行业扩展。</span>
+        </div>
+        <div class="step">
+          <small>04 当前已有</small>
+          <strong>AnalysisClaim</strong>
+          <span>基于 CompetitorKnowledge 形成分析结论，绑定 evidence_ids 和 confidence。</span>
+        </div>
+        <div class="step">
+          <small>05 当前不足</small>
+          <strong>Report string</strong>
+          <span>Writer 现在主要拼 Markdown 字符串，还不是结构化 ReportDocument。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="problem">
+      <div class="section-head">
+        <h2>现在的关键问题</h2>
+        <p class="note">
+          现在主线已经从 ProductFact 迁走。剩下的问题是：抽取还偏规则化，ReportWriter 还没有输出 ReportDocument。
+        </p>
+      </div>
+      <div class="compare">
+        <div class="card">
+          <h3>已经移除的旧思路</h3>
+          <p>不再用一个通用 ProductFact 兜底，因为它不能稳定表达功能树、定价模型、用户画像和行业扩展。</p>
+          <pre><code>{
+  "removed": "ProductFact",
+  "reason": "too generic for industry-aware competitor knowledge"
+}</code></pre>
+        </div>
+        <div class="card">
+          <h3>当前采用的主线</h3>
+          <p>KnowledgeStructuringAgent 把 evidence 填入 ActiveKnowledgeSchema 约束下的 CompetitorKnowledge。</p>
+          <pre><code>{
+  "competitor": "Notion",
+  "active_schema_id": "active_schema_productivity_saas_...",
+  "feature_tree": [],
+  "pricing_model": {},
+  "user_personas": [],
+  "industry_extensions": {},
+  "evidence_ids": ["ev_1", "ev_2"]
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="target">
+      <div class="section-head">
+        <h2>推荐目标 Schema</h2>
+        <p class="note">
+          这套结构更符合“知识结构化：定义竞品知识 Schema，Agent 产出必须符合 Schema”的要求。
+          但它应该是 Core Schema，不是所有行业共用的唯一终点。
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>它回答的问题</th>
+              <th>核心字段</th>
+              <th>由哪个 Agent 产出</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>EvidenceItem</strong></td>
+              <td>资料从哪里来，原文片段是什么。</td>
+              <td><code>id, source_id, url, title, quote, retrieved_at, source_type, confidence</code></td>
+              <td>CollectionAgent</td>
+            </tr>
+            <tr>
+              <td><strong>CompetitorKnowledge</strong></td>
+              <td>这个竞品的结构化画像是什么。</td>
+              <td><code>competitor_id, feature_tree, pricing_model, user_personas</code></td>
+              <td>KnowledgeStructuringAgent</td>
+            </tr>
+            <tr>
+              <td><strong>FeatureTree</strong></td>
+              <td>竞品有哪些功能，属于哪个功能域。</td>
+              <td><code>category, feature_name, availability, maturity, evidence_ids</code></td>
+              <td>KnowledgeStructuringAgent</td>
+            </tr>
+            <tr>
+              <td><strong>PricingModel</strong></td>
+              <td>套餐、计费单位、价格可见性和企业版策略是什么。</td>
+              <td><code>plans, billing_unit, price, currency, pricing_visibility, included_features</code></td>
+              <td>KnowledgeStructuringAgent</td>
+            </tr>
+            <tr>
+              <td><strong>UserPersona</strong></td>
+              <td>竞品服务什么用户、痛点和购买触发点是什么。</td>
+              <td><code>segment, needs, jobs_to_be_done, buying_triggers, evidence_ids</code></td>
+              <td>KnowledgeStructuringAgent</td>
+            </tr>
+            <tr>
+              <td><strong>AnalysisClaim</strong></td>
+              <td>结构化知识说明了什么竞争含义。</td>
+              <td><code>claim, dimension, competitors, reasoning, evidence_ids, confidence</code></td>
+              <td>AnalysisAgent</td>
+            </tr>
+            <tr>
+              <td><strong>ReportDocument</strong></td>
+              <td>报告每句话绑定了哪些 claim 和 evidence。</td>
+              <td><code>sections, blocks, spans, claim_ids, evidence_ids</code></td>
+              <td>ReportWriterAgent</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="industry">
+      <div class="section-head">
+        <h2>行业 Schema 决策机制</h2>
+        <p class="note">
+          不同行业的竞品分析重点不同，所以 Rivalens 应该采用“通用核心 + 行业扩展 + 受约束 AI 补充”的结构。
+        </p>
+      </div>
+      <div class="logic-figure" aria-label="行业 Schema 总架构图">
+        <svg viewBox="0 0 1120 460" role="img">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
+            </marker>
+            <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
+            </marker>
+          </defs>
+
+          <text x="24" y="32" class="svg-title">行业感知 Schema 选择逻辑图</text>
+
+          <rect x="24" y="70" width="220" height="72" class="svg-box"></rect>
+          <text x="44" y="98" class="svg-label">用户请求</text>
+          <text x="44" y="122" class="svg-small">query / 竞品名 / 用户指定行业</text>
+
+          <rect x="24" y="174" width="220" height="72" class="svg-box"></rect>
+          <text x="44" y="202" class="svg-label">官方 PDF</text>
+          <text x="44" y="226" class="svg-small">行业分类 / 官方定义 / 术语</text>
+
+          <rect x="24" y="278" width="220" height="72" class="svg-box"></rect>
+          <text x="44" y="306" class="svg-label">初步证据</text>
+          <text x="44" y="330" class="svg-small">官网 / 定价页 / 文档 / 评论</text>
+
+          <line x1="244" y1="106" x2="310" y2="178" class="svg-arrow"></line>
+          <line x1="244" y1="210" x2="310" y2="210" class="svg-arrow"></line>
+          <line x1="244" y1="314" x2="310" y2="242" class="svg-arrow"></line>
+
+          <rect x="310" y="74" width="590" height="276" class="svg-lane"></rect>
+          <text x="334" y="106" class="svg-label">Schema 决策流水线</text>
+
+          <rect x="334" y="142" width="130" height="82" class="svg-core"></rect>
+          <text x="350" y="172" class="svg-label">Taxonomy</text>
+          <text x="350" y="196" class="svg-small">官方分类可检索化</text>
+
+          <line x1="464" y1="183" x2="512" y2="183" class="svg-arrow"></line>
+
+          <rect x="512" y="142" width="142" height="82" class="svg-industry"></rect>
+          <text x="528" y="172" class="svg-label">Classifier</text>
+          <text x="528" y="196" class="svg-small">候选行业 + 置信度</text>
+
+          <line x1="654" y1="183" x2="702" y2="183" class="svg-arrow"></line>
+
+          <rect x="702" y="142" width="142" height="82" class="svg-industry"></rect>
+          <text x="718" y="172" class="svg-label">Registry</text>
+          <text x="718" y="196" class="svg-small">Core + 行业扩展</text>
+
+          <path d="M 773 224 C 773 278 650 294 598 260" class="svg-arrow"></path>
+          <rect x="512" y="262" width="142" height="58" class="svg-review"></rect>
+          <text x="528" y="286" class="svg-label">AI 候选字段</text>
+          <text x="528" y="306" class="svg-small">reason / evidence / confidence</text>
+
+          <line x1="844" y1="183" x2="892" y2="183" class="svg-arrow"></line>
+
+          <rect x="910" y="92" width="184" height="86" class="svg-core"></rect>
+          <text x="930" y="122" class="svg-label">Core Schema</text>
+          <text x="930" y="146" class="svg-small">功能 / 定价 / 用户画像</text>
+
+          <rect x="910" y="196" width="184" height="86" class="svg-industry"></rect>
+          <text x="930" y="226" class="svg-label">Industry Extensions</text>
+          <text x="930" y="250" class="svg-small">SaaS / 消费品 / 金融等</text>
+
+          <rect x="910" y="300" width="184" height="86" class="svg-output"></rect>
+          <text x="930" y="330" class="svg-label">ActiveKnowledgeSchema</text>
+          <text x="930" y="354" class="svg-small">本次任务冻结版本</text>
+
+          <line x1="1002" y1="178" x2="1002" y2="196" class="svg-arrow"></line>
+          <line x1="1002" y1="282" x2="1002" y2="300" class="svg-arrow"></line>
+          <path d="M 654 291 C 760 344 830 344 910 344" class="svg-arrow"></path>
+
+          <rect x="334" y="380" width="560" height="50" class="svg-danger"></rect>
+          <text x="354" y="410" class="svg-label">约束原则：AI 只能提出候选字段，不能直接发布永久 schema</text>
+        </svg>
+      </div>
+
+      <div class="flow" aria-label="行业 Schema 决策流程">
+        <div class="step">
+          <small>01 官方分类</small>
+          <strong>Industry Taxonomy</strong>
+          <span>从官方 PDF 或配置文件读取行业分类，作为客观一级边界。</span>
+        </div>
+        <div class="step">
+          <small>02 请求识别</small>
+          <strong>IndustryClassifier</strong>
+          <span>根据用户问题、竞品名称、产品描述判断候选行业和置信度。</span>
+        </div>
+        <div class="step">
+          <small>03 Schema 选择</small>
+          <strong>SchemaRegistry</strong>
+          <span>加载 Core Schema 和候选行业扩展，如 SaaS、消费品、医疗、金融等。</span>
+        </div>
+        <div class="step">
+          <small>04 受约束补充</small>
+          <strong>SchemaRefinementAgent</strong>
+          <span>AI 只能在证据和 taxonomy 约束下补充细分维度，并写明依据。</span>
+        </div>
+        <div class="step">
+          <small>05 质检冻结</small>
+          <strong>SchemaReview</strong>
+          <span>通过后生成本次任务的 ActiveKnowledgeSchema，后续 Agent 都按它输出。</span>
+        </div>
+      </div>
+
+      <div class="compare" style="margin-top: 16px;">
+        <div class="card">
+          <h3>Schema 不是随机生成</h3>
+          <p>AI 可以提出行业细分，但必须输出来源、理由、适用范围和置信度。没有证据支持的字段不能进入 active schema。</p>
+          <pre><code>{
+  "candidate_industries": [
+    {
+      "industry": "productivity_saas",
+      "confidence": 0.84,
+      "signals": ["Notion", "workspace", "SAML SSO"]
+    }
+  ],
+  "schema_extensions": [
+    {
+      "field": "security_compliance",
+      "reason": "Enterprise SaaS 采购通常关注 SSO、SCIM、audit log。",
+      "evidence_ids": ["ev_1", "ev_4"],
+      "confidence": 0.78
+    }
+  ]
+}</code></pre>
+        </div>
+        <div class="card">
+          <h3>最终使用 ActiveKnowledgeSchema</h3>
+          <p>后续 Agent 不直接面对“所有可能字段”，而是面对本次任务冻结后的 schema，保证输出稳定。</p>
+          <pre><code>{
+  "core": ["feature_tree", "pricing_model", "user_personas"],
+  "industry": "productivity_saas",
+  "extensions": [
+    "security_compliance",
+    "admin_governance",
+    "integration_ecosystem",
+    "ai_capability"
+  ],
+  "version": "task_schema_2026_05_24"
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>目标数据链路</h2>
+        <p class="note">
+          以后报告的每一句话都应该能回查到 claim，再回查到结构化竞品知识和原始证据。
+        </p>
+      </div>
+      <div class="logic-figure" aria-label="数据血缘与反馈闭环图">
+        <svg viewBox="0 0 1120 520" role="img">
+          <defs>
+            <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
+            </marker>
+            <marker id="arrow-data-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
+            </marker>
+          </defs>
+
+          <text x="24" y="34" class="svg-title">数据血缘图：报告句子如何回查到原文证据</text>
+
+          <rect x="38" y="72" width="1020" height="82" class="svg-lane"></rect>
+          <text x="58" y="104" class="svg-label">资料层</text>
+          <rect x="184" y="92" width="152" height="42" class="svg-box"></rect>
+          <text x="204" y="118" class="svg-small">SourceDocument</text>
+          <line x1="336" y1="113" x2="386" y2="113" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="386" y="92" width="152" height="42" class="svg-box"></rect>
+          <text x="414" y="118" class="svg-small">EvidenceItem</text>
+          <line x1="538" y1="113" x2="588" y2="113" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="588" y="92" width="152" height="42" class="svg-box"></rect>
+          <text x="610" y="118" class="svg-small">EvidenceLocator</text>
+          <line x1="740" y1="113" x2="790" y2="113" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="790" y="92" width="152" height="42" class="svg-box"></rect>
+          <text x="820" y="118" class="svg-small">SourceQuality</text>
+
+          <line x1="462" y1="154" x2="462" y2="188" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+
+          <rect x="38" y="188" width="1020" height="104" class="svg-lane"></rect>
+          <text x="58" y="222" class="svg-label">知识层</text>
+          <rect x="164" y="214" width="154" height="52" class="svg-core"></rect>
+          <text x="184" y="246" class="svg-small">FeatureTree</text>
+          <rect x="366" y="214" width="154" height="52" class="svg-core"></rect>
+          <text x="386" y="246" class="svg-small">PricingModel</text>
+          <rect x="568" y="214" width="154" height="52" class="svg-core"></rect>
+          <text x="588" y="246" class="svg-small">UserPersona</text>
+          <rect x="770" y="214" width="174" height="52" class="svg-industry"></rect>
+          <text x="790" y="246" class="svg-small">IndustryExtension</text>
+          <line x1="318" y1="240" x2="366" y2="240" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <line x1="520" y1="240" x2="568" y2="240" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <line x1="722" y1="240" x2="770" y2="240" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+
+          <line x1="548" y1="292" x2="548" y2="326" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+
+          <rect x="38" y="326" width="1020" height="82" class="svg-lane"></rect>
+          <text x="58" y="360" class="svg-label">分析层</text>
+          <rect x="184" y="346" width="166" height="42" class="svg-industry"></rect>
+          <text x="208" y="372" class="svg-small">AnalysisClaim</text>
+          <line x1="350" y1="367" x2="412" y2="367" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="412" y="346" width="166" height="42" class="svg-industry"></rect>
+          <text x="434" y="372" class="svg-small">ComparisonMatrix</text>
+          <line x1="578" y1="367" x2="640" y2="367" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="640" y="346" width="166" height="42" class="svg-industry"></rect>
+          <text x="684" y="372" class="svg-small">Opportunity</text>
+          <rect x="846" y="346" width="166" height="42" class="svg-review"></rect>
+          <text x="878" y="372" class="svg-small">QualityFinding</text>
+
+          <line x1="548" y1="408" x2="548" y2="442" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+
+          <rect x="38" y="442" width="1020" height="54" class="svg-lane"></rect>
+          <text x="58" y="476" class="svg-label">报告层</text>
+          <rect x="184" y="450" width="158" height="36" class="svg-output"></rect>
+          <text x="204" y="473" class="svg-small">ReportDocument</text>
+          <line x1="342" y1="468" x2="392" y2="468" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="392" y="450" width="158" height="36" class="svg-output"></rect>
+          <text x="422" y="473" class="svg-small">ReportSpan</text>
+          <line x1="550" y1="468" x2="600" y2="468" class="svg-arrow" marker-end="url(#arrow-data)"></line>
+          <rect x="600" y="450" width="158" height="36" class="svg-output"></rect>
+          <text x="642" y="473" class="svg-small">HTML / PDF</text>
+          <line x1="758" y1="468" x2="808" y2="468" class="svg-feedback" marker-end="url(#arrow-data-red)"></line>
+          <rect x="808" y="450" width="158" height="36" class="svg-danger"></rect>
+          <text x="838" y="473" class="svg-small">FeedbackEvent</text>
+
+          <path d="M 887 450 C 1050 300 1020 130 942 114" class="svg-feedback" marker-end="url(#arrow-data-red)"></path>
+          <text x="858" y="312" class="svg-small">反馈回写 claim / evidence / source</text>
+        </svg>
+      </div>
+
+      <div class="flow" aria-label="目标数据链路">
+        <div class="step">
+          <small>资料层</small>
+          <strong>EvidenceItem</strong>
+          <span>网页、数据库、PDF 或评论来源里的可引用证据片段。</span>
+        </div>
+        <div class="step">
+          <small>知识层</small>
+          <strong>CompetitorKnowledge</strong>
+          <span>功能树、定价模型、用户画像，字段稳定且能横向比较。</span>
+        </div>
+        <div class="step">
+          <small>分析层</small>
+          <strong>AnalysisClaim</strong>
+          <span>基于知识结构得出的竞争判断，而不是凭空写观点。</span>
+        </div>
+        <div class="step">
+          <small>表达层</small>
+          <strong>ReportDocument</strong>
+          <span>section/block/span 结构，每个 span 绑定 claim 和 evidence。</span>
+        </div>
+        <div class="step">
+          <small>反馈层</small>
+          <strong>FeedbackEvent</strong>
+          <span>用户可以针对句子、claim 或 evidence 反馈，进入修订闭环。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="references">
+      <div class="section-head">
+        <h2>参考项目的共同做法</h2>
+        <p class="note">
+          我们参考的是具有相似职能的 agent / routing / schema-guided extraction 项目：它们通常不让 AI 随机生成规则，
+          而是把 AI 放进“候选集合、路由、schema registry、反思和质检”的流程里。
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>参考模式</th>
+              <th>他们通常怎么做</th>
+              <th>Rivalens 应该怎么落地</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Handoff / Specialist Agents</strong></td>
+              <td>先显式注册可交接的专家 Agent，模型只能在候选 handoff 中选择，handoff 输入是结构化参数。</td>
+              <td>显式注册行业 schema 和行业专家，不让模型无限发散；低置信度时返回 unknown 或 request_more_evidence。</td>
+            </tr>
+            <tr>
+              <td><strong>Context-aware Routing</strong></td>
+              <td>Router 只做分类和路由，把 category 写入上下文，后续图节点根据 category 执行。</td>
+              <td>新增 IndustryClassifierAgent，只输出候选行业、置信度、signals，不同时做竞品分析。</td>
+            </tr>
+            <tr>
+              <td><strong>Semantic Route Matching</strong></td>
+              <td>每个 route 有 aliases 和 example utterances，用语义匹配筛出候选类别，无法匹配则返回 None。</td>
+              <td>官方 PDF 解析成行业 taxonomy 后，为每个行业生成 aliases、example_queries、known_competitors。</td>
+            </tr>
+            <tr>
+              <td><strong>Schema Repository</strong></td>
+              <td>预定义 schema repository，允许自定义 schema，但新增 schema 必须是可验证结构。</td>
+              <td>建立 schema_registry：core schema 固定，industry extensions 版本化，AI 只能提出 candidate_extensions。</td>
+            </tr>
+            <tr>
+              <td><strong>Domain Hint</strong></td>
+              <td>如果用户或上下文已给出领域，就把 domain_hint 传给研究或抽取流程。</td>
+              <td>用户明确说行业时直接作为强信号；未明确时先用 query、竞品、初步证据推断。</td>
+            </tr>
+            <tr>
+              <td><strong>Reflection Loop</strong></td>
+              <td>先用默认 schema 抽取，再检查缺失字段，生成补充搜索 query 或 refinement。</td>
+              <td>先跑 Core Schema，再让 SchemaReviewAgent 检查行业字段缺口，必要时回到 CollectionAgent 补采。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="compare" style="margin-top: 16px;">
+        <div class="card">
+          <h3>不推荐</h3>
+          <p>让 AI 直接根据用户请求自由生成一整套行业 schema。这样结果看似聪明，但难复现、难质检、难比较。</p>
+          <pre><code>{
+  "industry": "AI 自己猜的行业",
+  "schema": {
+    "random_field_1": "...",
+    "random_field_2": "..."
+  }
+}</code></pre>
+        </div>
+        <div class="card">
+          <h3>推荐</h3>
+          <p>AI 只能在官方 taxonomy 和 schema registry 中选择、解释、补充候选项，最后冻结为 ActiveKnowledgeSchema。</p>
+          <pre><code>{
+  "selected_industry": "productivity_saas",
+  "source": "official_taxonomy + semantic_route + evidence",
+  "registry_extensions": ["security_compliance"],
+  "candidate_extensions": [
+    {
+      "field": "workspace_migration",
+      "reason": "多条证据显示迁移能力影响企业采用。",
+      "evidence_ids": ["ev_7", "ev_12"],
+      "confidence": 0.74,
+      "approved": false
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents">
+      <div class="section-head">
+        <h2>Agent 应该如何构建</h2>
+        <p class="note">
+          Agent 不应该按底层 report type 命名，而应该按 schema 生产责任命名。每个 Agent 都有固定输入输出。
+        </p>
+      </div>
+      <div class="logic-figure" aria-label="Agent 分层 DAG 结构图">
+        <svg viewBox="0 0 1120 500" role="img">
+          <defs>
+            <marker id="arrow-agent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
+            </marker>
+            <marker id="arrow-agent-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
+            </marker>
+          </defs>
+
+          <text x="24" y="34" class="svg-title">Agent 分层 DAG：每层产出结构化对象</text>
+
+          <rect x="40" y="68" width="1040" height="100" class="svg-lane"></rect>
+          <text x="58" y="100" class="svg-label">Schema 决策层</text>
+          <rect x="236" y="92" width="180" height="52" class="svg-box"></rect>
+          <text x="262" y="124" class="svg-small">PlanningAgent</text>
+          <line x1="416" y1="118" x2="486" y2="118" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="486" y="92" width="204" height="52" class="svg-industry"></rect>
+          <text x="512" y="124" class="svg-small">SchemaSelectionAgent</text>
+          <line x1="690" y1="118" x2="760" y2="118" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="760" y="92" width="204" height="52" class="svg-output"></rect>
+          <text x="782" y="124" class="svg-small">ActiveKnowledgeSchema</text>
+
+          <line x1="862" y1="168" x2="862" y2="202" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+
+          <rect x="40" y="202" width="1040" height="112" class="svg-lane"></rect>
+          <text x="58" y="238" class="svg-label">知识生产层</text>
+          <rect x="150" y="232" width="166" height="52" class="svg-box"></rect>
+          <text x="176" y="264" class="svg-small">CollectionAgent</text>
+          <line x1="316" y1="258" x2="374" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="374" y="232" width="154" height="52" class="svg-core"></rect>
+          <text x="404" y="264" class="svg-small">EvidenceItem</text>
+          <line x1="528" y1="258" x2="586" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="586" y="232" width="214" height="52" class="svg-box"></rect>
+          <text x="606" y="264" class="svg-small">KnowledgeStructuringAgent</text>
+          <line x1="800" y1="258" x2="858" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="858" y="232" width="168" height="52" class="svg-core"></rect>
+          <text x="878" y="264" class="svg-small">CompetitorKnowledge</text>
+
+          <line x1="942" y1="314" x2="942" y2="348" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+
+          <rect x="40" y="348" width="1040" height="108" class="svg-lane"></rect>
+          <text x="58" y="382" class="svg-label">分析 / 质检 / 发布层</text>
+          <rect x="160" y="378" width="158" height="52" class="svg-box"></rect>
+          <text x="194" y="410" class="svg-small">AnalysisAgent</text>
+          <line x1="318" y1="404" x2="376" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="376" y="378" width="154" height="52" class="svg-industry"></rect>
+          <text x="406" y="410" class="svg-small">AnalysisClaim</text>
+          <line x1="530" y1="404" x2="588" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="588" y="378" width="146" height="52" class="svg-review"></rect>
+          <text x="624" y="410" class="svg-small">QualityAgent</text>
+          <line x1="734" y1="404" x2="792" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="792" y="378" width="154" height="52" class="svg-output"></rect>
+          <text x="816" y="410" class="svg-small">ReportWriter</text>
+
+          <path d="M 661 378 C 656 320 520 318 451 232" class="svg-feedback" marker-end="url(#arrow-agent-red)"></path>
+          <text x="475" y="340" class="svg-small">质检失败：补采 / 重构知识 / 重分析</text>
+        </svg>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>PlanningAgent</h3>
+          <p>输入用户任务，输出竞品范围、候选行业、分析维度、需要填充的 schema 区域。</p>
+        </div>
+        <div class="card">
+          <h3>SchemaSelectionAgent</h3>
+          <p>读取官方行业 taxonomy，选择 Core Schema 与行业扩展，冻结本次任务的 ActiveKnowledgeSchema。</p>
+        </div>
+        <div class="card">
+          <h3>CollectionAgent</h3>
+          <p>调用 ResearchToolkit，只产出 <code>EvidenceItem[]</code>，不负责分析。</p>
+        </div>
+        <div class="card">
+          <h3>KnowledgeStructuringAgent</h3>
+          <p>把 evidence 填入 <code>CompetitorKnowledge</code>，不再经过 ProductFact 兜底。</p>
+        </div>
+        <div class="card">
+          <h3>AnalysisAgent</h3>
+          <p>基于 <code>CompetitorKnowledge[]</code> 做横向比较，输出 <code>AnalysisClaim[]</code>。</p>
+        </div>
+        <div class="card">
+          <h3>QualityAgent</h3>
+          <p>审查 schema 字段、claim、evidence 绑定和置信度，输出 <code>QualityFinding[]</code>。</p>
+        </div>
+        <div class="card">
+          <h3>ReportWriterAgent</h3>
+          <p>输出 <code>ReportDocument</code>，Markdown/HTML/PDF 都只是渲染物。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="next">
+      <div class="section-head">
+        <h2>下一步改造顺序</h2>
+        <p class="note">
+          这部分是我建议你接下来真正动代码的顺序，先把业务 schema 稳住，再改 Agent。
+        </p>
+      </div>
+      <div class="decision">
+        <div class="callout">
+          <strong>第一优先级：新增 Core Schema 与 SchemaRegistry</strong>
+          <p>
+            先定义所有行业都共用的 <code>CompetitorKnowledge</code> 核心字段，再为行业扩展预留 registry。
+            不要把 SaaS、消费品、医疗、金融等不同业务重点写死到同一个大对象里。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>第二优先级：新增行业分类与选择 Agent</strong>
+          <p>
+            从官方 PDF 或配置文件加载 <code>IndustryTaxonomy</code>，让 SchemaSelectionAgent 输出候选行业、
+            置信度、依据和本次任务的 <code>ActiveKnowledgeSchema</code>。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>第三优先级：加入候选字段审查机制</strong>
+          <p>
+            AI 可以提出 <code>candidate_extensions</code>，但必须带 reason、signals、evidence_ids、confidence。
+            SchemaReviewAgent 通过后才能进入本次 active schema。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>第四优先级：精细化 CompetitorKnowledge 抽取</strong>
+          <p>
+            当前已经定义 FeatureTree、PricingModel、UserPersona。下一步要让抽取结果更稳定，
+            并按 active schema 中的行业扩展填充字段。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>第五优先级：完善 KnowledgeStructuringAgent</strong>
+          <p>
+            让它从 EvidenceItem 中分别抽取 feature、pricing、persona、industry extension，
+            并把每个字段绑定 evidence_ids。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>第六优先级：让 AnalysisAgent 消费知识 Schema</strong>
+          <p>
+            AnalysisAgent 已不再围绕 ProductFact 做简单 claim；后续要增强横向对比、机会点和风险判断。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>第七优先级：新增 ReportDocument</strong>
+          <p>
+            Writer 产出结构化文档，Publisher 负责渲染。这样之后才好做 hover 高亮、证据跳转和用户反馈。
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    当前结论：消息结构化已经完成第一步；下一步应从 Core Schema + Industry Schema + ActiveKnowledgeSchema 三层升级业务知识结构。
+  </footer>
+</body>
+</html>
