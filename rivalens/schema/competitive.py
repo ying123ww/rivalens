@@ -30,6 +30,9 @@ class Competitor(TypedDict, total=False):
 class EvidenceItem(TypedDict, total=False):
     id: str
     competitor: str
+    collection_task_id: str
+    dimension_id: str
+    dimension_name: str
     title: str
     url: str
     source_type: EvidenceType
@@ -280,6 +283,9 @@ class PlanMessagePayload(StrictPayloadModel):
 class EvidenceMessagePayload(StrictPayloadModel):
     evidence_count: int = Field(ge=0)
     research_runs: int = Field(ge=0)
+    collection_task_count: int = Field(default=0, ge=0)
+    failed_task_count: int = Field(default=0, ge=0)
+    dimensions: list[str] = Field(default_factory=list)
 
 
 class SchemaSelectionMessagePayload(StrictPayloadModel):

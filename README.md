@@ -90,11 +90,13 @@ flowchart LR
 ```
 
 `schema_selection` first freezes an `ActiveKnowledgeSchema` from the schema
-registry. `source_collection` then uses `ResearchToolkit.collect_evidence()`,
-which wraps `rivalens.research.ResearchEngine` search and deep-research
-capability as an evidence collection tool. The final report is produced only
-after evidence has been structured into `CompetitorKnowledge`, analyzed, and
-reviewed over traceable evidence.
+registry. `source_collection` then expands that schema into competitor-by-
+dimension collection tasks and runs them concurrently through
+`ResearchToolkit.collect_evidence()`, which wraps
+`rivalens.research.ResearchEngine` search and deep-research capability as an
+evidence collection tool. The final report is produced only after evidence has
+been structured into `CompetitorKnowledge`, analyzed, and reviewed over
+traceable evidence.
 
 ## Structured Agent Messages
 
@@ -146,7 +148,9 @@ are useful as capability channels, but they are still too mechanical:
 - `PlanningAgent -> generate_outline() -> outline_report` can help when the user
   has not provided analysis dimensions, but it should not always run.
 - `CollectionAgent -> collect_evidence() -> research_report/deep` is the most
-  natural mapping and should remain the primary evidence-gathering path.
+  natural mapping and remains the primary evidence-gathering path. It now
+  generates schema-aware collection tasks from core fields and industry
+  extensions, then runs them concurrently.
 - `KnowledgeStructuringAgent -> extract_schema() -> custom_report` is plausible
   for structured extraction, but its current deterministic assembly is still
   basic. The source of truth is now `EvidenceItem -> CompetitorKnowledge`, not
