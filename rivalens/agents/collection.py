@@ -73,6 +73,7 @@ class CollectionAgent:
             )
 
         evidence_ids = [item.get("id", "") for item in evidence_items]
+        research_pool_summary = self.research_toolkit.summarize_research_pool()
         message = create_agent_message(
             sender="collection",
             receiver="knowledge_structuring",
@@ -109,6 +110,7 @@ class CollectionAgent:
                         "evidence_count": len(evidence_items),
                         "research_runs": len(contexts),
                         "failed_task_count": len(failed_tasks),
+                        "research_pool": research_pool_summary,
                     },
                 }
             ],
@@ -120,9 +122,8 @@ class CollectionAgent:
         deep: bool,
         verbose: bool,
     ) -> dict[str, Any]:
-        return await self.research_toolkit.collect_evidence(
-            query=collection_task["query"],
-            competitor=collection_task["competitor"],
+        return await self.research_toolkit.collect_schema_evidence(
+            collection_task=collection_task,
             deep=deep,
             verbose=verbose,
         )

@@ -94,9 +94,11 @@ registry. `source_collection` then expands that schema into competitor-by-
 dimension collection tasks and runs them concurrently through
 `ResearchToolkit.collect_evidence()`, which wraps
 `rivalens.research.ResearchEngine` search and deep-research capability as an
-evidence collection tool. The final report is produced only after evidence has
-been structured into `CompetitorKnowledge`, analyzed, and reviewed over
-traceable evidence.
+evidence collection tool. `ResearchToolkit` also keeps a pooled research
+snapshot for deduplicated sources, run metadata, and coverage by competitor and
+schema dimension. The final report is produced only after evidence has been
+structured into `CompetitorKnowledge`, analyzed, and reviewed over traceable
+evidence.
 
 ## Structured Agent Messages
 

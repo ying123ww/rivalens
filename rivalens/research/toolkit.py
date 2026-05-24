@@ -23,6 +23,10 @@ class ResearchToolkit:
         self.stream_output = stream_output
         self.tone = tone
         self.headers = headers or {}
+        self._research_pool: dict[str, Any] = {
+            "runs": [],
+            "sources_by_key": {},
+        }
 
     async def collect_evidence(
         self,
@@ -43,6 +47,90 @@ class ResearchToolkit:
             query_domains=query_domains,
             write_report=False,
         )
+
+    async def collect_schema_evidence(
+        self,
+        collection_task: dict[str, Any],
+        deep: bool = False,
+        verbose: bool = True,
+        source: str = ReportSource.Web.value,
+        query_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Collect evidence for one schema-aware collection task and pool it."""
+        result = await self.collect_evidence(
+            query=collection_task["query"],
+            competitor=collection_task.get("competitor", ""),
+            deep=deep,
+            verbose=verbose,
+            source=source,
+            query_domains=query_domains,
+        )
+        return self.register_research_result(result, collection_task)
+
+    def register_research_result(
+        self,
+        result: dict[str, Any],
+        collection_task: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Add a research result to the toolkit-level aggregation pool."""
+        enriched_result = dict(result)
+        enriched_sources = []
+        for source in result.get("sources", []):
+            enriched_source = dict(source)
+            enriched_source.setdefault("competitor", collection_task.get("competitor", ""))
+            enriched_source["collection_task_id"] = collection_task.get("id", "")
+            enriched_source["dimension_id"] = collection_task.get("dimension_id", "")
+            enriched_source["dimension_name"] = collection_task.get("dimension_name", "")
+            enriched_sources.append(enriched_source)
+            self._research_pool["sources_by_key"][self._source_key(enriched_source)] = enriched_source
+
+        enriched_result["sources"] = enriched_sources
+        self._research_pool["runs"].append(
+            {
+                "collection_task_id": collection_task.get("id", ""),
+                "competitor": collection_task.get("competitor", ""),
+                "dimension_id": collection_task.get("dimension_id", ""),
+                "dimension_name": collection_task.get("dimension_name", ""),
+                "mode": result.get("mode", ""),
+                "query": result.get("query", ""),
+                "source_count": len(enriched_sources),
+                "costs": result.get("costs", 0),
+            }
+        )
+        return enriched_result
+
+    def get_research_pool_snapshot(self) -> dict[str, Any]:
+        """Return a deterministic snapshot of pooled research runs and sources."""
+        sources = list(self._research_pool["sources_by_key"].values())
+        return {
+            "run_count": len(self._research_pool["runs"]),
+            "source_count": len(sources),
+            "runs": list(self._research_pool["runs"]),
+            "sources": sources,
+            "by_competitor": self._count_by(sources, "competitor"),
+            "by_dimension": self._count_by(sources, "dimension_id"),
+        }
+
+    def summarize_research_pool(self) -> dict[str, Any]:
+        """Summarize pooled research coverage without making another LLM call."""
+        snapshot = self.get_research_pool_snapshot()
+        return {
+            "run_count": snapshot["run_count"],
+            "source_count": snapshot["source_count"],
+            "competitors": sorted(snapshot["by_competitor"].keys()),
+            "dimensions": sorted(snapshot["by_dimension"].keys()),
+            "coverage": {
+                "by_competitor": snapshot["by_competitor"],
+                "by_dimension": snapshot["by_dimension"],
+            },
+        }
+
+    def clear_research_pool(self) -> None:
+        """Clear pooled research state for callers that reuse a toolkit."""
+        self._research_pool = {
+            "runs": [],
+            "sources_by_key": {},
+        }
 
     async def discover_sources(self, query: str, verbose: bool = True) -> dict[str, Any]:
         return await self.run_mode(
@@ -180,3 +268,17 @@ class ResearchToolkit:
             )
 
         return evidence_items
+
+    def _source_key(self, source: dict[str, Any]) -> str:
+        url = source.get("url", "")
+        title = source.get("title", "")
+        competitor = source.get("competitor", "")
+        dimension_id = source.get("dimension_id", "")
+        return "|".join([competitor, dimension_id, url or title])
+
+    def _count_by(self, sources: list[dict[str, Any]], field: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for source in sources:
+            key = source.get(field) or "unknown"
+            counts[key] = counts.get(key, 0) + 1
+        return counts

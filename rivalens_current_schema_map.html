@@ -700,6 +700,7 @@
       <a href="#problem">主要问题</a>
       <a href="#target">目标 Schema</a>
       <a href="#industry">行业适配</a>
+      <a href="#agent-link">Agent 联系</a>
       <a href="#references">参考模式</a>
       <a href="#agents">Agent 构建</a>
       <a href="#next">下一步</a>
@@ -1009,6 +1010,86 @@
   "version": "task_schema_2026_05_24"
 }</code></pre>
         </div>
+      </div>
+    </section>
+
+    <section id="agent-link">
+      <div class="section-head">
+        <h2>SchemaSelectionAgent 与 KnowledgeStructuringAgent 的联系</h2>
+        <p class="note">
+          现在的连接点不只是 ActiveKnowledgeSchema。CollectionAgent 会按 schema 生成并行采集任务，
+          ResearchToolkit 会把搜索结果沉淀到研究结果池，KnowledgeStructuringAgent 再消费 schema、evidence 和池子摘要来产出 CompetitorKnowledge。
+        </p>
+      </div>
+      <div class="logic-figure" aria-label="SchemaSelectionAgent 与 KnowledgeStructuringAgent 联系图">
+        <svg viewBox="0 0 1120 560" role="img">
+          <defs>
+            <marker id="arrow-link" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
+            </marker>
+            <marker id="arrow-link-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
+            </marker>
+          </defs>
+
+          <text x="24" y="34" class="svg-title">具体联系：先定规则，再并行搜证据，最后按规则结构化</text>
+
+          <rect x="38" y="72" width="1044" height="92" class="svg-lane"></rect>
+          <text x="58" y="104" class="svg-label">Schema 决策</text>
+          <rect x="214" y="94" width="190" height="48" class="svg-box"></rect>
+          <text x="238" y="124" class="svg-small">PlanningAgent</text>
+          <line x1="404" y1="118" x2="462" y2="118" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="462" y="94" width="214" height="48" class="svg-industry"></rect>
+          <text x="488" y="124" class="svg-small">SchemaSelectionAgent</text>
+          <line x1="676" y1="118" x2="734" y2="118" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="734" y="86" width="264" height="64" class="svg-output"></rect>
+          <text x="754" y="114" class="svg-label">ActiveKnowledgeSchema</text>
+          <text x="754" y="138" class="svg-small">core_fields + industry_extensions</text>
+
+          <line x1="866" y1="164" x2="866" y2="204" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+
+          <rect x="38" y="204" width="1044" height="138" class="svg-lane"></rect>
+          <text x="58" y="238" class="svg-label">采集调度</text>
+          <rect x="164" y="236" width="190" height="60" class="svg-box"></rect>
+          <text x="184" y="262" class="svg-label">CollectionAgent</text>
+          <text x="184" y="284" class="svg-small">生成 competitor x dimension tasks</text>
+          <line x1="354" y1="266" x2="414" y2="266" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="414" y="224" width="210" height="86" class="svg-core"></rect>
+          <text x="434" y="250" class="svg-label">CollectionTask[]</text>
+          <text x="434" y="274" class="svg-small">Notion x pricing_model</text>
+          <text x="434" y="294" class="svg-small">ClickUp x security_compliance</text>
+          <line x1="624" y1="266" x2="684" y2="266" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="684" y="224" width="210" height="86" class="svg-review"></rect>
+          <text x="704" y="250" class="svg-label">asyncio.gather</text>
+          <text x="704" y="274" class="svg-small">并行执行多个采集任务</text>
+          <text x="704" y="294" class="svg-small">失败任务单独记录</text>
+          <line x1="894" y1="266" x2="954" y2="266" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="954" y="236" width="92" height="60" class="svg-box"></rect>
+          <text x="970" y="272" class="svg-small">EvidenceItem[]</text>
+
+          <line x1="789" y1="342" x2="789" y2="382" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+
+          <rect x="38" y="382" width="1044" height="104" class="svg-lane"></rect>
+          <text x="58" y="416" class="svg-label">ResearchToolkit 池子</text>
+          <rect x="204" y="408" width="196" height="54" class="svg-box"></rect>
+          <text x="224" y="440" class="svg-small">collect_schema_evidence()</text>
+          <line x1="400" y1="435" x2="458" y2="435" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="458" y="396" width="224" height="78" class="svg-industry"></rect>
+          <text x="478" y="424" class="svg-label">ResearchToolkit Pool</text>
+          <text x="478" y="448" class="svg-small">runs / sources / dedupe / coverage</text>
+          <line x1="682" y1="435" x2="740" y2="435" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="740" y="408" width="202" height="54" class="svg-output"></rect>
+          <text x="760" y="440" class="svg-small">pool summary / snapshot</text>
+
+          <path d="M 1000 296 C 1028 364 980 424 942 435" class="svg-arrow" marker-end="url(#arrow-link)"></path>
+
+          <line x1="842" y1="486" x2="842" y2="520" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="346" y="512" width="438" height="36" class="svg-core"></rect>
+          <text x="366" y="535" class="svg-small">KnowledgeStructuringAgent 输入：ActiveKnowledgeSchema + EvidenceItem[] + research_pool_summary</text>
+          <line x1="784" y1="530" x2="850" y2="530" class="svg-arrow" marker-end="url(#arrow-link)"></line>
+          <rect x="850" y="512" width="210" height="36" class="svg-output"></rect>
+          <text x="872" y="535" class="svg-small">CompetitorKnowledge[]</text>
+        </svg>
       </div>
     </section>
 

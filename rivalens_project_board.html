@@ -447,6 +447,7 @@
           <li><span class="tag done">已完成</span><span>新增 <code>ActiveKnowledgeSchema</code> 与 <code>CompetitorKnowledge</code>。</span></li>
           <li><span class="tag done">已完成</span><span>DAG 接入 <code>schema_selection</code> 和 <code>knowledge_structuring</code>。</span></li>
           <li><span class="tag done">已完成</span><span><code>CollectionAgent</code> 会按 schema 维度生成并行采集任务。</span></li>
+          <li><span class="tag done">已完成</span><span><code>ResearchToolkit</code> 新增研究结果池，汇总 runs、sources 和覆盖率。</span></li>
           <li><span class="tag next">下一步</span><span>增强结构化抽取、补 ReportDocument、做可交互报告。</span></li>
           <li><span class="tag risk">注意</span><span>当前行业判断是 registry 规则信号，尚未接官方 PDF。</span></li>
         </ul>
@@ -636,6 +637,17 @@
                 <details open>
                   <summary>查看展开</summary>
                   <p>现在会为每个 competitor x schema dimension 生成 collection task，并用 asyncio.gather 并行调用 ResearchToolkit。EvidenceItem 会带 collection_task_id、dimension_id 和 dimension_name。</p>
+                </details>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="tag done">已完成</span></td>
+              <td><strong>ResearchToolkit 研究结果池</strong></td>
+              <td>多个 schema 维度共享同一个 toolkit 时，结果先进入统一池子。</td>
+              <td>
+                <details>
+                  <summary>查看展开</summary>
+                  <p>新增 collect_schema_evidence、register_research_result、get_research_pool_snapshot、summarize_research_pool 和 clear_research_pool。当前池子支持按 competitor、dimension 聚合和 source 去重。</p>
                 </details>
               </td>
             </tr>
