@@ -19,8 +19,7 @@ research engine beneath Rivalens agents.
 flowchart TB
     User["User / product team"] --> Workflow["rivalens.workflows\nLangGraph DAG"]
 
-    Workflow --> Planner["PlanningAgent\nscope, competitors, dimensions"]
-    Workflow --> Selector["SchemaSelectionAgent\nindustry routing + active schema"]
+    Workflow --> Planner["PlanningAgent\nscope, outline, active schema"]
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
     Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
     Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
@@ -29,13 +28,11 @@ flowchart TB
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
-    Planner --> MsgPlan["AgentMessage(type=plan)"]
-    Selector --> MsgSelection["AgentMessage(type=schema_selection)"]
+    Planner --> MsgSelection["AgentMessage(type=schema_selection)"]
     Collector --> MsgEvidence["AgentMessage(type=evidence)"]
     Knowledge --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
     Reviewer --> MsgReview["AgentMessage(type=review)"]
-    MsgPlan --> MsgGuard["Pydantic payload validation"]
     MsgSelection --> MsgGuard
     MsgEvidence --> MsgGuard
     MsgSchema --> MsgGuard
@@ -53,7 +50,6 @@ flowchart TB
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
 
     Planner --> State["CompetitorAnalysisState"]
-    Selector --> State
     Collector --> State
     Knowledge --> State
     Analyst --> State
@@ -78,8 +74,7 @@ multi-agent DAG is:
 
 ```mermaid
 flowchart LR
-    A["scope_planner\nPlanningAgent"] --> S["schema_selection\nSchemaSelectionAgent"]
-    S --> B["source_collection\nCollectionAgent"]
+    A["scope_planner\nPlanningAgent"] --> B["source_collection\nCollectionAgent"]
     B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
     C --> D["dimension_analysis\nAnalysisAgent"]
     D --> E["reviewer\nQualityAgent"]
@@ -89,8 +84,10 @@ flowchart LR
     G --> H["publisher\nPublisherAgent"]
 ```
 
-`schema_selection` first freezes an `ActiveKnowledgeSchema` from the schema
-registry. `source_collection` then expands that schema into competitor-by-
+`scope_planner` owns the planning phase end to end: it normalizes competitor
+inputs, generates an outline, selects and freezes an `ActiveKnowledgeSchema`
+from the schema registry, then emits one `schema_selection` handoff to
+`source_collection`. `source_collection` expands that schema into competitor-by-
 dimension collection tasks and runs them concurrently through
 `ResearchToolkit.collect_evidence()`, which wraps
 `rivalens.research.ResearchEngine` search and deep-research capability as an
@@ -109,7 +106,6 @@ The payload is validated before it is appended to state, using a dedicated
 Pydantic schema for each message type:
 
 ```text
-plan     -> PlanMessagePayload
 schema_selection -> SchemaSelectionMessagePayload
 evidence -> EvidenceMessagePayload
 schema   -> SchemaMessagePayload
@@ -148,7 +144,8 @@ The current `ResearchToolkit` wiring is intentionally provisional. Some mappings
 are useful as capability channels, but they are still too mechanical:
 
 - `PlanningAgent -> generate_outline() -> outline_report` can help when the user
-  has not provided analysis dimensions, but it should not always run.
+  has not provided analysis dimensions. It also selects the task's active
+  schema before handing off to collection.
 - `CollectionAgent -> collect_evidence() -> research_report/deep` is the most
   natural mapping and remains the primary evidence-gathering path. It now
   generates schema-aware collection tasks from core fields and industry

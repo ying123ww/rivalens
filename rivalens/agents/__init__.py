@@ -6,7 +6,6 @@ from .knowledge_structuring import KnowledgeStructuringAgent
 from .planning import PlanningAgent
 from .quality import QualityAgent
 from .revision import RevisionAgent
-from .schema_selection import SchemaSelectionAgent
 from .writing import ReportWriterAgent
 from .publishing import PublisherAgent
 
@@ -17,7 +16,6 @@ __all__ = [
     "PlanningAgent",
     "QualityAgent",
     "RevisionAgent",
-    "SchemaSelectionAgent",
     "ReportWriterAgent",
     "PublisherAgent",
 ]

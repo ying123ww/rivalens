@@ -18,7 +18,7 @@ class CollectionAgent:
             state,
             receiver="collection",
             message_type="schema_selection",
-            sender="schema_selection",
+            sender="planner",
         )
         schema_payload = schema_message.get("payload", {}) if schema_message else {}
         active_schema = state.get("active_knowledge_schema") or schema_payload.get("active_schema", {})
