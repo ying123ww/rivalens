@@ -138,7 +138,8 @@ The collection path uses standard evidence collection for each branch. Deep
 research recursion is not used as a black box inside `ResearchEngine`; instead,
 Rivalens keeps branch lineage, review decisions, depth, and budget in
 `CompetitorAnalysisState.research_branches` and
-`CompetitorAnalysisState.branch_review_decisions`.
+`CompetitorAnalysisState.branch_review_decisions`. Root branches are treated as
+required schema coverage; expansion budget applies only to child branches.
 
 This keeps provider calls, source normalization, costs, and evidence metadata in
 one place while preserving the main Rivalens chain:

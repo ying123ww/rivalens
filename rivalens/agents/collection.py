@@ -21,12 +21,14 @@ class CollectionAgent:
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
         branch_reviewer: BranchReviewAgent | None = None,
         max_branch_depth: int = 1,
-        max_total_branches: int = 24,
+        max_expansion_branches: int = 24,
+        max_root_branch_hard_limit: int = 80,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.branch_reviewer = branch_reviewer or BranchReviewAgent(max_depth=max_branch_depth)
         self.max_branch_depth = max_branch_depth
-        self.max_total_branches = max_total_branches
+        self.max_expansion_branches = max_expansion_branches
+        self.max_root_branch_hard_limit = max_root_branch_hard_limit
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
@@ -48,14 +50,17 @@ class CollectionAgent:
         branch_review_decisions = list(state.get("branch_review_decisions", []))
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
-        root_branches = self._build_root_branches(query, competitors, active_schema)[: self.max_total_branches]
+        root_branches = self._build_root_branches(query, competitors, active_schema)
+        root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
+        if root_branch_limit_exceeded:
+            root_branches = root_branches[: self.max_root_branch_hard_limit]
         frontier = root_branches
         research_branches.extend(root_branches)
         processed_branch_count = 0
+        expansion_branch_count = 0
 
-        while frontier and processed_branch_count < self.max_total_branches:
-            available_slots = self.max_total_branches - processed_branch_count
-            active_frontier = frontier[:available_slots]
+        while frontier:
+            active_frontier = frontier
             processed_branch_count += len(active_frontier)
             collection_tasks = [self._branch_to_collection_task(branch) for branch in active_frontier]
             results = await asyncio.gather(
@@ -112,8 +117,15 @@ class CollectionAgent:
                 branch["review_decision"] = decision["decision"]
                 if decision["decision"] == "expand":
                     branch["status"] = "expanded"
-                    remaining_branch_slots = self.max_total_branches - len(research_branches)
+                    remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
+                    if remaining_branch_slots <= 0:
+                        branch["status"] = "stopped"
+                        branch["review_decision"] = "stop"
+                        decision["decision"] = "stop"
+                        decision["reasons"] = decision.get("reasons", []) + ["Expansion branch budget exhausted."]
+                        continue
                     children = self._build_child_branches(branch, decision)[:remaining_branch_slots]
+                    expansion_branch_count += len(children)
                     next_frontier.extend(children)
                     research_branches.extend(children)
                 else:
@@ -160,7 +172,9 @@ class CollectionAgent:
                         "active_schema_id": active_schema.get("id"),
                         "root_branch_count": len(root_branches),
                         "max_branch_depth": self.max_branch_depth,
-                        "max_total_branches": self.max_total_branches,
+                        "root_branch_limit_exceeded": root_branch_limit_exceeded,
+                        "max_expansion_branches": self.max_expansion_branches,
+                        "max_root_branch_hard_limit": self.max_root_branch_hard_limit,
                         "dimensions": sorted({branch["dimension_id"] for branch in research_branches}),
                     },
                     "output": {
@@ -168,7 +182,7 @@ class CollectionAgent:
                         "research_runs": len(contexts),
                         "failed_task_count": len(failed_tasks),
                         "branch_count": len(research_branches),
-                        "expanded_branch_count": sum(1 for decision in branch_review_decisions if decision.get("decision") == "expand"),
+                        "expanded_branch_count": expansion_branch_count,
                         "coverage": collection_coverage,
                     },
                 }

@@ -36,17 +36,22 @@ class BranchReviewAgent:
             or item.get("collection_task_id") == branch.get("collection_task_id")
         ]
         evidence_gaps = self._evidence_gaps(branch, relevant_evidence)
-        drift_risk = self._drift_risk(branch, root_query, active_schema)
-
-        if drift_risk == "high":
-            return self._stop(branch, ["Branch is likely drifting away from the active schema."], relevant_evidence, drift_risk)
-
         if len(relevant_evidence) >= self.min_sources_per_branch and not evidence_gaps:
-            return self._stop(branch, ["Branch has enough source coverage for this pass."], relevant_evidence, drift_risk)
+            return self._stop(branch, ["Branch has enough source coverage for this pass."], relevant_evidence)
 
-        next_queries = self._next_queries(branch, evidence_gaps, root_query)
-        if not next_queries:
-            return self._stop(branch, ["No useful schema-aligned child query was identified."], relevant_evidence, drift_risk)
+        child_candidates = self._child_candidates(branch, evidence_gaps, root_query)
+        approved_candidates = [
+            candidate
+            for candidate in child_candidates
+            if candidate["drift_risk"] != "high"
+        ]
+        if not approved_candidates:
+            return self._stop(
+                branch,
+                ["No schema-aligned child query survived drift review."],
+                relevant_evidence,
+                self._highest_drift_risk(child_candidates),
+            )
 
         score = min(0.95, 0.45 + 0.15 * len(evidence_gaps) + 0.1 * max(0, self.min_sources_per_branch - len(relevant_evidence)))
         return {
@@ -58,9 +63,9 @@ class BranchReviewAgent:
                 "Child queries remain aligned to the current competitor and schema dimension.",
             ],
             "evidence_gaps": evidence_gaps,
-            "next_topics": [query.splitlines()[0] for query in next_queries],
-            "next_queries": next_queries,
-            "drift_risk": drift_risk,
+            "next_topics": [candidate["topic"] for candidate in approved_candidates],
+            "next_queries": [candidate["query"] for candidate in approved_candidates],
+            "drift_risk": self._highest_drift_risk(approved_candidates),
         }
 
     def _evidence_gaps(self, branch: ResearchBranch, evidence_items: list[dict[str, Any]]) -> list[str]:
@@ -82,44 +87,48 @@ class BranchReviewAgent:
 
         return gaps[:4]
 
-    def _drift_risk(
+    def _candidate_drift_risk(
         self,
         branch: ResearchBranch,
-        root_query: str,
-        active_schema: dict[str, Any],
+        candidate_topic: str,
+        gap: str,
     ) -> str:
-        text = " ".join(
-            [
-                branch.get("query", ""),
-                branch.get("topic", ""),
-                branch.get("dimension_name", ""),
-                branch.get("competitor", ""),
-                root_query,
-            ]
-        ).lower()
-        allowed_terms = {
-            branch.get("competitor", "").lower(),
+        text = candidate_topic.lower()
+        competitor = branch.get("competitor", "").lower()
+        dimension_terms = [
             branch.get("dimension_id", "").replace("_", " ").lower(),
             branch.get("dimension_name", "").lower(),
-            active_schema.get("selected_industry", {}).get("name", "").lower(),
+        ]
+        gap_terms = gap.replace("_", " ").lower().split()
+        off_topic_terms = {
+            "founder",
+            "funding",
+            "hiring",
+            "culture",
+            "history",
+            "stock",
+            "lawsuit",
         }
-        allowed_terms.update(field.replace("_", " ").lower() for field in active_schema.get("core_fields", []))
-        allowed_terms.update(
-            extension.get("name", "").lower()
-            for extension in active_schema.get("industry_extensions", [])
-            if extension.get("name")
-        )
-        matched_terms = [term for term in allowed_terms if term and term in text]
-        if matched_terms:
+
+        has_competitor = bool(competitor and competitor in text)
+        has_dimension = any(term and term in text for term in dimension_terms)
+        has_gap_intent = any(term and term in text for term in gap_terms)
+        has_off_topic = any(term in text for term in off_topic_terms)
+
+        if has_off_topic:
+            return "high"
+        if has_competitor and (has_dimension or has_gap_intent):
             return "low"
+        if has_competitor or has_dimension or has_gap_intent:
+            return "medium"
         return "medium"
 
-    def _next_queries(
+    def _child_candidates(
         self,
         branch: ResearchBranch,
         evidence_gaps: list[str],
         root_query: str,
-    ) -> list[str]:
+    ) -> list[dict[str, str]]:
         competitor = branch.get("competitor", "") or "the competitor"
         dimension_name = branch.get("dimension_name", branch.get("dimension_id", ""))
         base = [
@@ -134,22 +143,35 @@ class BranchReviewAgent:
             "missing_docs_or_security_source": f"{competitor} {dimension_name} docs security compliance",
             "missing_customer_or_review_source": f"{competitor} customer reviews personas use cases",
         }
-        queries = []
+        candidates = []
         for gap in evidence_gaps:
             topic = templates.get(gap)
             if not topic:
                 continue
-            queries.append(
-                "\n".join(
-                    base
-                    + [
-                        f"Child topic: {topic}",
-                        f"Evidence gap: {gap}",
-                        "Stay within the active schema dimension. Prefer public, source-backed pages.",
-                    ]
-                )
+            query = "\n".join(
+                base
+                + [
+                    f"Child topic: {topic}",
+                    f"Evidence gap: {gap}",
+                    "Stay within the active schema dimension. Prefer public, source-backed pages.",
+                ]
             )
-        return queries[: self.max_child_queries]
+            candidates.append(
+                {
+                    "topic": topic,
+                    "query": query,
+                    "gap": gap,
+                    "drift_risk": self._candidate_drift_risk(branch, topic, gap),
+                }
+            )
+        return candidates[: self.max_child_queries]
+
+    def _highest_drift_risk(self, candidates: list[dict[str, str]]) -> str:
+        if any(candidate.get("drift_risk") == "high" for candidate in candidates):
+            return "high"
+        if any(candidate.get("drift_risk") == "medium" for candidate in candidates):
+            return "medium"
+        return "low"
 
     def _looks_official(self, url: str, competitor: str) -> bool:
         if not url or not competitor:
