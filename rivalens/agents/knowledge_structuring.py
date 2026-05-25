@@ -4,17 +4,12 @@ from collections import defaultdict
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
-from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge
 
 
 class KnowledgeStructuringAgent:
-    def __init__(self, research_toolkit: ResearchToolkit | None = None):
-        self.research_toolkit = research_toolkit or ResearchToolkit()
-
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
-        verbose = bool(task.get("verbose", True))
         evidence_message = latest_message_for(
             state,
             receiver="knowledge_structuring",
@@ -24,25 +19,7 @@ class KnowledgeStructuringAgent:
         active_schema = state.get("active_knowledge_schema", {})
         evidence_items = state.get("evidence_items", [])
 
-        schema_research = await self.research_toolkit.extract_schema(
-            query=f"Extract competitor knowledge according to active schema for: {task.get('query', '')}",
-            context={
-                "active_schema": active_schema,
-                "evidence_items": evidence_items,
-            },
-            verbose=verbose,
-        )
-
         knowledge = self._build_competitor_knowledge(evidence_items, active_schema)
-        artifact = {
-            "id": "artifact_knowledge_structuring_1",
-            "agent": "knowledge_structuring",
-            "mode": schema_research["mode"],
-            "query": schema_research["query"],
-            "report": schema_research["report"],
-            "context": schema_research["context"],
-            "costs": schema_research["costs"],
-        }
         message = create_agent_message(
             sender="knowledge_structuring",
             receiver="analysis",
@@ -51,7 +28,6 @@ class KnowledgeStructuringAgent:
                 "knowledge_count": len(knowledge),
                 "competitor_knowledge": knowledge,
             },
-            artifact_ids=[artifact["id"]],
             evidence_ids=[
                 evidence_id
                 for item in knowledge
@@ -61,7 +37,6 @@ class KnowledgeStructuringAgent:
 
         return {
             "competitor_knowledge": knowledge,
-            "research_artifacts": state.get("research_artifacts", []) + [artifact],
             "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
@@ -69,13 +44,13 @@ class KnowledgeStructuringAgent:
                     "agent": "knowledge_structuring",
                     "action": "extract_competitor_knowledge",
                     "input": {
+                        "query": task.get("query", ""),
                         "evidence_count": len(evidence_items),
                         "active_schema_id": active_schema.get("id"),
                         "message_id": evidence_message.get("id") if evidence_message else None,
                     },
                     "output": {
                         "knowledge_count": len(knowledge),
-                        "research_mode": schema_research["mode"],
                     },
                 }
             ],

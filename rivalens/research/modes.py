@@ -1,8 +1,4 @@
-"""Rivalens research modes.
-
-These modes are business-level tools for agents. They intentionally hide the
-lower-level report_type names used by ResearchEngine.
-"""
+"""Rivalens research modes used by evidence collection adapters."""
 
 from enum import Enum
 

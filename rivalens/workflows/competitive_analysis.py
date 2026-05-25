@@ -14,7 +14,7 @@ from rivalens.agents import (
     ReportWriterAgent,
     RevisionAgent,
 )
-from rivalens.research import ResearchToolkit
+from rivalens.research import ResearchEngineEvidenceCollector
 from rivalens.schema import CompetitorAnalysisState
 
 
@@ -25,12 +25,12 @@ def build_competitive_analysis_graph(
     headers: dict[str, Any] | None = None,
 ) -> Any:
     """Build the traceable multi-agent competitor-analysis DAG."""
-    research_toolkit = ResearchToolkit(websocket, stream_output, tone=tone, headers=headers)
-    planner = PlanningAgent(research_toolkit)
-    collection = CollectionAgent(research_toolkit)
-    knowledge_structuring = KnowledgeStructuringAgent(research_toolkit)
-    analysis = AnalysisAgent(research_toolkit)
-    reviewer = QualityAgent(research_toolkit)
+    evidence_collector = ResearchEngineEvidenceCollector(websocket, stream_output, tone=tone, headers=headers)
+    planner = PlanningAgent()
+    collection = CollectionAgent(evidence_collector)
+    knowledge_structuring = KnowledgeStructuringAgent()
+    analysis = AnalysisAgent()
+    reviewer = QualityAgent()
     reviser = RevisionAgent()
     writer = ReportWriterAgent()
     publisher = PublisherAgent()
@@ -78,7 +78,7 @@ async def run_competitive_analysis_task(
     task = {
         "query": query,
         "competitors": kwargs.get("competitors", []),
-        "deep_research": kwargs.get("deep_research", True),
+        "deep_research": kwargs.get("deep_research", False),
         "verbose": kwargs.get("verbose", True),
     }
     graph = build_competitive_analysis_graph(websocket, stream_output, tone, headers).compile()

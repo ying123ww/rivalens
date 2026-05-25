@@ -1017,8 +1017,8 @@
       <div class="section-head">
         <h2>SchemaSelectionAgent 与 KnowledgeStructuringAgent 的联系</h2>
         <p class="note">
-          现在的连接点不只是 ActiveKnowledgeSchema。CollectionAgent 会按 schema 生成并行采集任务，
-          ResearchToolkit 会把搜索结果沉淀到研究结果池，KnowledgeStructuringAgent 再消费 schema、evidence 和池子摘要来产出 CompetitorKnowledge。
+          现在的连接点是 ActiveKnowledgeSchema、ResearchBranch 和 EvidenceItem。CollectionAgent 会按 schema 生成 root branches，
+          BranchReviewAgent 审查是否展开子分支，ResearchEngineEvidenceCollector 会把 ResearchEngine sources 标准化为 EvidenceItem，KnowledgeStructuringAgent 再消费 schema 和 evidence 来产出 CompetitorKnowledge。
         </p>
       </div>
       <div class="logic-figure" aria-label="SchemaSelectionAgent 与 KnowledgeStructuringAgent 联系图">
@@ -1070,22 +1070,22 @@
           <line x1="789" y1="342" x2="789" y2="382" class="svg-arrow" marker-end="url(#arrow-link)"></line>
 
           <rect x="38" y="382" width="1044" height="104" class="svg-lane"></rect>
-          <text x="58" y="416" class="svg-label">ResearchToolkit 池子</text>
+          <text x="58" y="416" class="svg-label">证据适配层</text>
           <rect x="204" y="408" width="196" height="54" class="svg-box"></rect>
-          <text x="224" y="440" class="svg-small">collect_schema_evidence()</text>
+          <text x="216" y="440" class="svg-small">collector.collect()</text>
           <line x1="400" y1="435" x2="458" y2="435" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="458" y="396" width="224" height="78" class="svg-industry"></rect>
-          <text x="478" y="424" class="svg-label">ResearchToolkit Pool</text>
-          <text x="478" y="448" class="svg-small">runs / sources / dedupe / coverage</text>
+          <text x="478" y="424" class="svg-label">EvidenceItem adapter</text>
+          <text x="478" y="448" class="svg-small">sources / metadata / costs</text>
           <line x1="682" y1="435" x2="740" y2="435" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="740" y="408" width="202" height="54" class="svg-output"></rect>
-          <text x="760" y="440" class="svg-small">pool summary / snapshot</text>
+          <text x="760" y="440" class="svg-small">EvidenceItem[]</text>
 
           <path d="M 1000 296 C 1028 364 980 424 942 435" class="svg-arrow" marker-end="url(#arrow-link)"></path>
 
           <line x1="842" y1="486" x2="842" y2="520" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="346" y="512" width="438" height="36" class="svg-core"></rect>
-          <text x="366" y="535" class="svg-small">KnowledgeStructuringAgent 输入：ActiveKnowledgeSchema + EvidenceItem[] + research_pool_summary</text>
+          <text x="366" y="535" class="svg-small">KnowledgeStructuringAgent 输入：ActiveKnowledgeSchema + EvidenceItem[]</text>
           <line x1="784" y1="530" x2="850" y2="530" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="850" y="512" width="210" height="36" class="svg-output"></rect>
           <text x="872" y="535" class="svg-small">CompetitorKnowledge[]</text>
@@ -1372,7 +1372,7 @@
         </div>
         <div class="card">
           <h3>CollectionAgent</h3>
-          <p>调用 ResearchToolkit，只产出 <code>EvidenceItem[]</code>，不负责分析。</p>
+          <p>维护 research branch frontier，调用 BranchReviewAgent 和 ResearchEngineEvidenceCollector，只产出 <code>EvidenceItem[]</code>，不负责分析。</p>
         </div>
         <div class="card">
           <h3>KnowledgeStructuringAgent</h3>

@@ -30,6 +30,8 @@ class Competitor(TypedDict, total=False):
 class EvidenceItem(TypedDict, total=False):
     id: str
     competitor: str
+    branch_id: str
+    parent_branch_id: str | None
     collection_task_id: str
     dimension_id: str
     dimension_name: str
@@ -41,6 +43,61 @@ class EvidenceItem(TypedDict, total=False):
     excerpt: str
     summary: str
     confidence: float
+
+
+class EvidenceCollectionTask(TypedDict, total=False):
+    id: str
+    branch_id: str
+    parent_branch_id: str | None
+    depth: int
+    topic: str
+    expansion_reason: str
+    competitor: str
+    dimension_id: str
+    dimension_name: str
+    dimension_type: str
+    query: str
+
+
+class EvidenceCollectionResult(TypedDict, total=False):
+    task: EvidenceCollectionTask
+    mode: str
+    query: str
+    context: Any
+    evidence_items: list[EvidenceItem]
+    costs: float
+
+
+BranchDecisionType = Literal["expand", "stop", "merge", "redirect"]
+BranchDriftRisk = Literal["low", "medium", "high"]
+
+
+class ResearchBranch(TypedDict, total=False):
+    id: str
+    parent_id: str | None
+    depth: int
+    path: list[str]
+    competitor: str
+    dimension_id: str
+    dimension_name: str
+    dimension_type: str
+    topic: str
+    query: str
+    evidence_ids: list[str]
+    status: Literal["active", "expanded", "stopped", "failed"]
+    expansion_reason: str
+    review_decision: BranchDecisionType | None
+
+
+class BranchReviewDecision(TypedDict, total=False):
+    branch_id: str
+    decision: BranchDecisionType
+    score: float
+    reasons: list[str]
+    evidence_gaps: list[str]
+    next_topics: list[str]
+    next_queries: list[str]
+    drift_risk: BranchDriftRisk
 
 
 class IndustryCandidate(TypedDict, total=False):
@@ -344,6 +401,7 @@ class ResearchArtifact(TypedDict, total=False):
     mode: str
     query: str
     competitor: str
+    branch_id: str
     report: str
     context: Any
     evidence_ids: list[str]
@@ -355,6 +413,8 @@ class CompetitorAnalysisState(TypedDict, total=False):
     messages: list[AgentMessage]
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
+    research_branches: list[ResearchBranch]
+    branch_review_decisions: list[BranchReviewDecision]
     evidence_items: list[EvidenceItem]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]

@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message
-from rivalens.research import ResearchToolkit
 from rivalens.schema import ActiveKnowledgeSchema, Competitor, CompetitorAnalysisState
 from rivalens.schema_registry import CORE_SCHEMA_FIELDS, SchemaRegistry
 
@@ -12,39 +11,20 @@ from rivalens.schema_registry import CORE_SCHEMA_FIELDS, SchemaRegistry
 class PlanningAgent:
     def __init__(
         self,
-        research_toolkit: ResearchToolkit | None = None,
         schema_registry: SchemaRegistry | None = None,
     ):
-        self.research_toolkit = research_toolkit or ResearchToolkit()
         self.schema_registry = schema_registry or SchemaRegistry()
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
         query = task.get("query", "")
         competitors = state.get("competitors") or task.get("competitors") or []
-        verbose = bool(task.get("verbose", True))
 
         normalized = self._normalize_competitors(competitors)
-        outline = await self.research_toolkit.generate_outline(
-            query=query,
-            verbose=verbose,
-        )
         active_schema = self._select_active_schema(query, normalized)
         candidate_industries = active_schema.get("candidate_industries", [])
         industry_extensions = active_schema.get("industry_extensions", [])
 
-        research_artifacts = state.get("research_artifacts", []) + [
-            {
-                "id": "artifact_planning_outline_1",
-                "agent": "planner",
-                "mode": outline["mode"],
-                "query": outline["query"],
-                "report": outline["report"],
-                "context": outline["context"],
-                "costs": outline["costs"],
-            }
-        ]
-        artifact_id = research_artifacts[-1]["id"]
         message = create_agent_message(
             sender="planner",
             receiver="collection",
@@ -53,23 +33,20 @@ class PlanningAgent:
                 "active_schema": active_schema,
                 "candidate_count": len(candidate_industries),
             },
-            artifact_ids=[artifact_id],
         )
 
         return {
             "competitors": normalized,
             "active_knowledge_schema": active_schema,
-            "research_artifacts": research_artifacts,
             "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
                 {
                     "agent": "planner",
-                    "action": "normalize_scope_generate_outline_and_select_schema",
+                    "action": "normalize_scope_and_select_schema",
                     "input": {"query": query, "competitors": competitors},
                     "output": {
                         "competitor_count": len(normalized),
-                        "research_mode": outline["mode"],
                         "selected_industry": active_schema.get(
                             "selected_industry",
                             {},
