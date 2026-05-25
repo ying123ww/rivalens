@@ -13,7 +13,6 @@ from rivalens.agents import (
     QualityAgent,
     ReportWriterAgent,
     RevisionAgent,
-    SchemaSelectionAgent,
 )
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState
@@ -28,7 +27,6 @@ def build_competitive_analysis_graph(
     """Build the traceable multi-agent competitor-analysis DAG."""
     research_toolkit = ResearchToolkit(websocket, stream_output, tone=tone, headers=headers)
     planner = PlanningAgent(research_toolkit)
-    schema_selection = SchemaSelectionAgent()
     collection = CollectionAgent(research_toolkit)
     knowledge_structuring = KnowledgeStructuringAgent(research_toolkit)
     analysis = AnalysisAgent(research_toolkit)
@@ -39,7 +37,6 @@ def build_competitive_analysis_graph(
 
     workflow = StateGraph(CompetitorAnalysisState)
     workflow.add_node("scope_planner", planner.run)
-    workflow.add_node("schema_selection", schema_selection.run)
     workflow.add_node("source_collection", collection.run)
     workflow.add_node("knowledge_structuring", knowledge_structuring.run)
     workflow.add_node("dimension_analysis", analysis.run)
@@ -49,8 +46,7 @@ def build_competitive_analysis_graph(
     workflow.add_node("publisher", publisher.run)
 
     workflow.set_entry_point("scope_planner")
-    workflow.add_edge("scope_planner", "schema_selection")
-    workflow.add_edge("schema_selection", "source_collection")
+    workflow.add_edge("scope_planner", "source_collection")
     workflow.add_edge("source_collection", "knowledge_structuring")
     workflow.add_edge("knowledge_structuring", "dimension_analysis")
     workflow.add_edge("dimension_analysis", "reviewer")

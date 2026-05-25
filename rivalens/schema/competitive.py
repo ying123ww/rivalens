@@ -151,7 +151,6 @@ class AgentEvent(TypedDict, total=False):
 
 
 AgentMessageType = Literal[
-    "plan",
     "schema_selection",
     "evidence",
     "schema",
@@ -274,12 +273,6 @@ class QualityFindingPayload(StrictPayloadModel):
     recommendation: str
 
 
-class PlanMessagePayload(StrictPayloadModel):
-    query: str
-    competitors: list[CompetitorPayload] = Field(default_factory=list)
-    suggested_outline: str = ""
-
-
 class EvidenceMessagePayload(StrictPayloadModel):
     evidence_count: int = Field(ge=0)
     research_runs: int = Field(ge=0)
@@ -323,8 +316,7 @@ class PublishMessagePayload(StrictPayloadModel):
 
 
 AgentMessagePayload = (
-    PlanMessagePayload
-    | SchemaSelectionMessagePayload
+    SchemaSelectionMessagePayload
     | EvidenceMessagePayload
     | SchemaMessagePayload
     | AnalysisMessagePayload

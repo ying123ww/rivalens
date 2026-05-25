@@ -12,7 +12,6 @@ from rivalens.schema import (
     AnalysisMessagePayload,
     CompetitorAnalysisState,
     EvidenceMessagePayload,
-    PlanMessagePayload,
     PublishMessagePayload,
     ReportMessagePayload,
     ReviewMessagePayload,
@@ -23,7 +22,6 @@ from rivalens.schema import (
 
 
 PAYLOAD_MODELS: dict[AgentMessageType, type[BaseModel]] = {
-    "plan": PlanMessagePayload,
     "schema_selection": SchemaSelectionMessagePayload,
     "evidence": EvidenceMessagePayload,
     "schema": SchemaMessagePayload,
