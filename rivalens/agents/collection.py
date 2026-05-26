@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from rivalens.agents.branch_review import BranchReviewAgent
+from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.research import ResearchEngineEvidenceCollector
 from rivalens.schema import (
@@ -20,12 +21,14 @@ class CollectionAgent:
         self,
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
         branch_reviewer: BranchReviewAgent | None = None,
+        evidence_reviewer: EvidenceQualityReviewer | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 24,
         max_root_branch_hard_limit: int = 80,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.branch_reviewer = branch_reviewer or BranchReviewAgent(max_depth=max_branch_depth)
+        self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
@@ -39,7 +42,10 @@ class CollectionAgent:
             sender="planner",
         )
         schema_payload = schema_message.get("payload", {}) if schema_message else {}
-        active_schema = state.get("active_knowledge_schema") or schema_payload.get("active_schema", {})
+        active_schema = state.get("active_knowledge_schema") or schema_payload.get(
+            "active_schema",
+            {},
+        )
         query = task.get("query", "")
         competitors = state.get("competitors") or task.get("competitors") or []
         verbose = bool(task.get("verbose", True))
@@ -48,6 +54,7 @@ class CollectionAgent:
         research_artifacts = list(state.get("research_artifacts", []))
         research_branches = list(state.get("research_branches", []))
         branch_review_decisions = list(state.get("branch_review_decisions", []))
+        evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
         root_branches = self._build_root_branches(query, competitors, active_schema)
@@ -62,7 +69,10 @@ class CollectionAgent:
         while frontier:
             active_frontier = frontier
             processed_branch_count += len(active_frontier)
-            collection_tasks = [self._branch_to_collection_task(branch) for branch in active_frontier]
+            collection_tasks = [
+                self._branch_to_collection_task(branch)
+                for branch in active_frontier
+            ]
             results = await asyncio.gather(
                 *[
                     self._run_collection_task(collection_task, verbose=verbose)
@@ -72,7 +82,12 @@ class CollectionAgent:
             )
 
             next_frontier: list[ResearchBranch] = []
-            for branch, collection_task, result in zip(active_frontier, collection_tasks, results, strict=True):
+            for branch, collection_task, result in zip(
+                active_frontier,
+                collection_tasks,
+                results,
+                strict=True,
+            ):
                 if isinstance(result, Exception):
                     branch["status"] = "failed"
                     failed_tasks.append(
@@ -86,9 +101,15 @@ class CollectionAgent:
                     )
                     continue
 
-                sources = self._assign_evidence_ids(result["evidence_items"], len(evidence_items), collection_task)
+                sources = self._assign_evidence_ids(
+                    result["evidence_items"],
+                    len(evidence_items),
+                    collection_task,
+                )
                 branch["evidence_ids"] = [source.get("id", "") for source in sources]
                 evidence_items.extend(sources)
+                evidence_review = self.evidence_reviewer.review(branch, sources)
+                evidence_reviews.append(evidence_review)
                 contexts.append(result)
                 research_artifacts.append(
                     {
@@ -112,22 +133,29 @@ class CollectionAgent:
                     evidence_items=sources,
                     active_schema=active_schema,
                     root_query=query,
+                    evidence_review=evidence_review,
                 )
                 branch_review_decisions.append(decision)
                 branch["review_decision"] = decision["decision"]
-                if decision["decision"] == "expand":
+                if decision["decision"] in {"expand", "retry"}:
                     branch["status"] = "expanded"
                     remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
                     if remaining_branch_slots <= 0:
                         branch["status"] = "stopped"
                         branch["review_decision"] = "stop"
                         decision["decision"] = "stop"
-                        decision["reasons"] = decision.get("reasons", []) + ["Expansion branch budget exhausted."]
+                        decision["reasons"] = decision.get("reasons", []) + [
+                            "Expansion branch budget exhausted."
+                        ]
                         continue
-                    children = self._build_child_branches(branch, decision)[:remaining_branch_slots]
+                    children = self._build_child_branches(branch, decision)[
+                        :remaining_branch_slots
+                    ]
                     expansion_branch_count += len(children)
                     next_frontier.extend(children)
                     research_branches.extend(children)
+                elif decision["decision"] == "fail":
+                    branch["status"] = "failed"
                 else:
                     branch["status"] = "stopped"
 
@@ -137,6 +165,8 @@ class CollectionAgent:
                 if branch.get("depth", 0) <= self.max_branch_depth
             ]
 
+        accepted_evidence_ids = self._accepted_evidence_ids(evidence_reviews)
+        rejected_evidence_ids = self._rejected_evidence_ids(evidence_reviews)
         evidence_ids = [item.get("id", "") for item in evidence_items]
         collection_coverage = self._summarize_collection_coverage(evidence_items)
         message = create_agent_message(
@@ -145,17 +175,27 @@ class CollectionAgent:
             message_type="evidence",
             payload={
                 "evidence_count": len(evidence_items),
+                "accepted_evidence_count": len(accepted_evidence_ids),
+                "rejected_evidence_count": len(rejected_evidence_ids),
+                "evidence_review_count": len(evidence_reviews),
                 "research_runs": len(contexts),
                 "collection_task_count": processed_branch_count,
                 "failed_task_count": len(failed_tasks),
-                "dimensions": sorted({branch["dimension_id"] for branch in research_branches}),
+                "dimensions": sorted(
+                    {branch["dimension_id"] for branch in research_branches}
+                ),
             },
-            artifact_ids=[artifact.get("id", "") for artifact in research_artifacts if artifact.get("agent") == "collection"],
-            evidence_ids=evidence_ids,
+            artifact_ids=[
+                artifact.get("id", "")
+                for artifact in research_artifacts
+                if artifact.get("agent") == "collection"
+            ],
+            evidence_ids=accepted_evidence_ids,
         )
 
         return {
             "evidence_items": evidence_items,
+            "evidence_reviews": evidence_reviews,
             "research_branches": research_branches,
             "branch_review_decisions": branch_review_decisions,
             "research_artifacts": research_artifacts,
@@ -175,7 +215,9 @@ class CollectionAgent:
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
                         "max_expansion_branches": self.max_expansion_branches,
                         "max_root_branch_hard_limit": self.max_root_branch_hard_limit,
-                        "dimensions": sorted({branch["dimension_id"] for branch in research_branches}),
+                        "dimensions": sorted(
+                            {branch["dimension_id"] for branch in research_branches}
+                        ),
                     },
                     "output": {
                         "evidence_count": len(evidence_items),
@@ -183,6 +225,9 @@ class CollectionAgent:
                         "failed_task_count": len(failed_tasks),
                         "branch_count": len(research_branches),
                         "expanded_branch_count": expansion_branch_count,
+                        "evidence_review_count": len(evidence_reviews),
+                        "accepted_evidence_count": len(accepted_evidence_ids),
+                        "rejected_evidence_count": len(rejected_evidence_ids),
                         "coverage": collection_coverage,
                     },
                 }
@@ -224,7 +269,12 @@ class CollectionAgent:
                         "dimension_name": dimension["name"],
                         "dimension_type": dimension["type"],
                         "topic": dimension["name"],
-                        "query": self._schema_aware_query(query, competitor, dimension, active_schema),
+                        "query": self._schema_aware_query(
+                            query,
+                            competitor,
+                            dimension,
+                            active_schema,
+                        ),
                         "evidence_ids": [],
                         "status": "active",
                         "expansion_reason": "Root branch generated from active schema dimension.",
@@ -257,7 +307,11 @@ class CollectionAgent:
         children = []
         next_topics = decision.get("next_topics", [])
         for index, query in enumerate(decision.get("next_queries", []), start=1):
-            topic = next_topics[index - 1] if index <= len(next_topics) else f"{parent['topic']} follow-up {index}"
+            topic = (
+                next_topics[index - 1]
+                if index <= len(next_topics)
+                else f"{parent['topic']} follow-up {index}"
+            )
             child_id = f"{parent['id']}_d{parent.get('depth', 0) + 1}_{index}"
             children.append(
                 {
@@ -273,7 +327,10 @@ class CollectionAgent:
                     "query": query,
                     "evidence_ids": [],
                     "status": "active",
-                    "expansion_reason": "; ".join(decision.get("evidence_gaps", [])) or "Branch reviewer requested expansion.",
+                    "expansion_reason": (
+                        "; ".join(decision.get("evidence_gaps", []))
+                        or "Branch reviewer requested expansion."
+                    ),
                     "review_decision": None,
                 }
             )
@@ -285,19 +342,36 @@ class CollectionAgent:
 
         normalized = []
         for competitor in competitors:
-            name = competitor.get("name", "") if isinstance(competitor, dict) else str(competitor)
+            name = (
+                competitor.get("name", "")
+                if isinstance(competitor, dict)
+                else str(competitor)
+            )
             normalized.append(name)
         return [name for name in normalized if name] or [""]
 
     def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, str]]:
         core_descriptions = {
-            "feature_tree": "product capabilities, feature availability, feature maturity, and product packaging",
-            "pricing_model": "pricing pages, plans, billing units, packaging, enterprise pricing, and free tiers",
-            "user_personas": "target users, buyer personas, use cases, jobs to be done, and customer segments",
+            "feature_tree": (
+                "product capabilities, feature availability, feature maturity, "
+                "and product packaging"
+            ),
+            "pricing_model": (
+                "pricing pages, plans, billing units, packaging, enterprise "
+                "pricing, and free tiers"
+            ),
+            "user_personas": (
+                "target users, buyer personas, use cases, jobs to be done, "
+                "and customer segments"
+            ),
         }
         dimensions = []
 
-        for field in active_schema.get("core_fields", []) or ["feature_tree", "pricing_model", "user_personas"]:
+        for field in active_schema.get("core_fields", []) or [
+            "feature_tree",
+            "pricing_model",
+            "user_personas",
+        ]:
             dimensions.append(
                 {
                     "id": field,
@@ -314,9 +388,15 @@ class CollectionAgent:
             dimensions.append(
                 {
                     "id": extension_id,
-                    "name": extension.get("name", extension_id.replace("_", " ").title()),
+                    "name": extension.get(
+                        "name",
+                        extension_id.replace("_", " ").title(),
+                    ),
                     "type": "industry_extension",
-                    "description": extension.get("description", extension_id.replace("_", " ")),
+                    "description": extension.get(
+                        "description",
+                        extension_id.replace("_", " "),
+                    ),
                 }
             )
 
@@ -332,8 +412,15 @@ class CollectionAgent:
         dimension: dict[str, str],
         active_schema: dict[str, Any],
     ) -> str:
-        selected_industry = active_schema.get("selected_industry", {}).get("name", "unknown industry")
-        competitor_line = f"Competitor: {competitor}" if competitor else "Competitor: infer from the user query"
+        selected_industry = active_schema.get("selected_industry", {}).get(
+            "name",
+            "unknown industry",
+        )
+        competitor_line = (
+            f"Competitor: {competitor}"
+            if competitor
+            else "Competitor: infer from the user query"
+        )
         return "\n".join(
             [
                 query,
@@ -341,7 +428,9 @@ class CollectionAgent:
                 f"Selected industry: {selected_industry}",
                 f"Research focus: {dimension['name']} ({dimension['type']})",
                 f"Focus definition: {dimension['description']}",
-                "Collect public, source-backed evidence only. Prefer official pages, pricing pages, docs, reviews, news, and marketplace listings when relevant.",
+                "Collect public, source-backed evidence only. Prefer official "
+                "pages, pricing pages, docs, reviews, news, and marketplace "
+                "listings when relevant.",
             ]
         )
 
@@ -350,7 +439,13 @@ class CollectionAgent:
         return f"collect_{competitor_slug}_{self._slug(dimension_id)}"
 
     def _slug(self, value: str) -> str:
-        return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_") or "unknown"
+        return (
+            "".join(
+                character.lower() if character.isalnum() else "_"
+                for character in value
+            ).strip("_")
+            or "unknown"
+        )
 
     def _assign_evidence_ids(
         self,
@@ -363,15 +458,24 @@ class CollectionAgent:
             item = dict(source)
             item["id"] = f"ev_{index}"
             item["competitor"] = item.get("competitor") or collection_task["competitor"]
-            item["branch_id"] = item.get("branch_id") or collection_task.get("branch_id", collection_task["id"])
-            item["parent_branch_id"] = item.get("parent_branch_id", collection_task.get("parent_branch_id"))
+            item["branch_id"] = item.get("branch_id") or collection_task.get(
+                "branch_id",
+                collection_task["id"],
+            )
+            item["parent_branch_id"] = item.get(
+                "parent_branch_id",
+                collection_task.get("parent_branch_id"),
+            )
             item["collection_task_id"] = collection_task["id"]
             item["dimension_id"] = collection_task["dimension_id"]
             item["dimension_name"] = collection_task["dimension_name"]
             assigned.append(item)
         return assigned
 
-    def _summarize_collection_coverage(self, evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
+    def _summarize_collection_coverage(
+        self,
+        evidence_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         return {
             "source_count": len(evidence_items),
             "by_competitor": self._count_by(evidence_items, "competitor"),
@@ -384,3 +488,15 @@ class CollectionAgent:
             key = item.get(field) or "unknown"
             counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def _accepted_evidence_ids(self, evidence_reviews: list[dict[str, Any]]) -> list[str]:
+        accepted: list[str] = []
+        for review in evidence_reviews:
+            accepted.extend(review.get("accepted_evidence_ids", []))
+        return list(dict.fromkeys(accepted))
+
+    def _rejected_evidence_ids(self, evidence_reviews: list[dict[str, Any]]) -> list[str]:
+        rejected: list[str] = []
+        for review in evidence_reviews:
+            rejected.extend(review.get("rejected_evidence_ids", []))
+        return list(dict.fromkeys(rejected))

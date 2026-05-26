@@ -525,7 +525,7 @@
           <text x="872" y="422" class="svg-small">Publisher</text>
 
           <path d="M 697 394 C 685 350 560 346 488 298" class="svg-feedback"></path>
-          <text x="535" y="356" class="svg-small">采集后 review gate 待设计</text>
+          <text x="535" y="356" class="svg-small">EvidenceQualityReviewer 审查 accepted/rejected evidence</text>
         </svg>
       </div>
     </section>
@@ -571,7 +571,7 @@
           <text x="884" y="238" class="svg-small">ReportWriterAgent</text>
 
           <path d="M 870 233 C 770 292 650 292 540 248" class="svg-feedback"></path>
-          <text x="590" y="310" class="svg-small">旧末端 review 已移除</text>
+          <text x="590" y="310" class="svg-small">search 后证据 review 已前移</text>
           <rect x="420" y="204" width="132" height="58" class="svg-risk"></rect>
           <text x="462" y="238" class="svg-small">Publisher</text>
           <line x1="552" y1="233" x2="636" y2="233" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
@@ -697,13 +697,13 @@
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">下一步</span></td>
+              <td><span class="tag done">完成</span></td>
               <td><strong>设计采集后 Review Gate</strong></td>
               <td>standard search 结束后立即审查证据质量。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>明晰 CollectionReviewAgent 与 BranchReviewAgent 的职责边界，再决定融合还是拆分。</p>
+                  <p>新增 EvidenceQualityReviewer 负责 accepted/rejected evidence、findings、required_action；BranchReviewAgent 消费 review result 后只负责分支级 expand/retry/fail/stop。</p>
                 </details>
               </td>
             </tr>

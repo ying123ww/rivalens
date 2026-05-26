@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from rivalens.schema import BranchReviewDecision, ResearchBranch
+from rivalens.schema import BranchReviewDecision, EvidenceReviewResult, ResearchBranch
 
 
 class BranchReviewAgent:
@@ -24,20 +24,56 @@ class BranchReviewAgent:
         evidence_items: list[dict[str, Any]],
         active_schema: dict[str, Any],
         root_query: str,
+        evidence_review: EvidenceReviewResult | None = None,
     ) -> BranchReviewDecision:
         """Return a structured branch decision using schema and evidence gaps."""
-        if branch.get("depth", 0) >= self.max_depth:
-            return self._stop(branch, ["Reached max branch depth."], evidence_items)
-
+        review_id = evidence_review.get("id", "") if evidence_review else ""
         relevant_evidence = [
             item
             for item in evidence_items
             if item.get("collection_task_id") == branch.get("id")
             or item.get("collection_task_id") == branch.get("collection_task_id")
         ]
-        evidence_gaps = self._evidence_gaps(branch, relevant_evidence)
+        evidence_gaps = self._evidence_gaps(branch, relevant_evidence, evidence_review)
+
+        if branch.get("depth", 0) >= self.max_depth:
+            return self._stop(
+                branch,
+                ["Reached max branch depth."],
+                relevant_evidence,
+                evidence_review=evidence_review,
+            )
+
+        if evidence_review and evidence_review.get("required_action") == "fail":
+            return {
+                "branch_id": branch["id"],
+                "evidence_review_id": review_id,
+                "decision": "fail",
+                "score": evidence_review.get("score", 0.0),
+                "reasons": [
+                    "Evidence quality review found a branch-level blocking mismatch.",
+                ],
+                "evidence_gaps": evidence_gaps,
+                "next_topics": [],
+                "next_queries": [],
+                "drift_risk": "high",
+            }
+
+        if evidence_review and evidence_review.get("required_action") == "accept":
+            return self._stop(
+                branch,
+                ["Evidence quality review accepted this branch."],
+                relevant_evidence,
+                evidence_review=evidence_review,
+            )
+
         if len(relevant_evidence) >= self.min_sources_per_branch and not evidence_gaps:
-            return self._stop(branch, ["Branch has enough source coverage for this pass."], relevant_evidence)
+            return self._stop(
+                branch,
+                ["Branch has enough source coverage for this pass."],
+                relevant_evidence,
+                evidence_review=evidence_review,
+            )
 
         child_candidates = self._child_candidates(branch, evidence_gaps, root_query)
         approved_candidates = [
@@ -51,12 +87,20 @@ class BranchReviewAgent:
                 ["No schema-aligned child query survived drift review."],
                 relevant_evidence,
                 self._highest_drift_risk(child_candidates),
+                evidence_review=evidence_review,
             )
 
-        score = min(0.95, 0.45 + 0.15 * len(evidence_gaps) + 0.1 * max(0, self.min_sources_per_branch - len(relevant_evidence)))
+        missing_sources = max(0, self.min_sources_per_branch - len(relevant_evidence))
+        score = min(0.95, 0.45 + 0.15 * len(evidence_gaps) + 0.1 * missing_sources)
+        decision = (
+            "retry"
+            if evidence_review and evidence_review.get("required_action") == "retry"
+            else "expand"
+        )
         return {
             "branch_id": branch["id"],
-            "decision": "expand",
+            "evidence_review_id": review_id,
+            "decision": decision,
             "score": round(score, 2),
             "reasons": [
                 "Evidence coverage is below the branch threshold or has source-quality gaps.",
@@ -68,7 +112,20 @@ class BranchReviewAgent:
             "drift_risk": self._highest_drift_risk(approved_candidates),
         }
 
-    def _evidence_gaps(self, branch: ResearchBranch, evidence_items: list[dict[str, Any]]) -> list[str]:
+    def _evidence_gaps(
+        self,
+        branch: ResearchBranch,
+        evidence_items: list[dict[str, Any]],
+        evidence_review: EvidenceReviewResult | None = None,
+    ) -> list[str]:
+        if evidence_review:
+            review_gaps = [
+                finding.get("code", "")
+                for finding in evidence_review.get("findings", [])
+                if finding.get("code")
+            ]
+            return list(dict.fromkeys(review_gaps))[:4]
+
         gaps = []
         source_types = {item.get("source_type", "other") for item in evidence_items}
         urls = [item.get("url", "") for item in evidence_items]
@@ -80,7 +137,11 @@ class BranchReviewAgent:
             gaps.append("missing_official_source")
         if dimension_id == "pricing_model" and "pricing_page" not in source_types:
             gaps.append("missing_pricing_page")
-        if dimension_id in {"security_compliance", "admin_governance", "integration_ecosystem"} and "docs" not in source_types:
+        if (
+            dimension_id
+            in {"security_compliance", "admin_governance", "integration_ecosystem"}
+            and "docs" not in source_types
+        ):
             gaps.append("missing_docs_or_security_source")
         if dimension_id == "user_personas" and "review" not in source_types:
             gaps.append("missing_customer_or_review_source")
@@ -137,11 +198,20 @@ class BranchReviewAgent:
             f"Research focus: {dimension_name}",
         ]
         templates = {
+            "no_evidence": f"{competitor} {dimension_name} official evidence",
+            "missing_source_url": f"{competitor} {dimension_name} official source URL",
             "insufficient_source_count": f"{competitor} {dimension_name} official evidence",
-            "missing_official_source": f"{competitor} {dimension_name} official page documentation",
+            "missing_official_source": (
+                f"{competitor} {dimension_name} official page documentation"
+            ),
             "missing_pricing_page": f"{competitor} pricing plans enterprise add-ons official",
-            "missing_docs_or_security_source": f"{competitor} {dimension_name} docs security compliance",
-            "missing_customer_or_review_source": f"{competitor} customer reviews personas use cases",
+            "missing_docs_or_security_source": (
+                f"{competitor} {dimension_name} docs security compliance"
+            ),
+            "missing_customer_or_review_source": (
+                f"{competitor} customer reviews personas use cases"
+            ),
+            "dimension_mismatch": f"{competitor} {dimension_name} schema-specific evidence",
         }
         candidates = []
         for gap in evidence_gaps:
@@ -186,14 +256,19 @@ class BranchReviewAgent:
         reasons: list[str],
         evidence_items: list[dict[str, Any]],
         drift_risk: str = "low",
+        evidence_review: EvidenceReviewResult | None = None,
     ) -> BranchReviewDecision:
-        score = 0.75 if evidence_items else 0.35
+        if evidence_review:
+            score = evidence_review.get("score", 0.75 if evidence_items else 0.35)
+        else:
+            score = 0.75 if evidence_items else 0.35
         return {
             "branch_id": branch["id"],
+            "evidence_review_id": evidence_review.get("id", "") if evidence_review else "",
             "decision": "stop",
             "score": score,
             "reasons": reasons,
-            "evidence_gaps": self._evidence_gaps(branch, evidence_items),
+            "evidence_gaps": self._evidence_gaps(branch, evidence_items, evidence_review),
             "next_topics": [],
             "next_queries": [],
             "drift_risk": drift_risk,

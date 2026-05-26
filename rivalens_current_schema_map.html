@@ -1156,7 +1156,7 @@
           <rect x="640" y="346" width="166" height="42" class="svg-industry"></rect>
           <text x="684" y="372" class="svg-small">Opportunity</text>
           <rect x="846" y="346" width="166" height="42" class="svg-review"></rect>
-          <text x="878" y="372" class="svg-small">QualityFinding</text>
+          <text x="866" y="372" class="svg-small">EvidenceReviewResult</text>
 
           <line x1="548" y1="408" x2="548" y2="442" class="svg-arrow" marker-end="url(#arrow-data)"></line>
 
@@ -1357,7 +1357,7 @@
           <text x="836" y="410" class="svg-small">Publisher</text>
 
           <path d="M 661 378 C 656 320 520 318 451 232" class="svg-feedback" marker-end="url(#arrow-agent-red)"></path>
-          <text x="475" y="340" class="svg-small">采集后 review gate 待设计</text>
+          <text x="475" y="340" class="svg-small">EvidenceQualityReviewer 审查 accepted/rejected evidence</text>
         </svg>
       </div>
 
@@ -1384,7 +1384,7 @@
         </div>
         <div class="card">
           <h3>BranchReviewAgent</h3>
-          <p>当前只负责 collection-time branch expand / stop 决策；standard search 后的证据质量门待设计。</p>
+          <p>消费 EvidenceQualityReviewer 的 findings，只负责 collection-time branch expand / retry / fail / stop 决策。</p>
         </div>
         <div class="card">
           <h3>ReportWriterAgent</h3>

@@ -17,7 +17,7 @@ class KnowledgeStructuringAgent:
             sender="collection",
         )
         active_schema = state.get("active_knowledge_schema", {})
-        evidence_items = state.get("evidence_items", [])
+        evidence_items = self._accepted_evidence_items(state)
 
         knowledge = self._build_competitor_knowledge(evidence_items, active_schema)
         message = create_agent_message(
@@ -78,7 +78,12 @@ class KnowledgeStructuringAgent:
 
             for feature_index, evidence in enumerate(competitor_evidence, start=1):
                 evidence_id = evidence.get("id", "")
-                text = evidence.get("summary") or evidence.get("excerpt") or evidence.get("title") or ""
+                text = (
+                    evidence.get("summary")
+                    or evidence.get("excerpt")
+                    or evidence.get("title")
+                    or ""
+                )
                 if not text:
                     continue
                 source_type = evidence.get("source_type", "other")
@@ -86,7 +91,11 @@ class KnowledgeStructuringAgent:
                 title = evidence.get("title", "")
                 normalized_text = f"{title} {text}".lower()
 
-                if source_type == "pricing_page" or "pricing" in normalized_text or "price" in normalized_text:
+                if (
+                    source_type == "pricing_page"
+                    or "pricing" in normalized_text
+                    or "price" in normalized_text
+                ):
                     pricing_plans.append(
                         {
                             "id": f"plan_{index}_{len(pricing_plans) + 1}",
@@ -102,7 +111,10 @@ class KnowledgeStructuringAgent:
                     )
                     continue
 
-                if any(keyword in normalized_text for keyword in ["customer", "user", "persona", "segment", "用户", "客户"]):
+                if any(
+                    keyword in normalized_text
+                    for keyword in ["customer", "user", "persona", "segment", "用户", "客户"]
+                ):
                     persona_signals.append(
                         {
                             "id": f"persona_{index}_{len(persona_signals) + 1}",
@@ -177,3 +189,23 @@ class KnowledgeStructuringAgent:
         if not confidences:
             return 0.5
         return round(sum(confidences) / len(confidences), 2)
+
+    def _accepted_evidence_items(
+        self,
+        state: CompetitorAnalysisState,
+    ) -> list[dict[str, Any]]:
+        evidence_items = state.get("evidence_items", [])
+        evidence_reviews = state.get("evidence_reviews", [])
+        if not evidence_reviews:
+            return evidence_items
+
+        accepted_ids = {
+            evidence_id
+            for review in evidence_reviews
+            for evidence_id in review.get("accepted_evidence_ids", [])
+        }
+        return [
+            evidence
+            for evidence in evidence_items
+            if evidence.get("id") in accepted_ids
+        ]

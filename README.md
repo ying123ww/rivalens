@@ -6,7 +6,7 @@ The project is being shaped into a traceable multi-agent workflow for market
 intelligence. The main package is `rivalens`, with these primary domains:
 
 - `rivalens/workflows`: DAG task orchestration for competitor analysis.
-- `rivalens/agents`: specialist agents for planning, collection, knowledge structuring, analysis, writing, and publishing.
+- `rivalens/agents`: specialist agents for planning, collection, collection-time evidence review, branch control, knowledge structuring, analysis, writing, and publishing.
 - `rivalens/schema`: structured competitor knowledge and evidence schema.
 - `rivalens/research`: evidence collection adapters, retrievers, and the underlying research engine.
 
@@ -36,6 +36,8 @@ flowchart TB
     MsgAnalysis --> MsgGuard
 
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
+    Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
+    Collector --> BranchReview["BranchReviewAgent\nexpand/retry/fail/stop"]
     EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
@@ -48,6 +50,7 @@ flowchart TB
     Publisher --> State
 
     State --> Evidence["EvidenceItem"]
+    State --> EvidenceReviews["EvidenceReviewResult"]
     State --> ActiveSchema["ActiveKnowledgeSchema"]
     State --> KnowledgeState["CompetitorKnowledge"]
     State --> Claims["AnalysisClaim"]
@@ -77,8 +80,10 @@ dimension collection tasks and runs them concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and schema
-dimension metadata. The final report is produced only after evidence has been
-structured into `CompetitorKnowledge` and analyzed into traceable claims.
+dimension metadata, reviews each standard-search result, and passes only
+accepted evidence into knowledge structuring. The final report is produced only
+after accepted evidence has been structured into `CompetitorKnowledge` and
+analyzed into traceable claims.
 
 ## Structured Agent Messages
 
@@ -113,17 +118,19 @@ ResearchEngine wiring out of agent business logic:
 ```text
 CollectionAgent
   -> ResearchBranch frontier
-  -> BranchReviewAgent expand/stop decisions
   -> EvidenceCollectionTask
   -> ResearchEngineEvidenceCollector (standard evidence)
   -> ResearchEngine
   -> EvidenceItem[]
+  -> EvidenceQualityReviewer (accept/retry/expand/fail recommendation)
+  -> BranchReviewAgent (expand/retry/fail/stop branch decision)
 ```
 
 The collection path uses standard evidence collection for each branch. Deep
 research recursion is not used as a black box inside `ResearchEngine`; instead,
-Rivalens keeps branch lineage, review decisions, depth, and budget in
-`CompetitorAnalysisState.research_branches` and
+Rivalens keeps branch lineage, evidence reviews, branch review decisions,
+depth, and budget in `CompetitorAnalysisState.research_branches`,
+`CompetitorAnalysisState.evidence_reviews`, and
 `CompetitorAnalysisState.branch_review_decisions`.
 
 Root branches are required schema coverage: every competitor x active schema
@@ -140,11 +147,11 @@ EvidenceItem -> CompetitorKnowledge -> AnalysisClaim -> Report
 ```
 
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
-`ReportWriterAgent` do not run their own research/report modes by default.
-The previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been
-removed because they created a late, claim-deletion-oriented pseudo loop.
-`BranchReviewAgent` remains collection-time branch expansion logic: it reviews
-the current branch evidence only to decide whether to expand or stop child
-queries against the current competitor, schema dimension, evidence gaps, drift
-risk, and expansion budget. A separate collection-time evidence review gate is
-the next design discussion before adding new review behavior.
+`ReportWriterAgent` do not run their own research/report modes by default. The
+previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
+because they created a late, claim-deletion-oriented pseudo loop.
+`EvidenceQualityReviewer` now runs immediately after each standard search and
+produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
+findings, score, and required action. `BranchReviewAgent` consumes that result
+and remains responsible for branch-level search control: depth, budget, drift
+risk, child query generation, and the final expand/retry/fail/stop decision.
