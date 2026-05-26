@@ -23,7 +23,7 @@ class AnalysisAgent:
 
         message = create_agent_message(
             sender="analysis",
-            receiver="quality",
+            receiver="writer",
             message_type="analysis",
             payload={"claim_count": len(claims), "claims": claims},
             evidence_ids=[evidence_id for claim in claims for evidence_id in claim.get("evidence_ids", [])],

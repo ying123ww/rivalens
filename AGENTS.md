@@ -43,4 +43,3 @@ During review, prioritize:
 - Quality loops that cannot actually route work back or improve output.
 - Missing observability, token/cost tracking, timeout handling, retries, or fallbacks.
 - Frontend or backend gaps that prevent source viewing, human correction, or decision replay.
-

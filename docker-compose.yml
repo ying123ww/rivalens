@@ -14,6 +14,13 @@ services:
       IMAGE_GENERATION_ENABLED: ${IMAGE_GENERATION_ENABLED:-false}
       IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-gemini-2.0-flash-preview-image-generation}
       IMAGE_GENERATION_MAX_IMAGES: ${IMAGE_GENERATION_MAX_IMAGES:-3}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rivalens}:123456@postgres:5432/rivalens
+      REDIS_URL: redis://:123456@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ${PWD}/my-docs:/usr/src/app/my-docs:rw
       - ${PWD}/outputs:/usr/src/app/outputs:rw
@@ -43,3 +50,38 @@ services:
     restart: always
     ports:
       - 3000:3000
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rivalens
+      POSTGRES_USER: ${POSTGRES_USER:-rivalens}
+      POSTGRES_PASSWORD: 123456
+    volumes:
+      - rivalens-postgres-data:/var/lib/postgresql/data
+    restart: always
+    ports:
+      - ${POSTGRES_PORT:-5433}:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rivalens} -d rivalens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "123456"]
+    volumes:
+      - rivalens-redis-data:/data
+    restart: always
+    ports:
+      - ${REDIS_PORT:-6380}:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "123456", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rivalens-postgres-data:
+  rivalens-redis-data:

@@ -6,6 +6,7 @@ from typing import Any
 from rivalens.agents.branch_review import BranchReviewAgent
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector
 from rivalens.schema import (
     BranchReviewDecision,
@@ -65,6 +66,7 @@ class CollectionAgent:
         research_branches.extend(root_branches)
         processed_branch_count = 0
         expansion_branch_count = 0
+        file_context = state.get("file_context", {})
 
         while frontier:
             active_frontier = frontier
@@ -73,6 +75,12 @@ class CollectionAgent:
                 self._branch_to_collection_task(branch)
                 for branch in active_frontier
             ]
+            for collection_task in collection_tasks:
+                collection_task["query"] = self._with_file_rag(
+                    collection_task["query"],
+                    file_context,
+                )
+
             results = await asyncio.gather(
                 *[
                     self._run_collection_task(collection_task, verbose=verbose)
@@ -433,6 +441,16 @@ class CollectionAgent:
                 "listings when relevant.",
             ]
         )
+
+    def _with_file_rag(
+        self,
+        query: str,
+        file_context: dict[str, Any],
+    ) -> str:
+        rag_context = format_rag_context(file_context, query, limit=4)
+        if not rag_context:
+            return query
+        return "\n".join([query, "", rag_context])
 
     def _task_id(self, competitor: str, dimension_id: str) -> str:
         competitor_slug = self._slug(competitor or "query")

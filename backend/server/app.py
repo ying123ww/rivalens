@@ -34,8 +34,9 @@ from rivalens.research.utils.enum import Tone
 from chat.chat import ChatAgentWithMemory
 
 from server.report_store import ReportStore
+from server.persistence import get_persistence_config, redact_url
 
-# MongoDB services removed - no database persistence needed
+# Database services are available through Docker, but no tables are created yet.
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -87,7 +88,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning(f"Frontend directory not found: {frontend_path}")
     
-    logger.info("Rivalens API ready - local mode (no database persistence)")
+    persistence_config = get_persistence_config()
+    logger.info(
+        "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
+        redact_url(persistence_config.database_url),
+        persistence_config.redis_url,
+    )
     yield
     # Shutdown
     logger.info("Research API shutting down")
