@@ -6,7 +6,7 @@ The project is being shaped into a traceable multi-agent workflow for market
 intelligence. The main package is `rivalens`, with these primary domains:
 
 - `rivalens/workflows`: DAG task orchestration for competitor analysis.
-- `rivalens/agents`: specialist agents for collection, analysis, writing, and quality review.
+- `rivalens/agents`: specialist agents for planning, collection, knowledge structuring, analysis, writing, and publishing.
 - `rivalens/schema`: structured competitor knowledge and evidence schema.
 - `rivalens/research`: evidence collection adapters, retrievers, and the underlying research engine.
 
@@ -23,8 +23,6 @@ flowchart TB
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
     Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
     Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
-    Workflow --> Reviewer["QualityAgent\ntraceability and coverage review"]
-    Workflow --> Reviser["RevisionAgent\nrespond to review findings"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
@@ -32,12 +30,10 @@ flowchart TB
     Collector --> MsgEvidence["AgentMessage(type=evidence)"]
     Knowledge --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
-    Reviewer --> MsgReview["AgentMessage(type=review)"]
     MsgSelection --> MsgGuard
     MsgEvidence --> MsgGuard
     MsgSchema --> MsgGuard
     MsgAnalysis --> MsgGuard
-    MsgReview --> MsgGuard
 
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
     EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
@@ -48,8 +44,6 @@ flowchart TB
     Collector --> State
     Knowledge --> State
     Analyst --> State
-    Reviewer --> State
-    Reviser --> State
     Writer --> State
     Publisher --> State
 
@@ -57,7 +51,6 @@ flowchart TB
     State --> ActiveSchema["ActiveKnowledgeSchema"]
     State --> KnowledgeState["CompetitorKnowledge"]
     State --> Claims["AnalysisClaim"]
-    State --> QA["QualityFinding"]
     State --> Messages["AgentMessage[]"]
     State --> Artifacts["research_artifacts / agent_events"]
 ```
@@ -72,11 +65,8 @@ flowchart LR
     A["scope_planner\nPlanningAgent"] --> B["source_collection\nCollectionAgent"]
     B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
     C --> D["dimension_analysis\nAnalysisAgent"]
-    D --> E["reviewer\nQualityAgent"]
-    E -->|quality_findings present| F["reviser\nRevisionAgent"]
-    E -->|accepted| G["report_writer\nReportWriterAgent"]
-    F --> G
-    G --> H["publisher\nPublisherAgent"]
+    D --> E["report_writer\nReportWriterAgent"]
+    E --> F["publisher\nPublisherAgent"]
 ```
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
@@ -88,24 +78,21 @@ dimension collection tasks and runs them concurrently through
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and schema
 dimension metadata. The final report is produced only after evidence has been
-structured into `CompetitorKnowledge`, analyzed, and reviewed over traceable
-evidence.
+structured into `CompetitorKnowledge` and analyzed into traceable claims.
 
 ## Structured Agent Messages
 
 Agents exchange validated JSON messages through
 `CompetitorAnalysisState.messages`. Each `AgentMessage` contains `sender`,
 `receiver`, `type`, `payload`, `artifact_ids`, `evidence_ids`, and `created_at`.
-The payload is validated before it is appended to state, using a dedicated
-Pydantic schema for each message type:
+The payload is validated before it is appended to state. Active handoffs
+currently use these Pydantic payloads:
 
 ```text
 schema_selection -> SchemaSelectionMessagePayload
 evidence -> EvidenceMessagePayload
 schema   -> SchemaMessagePayload
 analysis -> AnalysisMessagePayload
-review   -> ReviewMessagePayload
-revision -> RevisionMessagePayload
 report   -> ReportMessagePayload
 publish  -> PublishMessagePayload
 ```
@@ -117,9 +104,8 @@ between agents has explicit typed inputs instead of arbitrary free-form text.
 
 ## Evidence Collection Boundary
 
-Search is intentionally owned by `CollectionAgent`. Other agents express data
-needs through structured state, messages, and quality findings; they do not call
-the research engine directly.
+Search is intentionally owned by `CollectionAgent`. Other agents consume
+structured state and messages; they do not call the research engine directly.
 
 `CollectionAgent` calls `ResearchEngineEvidenceCollector`, which keeps the
 ResearchEngine wiring out of agent business logic:
@@ -154,10 +140,11 @@ EvidenceItem -> CompetitorKnowledge -> AnalysisClaim -> Report
 ```
 
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
-`QualityAgent` no longer run their own research/report modes by default.
-`BranchReviewAgent` handles collection-time branch expansion by reviewing child
-query candidates against the current competitor, schema dimension, evidence
-gaps, drift risk, and expansion budget.
-Quality review should still audit final claims and evidence; when it finds a
-coverage or citation gap, the next design step is to route a structured
-collection request back to `CollectionAgent`.
+`ReportWriterAgent` do not run their own research/report modes by default.
+The previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been
+removed because they created a late, claim-deletion-oriented pseudo loop.
+`BranchReviewAgent` remains collection-time branch expansion logic: it reviews
+the current branch evidence only to decide whether to expand or stop child
+queries against the current competitor, schema dimension, evidence gaps, drift
+risk, and expansion budget. A separate collection-time evidence review gate is
+the next design discussion before adding new review behavior.

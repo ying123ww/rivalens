@@ -10,9 +10,7 @@ from rivalens.agents import (
     KnowledgeStructuringAgent,
     PlanningAgent,
     PublisherAgent,
-    QualityAgent,
     ReportWriterAgent,
-    RevisionAgent,
 )
 from rivalens.research import ResearchEngineEvidenceCollector
 from rivalens.schema import CompetitorAnalysisState
@@ -30,8 +28,6 @@ def build_competitive_analysis_graph(
     collection = CollectionAgent(evidence_collector)
     knowledge_structuring = KnowledgeStructuringAgent()
     analysis = AnalysisAgent()
-    reviewer = QualityAgent()
-    reviser = RevisionAgent()
     writer = ReportWriterAgent()
     publisher = PublisherAgent()
 
@@ -40,8 +36,6 @@ def build_competitive_analysis_graph(
     workflow.add_node("source_collection", collection.run)
     workflow.add_node("knowledge_structuring", knowledge_structuring.run)
     workflow.add_node("dimension_analysis", analysis.run)
-    workflow.add_node("reviewer", reviewer.run)
-    workflow.add_node("reviser", reviser.run)
     workflow.add_node("report_writer", writer.run)
     workflow.add_node("publisher", publisher.run)
 
@@ -49,13 +43,7 @@ def build_competitive_analysis_graph(
     workflow.add_edge("scope_planner", "source_collection")
     workflow.add_edge("source_collection", "knowledge_structuring")
     workflow.add_edge("knowledge_structuring", "dimension_analysis")
-    workflow.add_edge("dimension_analysis", "reviewer")
-    workflow.add_conditional_edges(
-        "reviewer",
-        lambda state: "revise" if state.get("quality_findings") else "accept",
-        {"revise": "reviser", "accept": "report_writer"},
-    )
-    workflow.add_edge("reviser", "report_writer")
+    workflow.add_edge("dimension_analysis", "report_writer")
     workflow.add_edge("report_writer", "publisher")
     workflow.add_edge("publisher", END)
 

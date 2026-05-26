@@ -1343,7 +1343,7 @@
           <line x1="942" y1="314" x2="942" y2="348" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
 
           <rect x="40" y="348" width="1040" height="108" class="svg-lane"></rect>
-          <text x="58" y="382" class="svg-label">分析 / 质检 / 发布层</text>
+          <text x="58" y="382" class="svg-label">分析 / 撰写 / 发布层</text>
           <rect x="160" y="378" width="158" height="52" class="svg-box"></rect>
           <text x="194" y="410" class="svg-small">AnalysisAgent</text>
           <line x1="318" y1="404" x2="376" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
@@ -1351,13 +1351,13 @@
           <text x="406" y="410" class="svg-small">AnalysisClaim</text>
           <line x1="530" y1="404" x2="588" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
           <rect x="588" y="378" width="146" height="52" class="svg-review"></rect>
-          <text x="624" y="410" class="svg-small">QualityAgent</text>
+          <text x="612" y="410" class="svg-small">ReportWriterAgent</text>
           <line x1="734" y1="404" x2="792" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
           <rect x="792" y="378" width="154" height="52" class="svg-output"></rect>
-          <text x="816" y="410" class="svg-small">ReportWriter</text>
+          <text x="836" y="410" class="svg-small">Publisher</text>
 
           <path d="M 661 378 C 656 320 520 318 451 232" class="svg-feedback" marker-end="url(#arrow-agent-red)"></path>
-          <text x="475" y="340" class="svg-small">质检失败：补采 / 重构知识 / 重分析</text>
+          <text x="475" y="340" class="svg-small">采集后 review gate 待设计</text>
         </svg>
       </div>
 
@@ -1383,8 +1383,8 @@
           <p>基于 <code>CompetitorKnowledge[]</code> 做横向比较，输出 <code>AnalysisClaim[]</code>。</p>
         </div>
         <div class="card">
-          <h3>QualityAgent</h3>
-          <p>审查 schema 字段、claim、evidence 绑定和置信度，输出 <code>QualityFinding[]</code>。</p>
+          <h3>BranchReviewAgent</h3>
+          <p>当前只负责 collection-time branch expand / stop 决策；standard search 后的证据质量门待设计。</p>
         </div>
         <div class="card">
           <h3>ReportWriterAgent</h3>

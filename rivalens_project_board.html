@@ -511,7 +511,7 @@
           <line x1="958" y1="330" x2="958" y2="366" class="svg-arrow"></line>
 
           <rect x="42" y="366" width="1000" height="96" class="svg-lane"></rect>
-          <text x="64" y="400" class="svg-label">分析 / 质检 / 发布层</text>
+          <text x="64" y="400" class="svg-label">分析 / 撰写 / 发布层</text>
           <rect x="214" y="394" width="150" height="44" class="svg-box"></rect>
           <text x="248" y="422" class="svg-small">AnalysisAgent</text>
           <line x1="364" y1="416" x2="424" y2="416" class="svg-arrow"></line>
@@ -519,13 +519,13 @@
           <text x="450" y="422" class="svg-small">AnalysisClaim</text>
           <line x1="568" y1="416" x2="628" y2="416" class="svg-arrow"></line>
           <rect x="628" y="394" width="138" height="44" class="svg-review"></rect>
-          <text x="660" y="422" class="svg-small">QualityAgent</text>
+          <text x="642" y="422" class="svg-small">ReportWriterAgent</text>
           <line x1="766" y1="416" x2="826" y2="416" class="svg-arrow"></line>
           <rect x="826" y="394" width="150" height="44" class="svg-output"></rect>
-          <text x="856" y="422" class="svg-small">ReportWriter</text>
+          <text x="872" y="422" class="svg-small">Publisher</text>
 
           <path d="M 697 394 C 685 350 560 346 488 298" class="svg-feedback"></path>
-          <text x="535" y="356" class="svg-small">质检失败回流：补采 / 重构 / 重分析</text>
+          <text x="535" y="356" class="svg-small">采集后 review gate 待设计</text>
         </svg>
       </div>
     </section>
@@ -545,7 +545,7 @@
             </marker>
           </defs>
 
-          <text x="24" y="34" class="svg-title">LangGraph DAG：确定性流转 + 质检分支</text>
+          <text x="24" y="34" class="svg-title">LangGraph DAG：确定性流转</text>
 
           <rect x="44" y="96" width="132" height="58" class="svg-box"></rect>
           <text x="66" y="130" class="svg-small">PlanningAgent</text>
@@ -568,12 +568,12 @@
 
           <line x1="936" y1="154" x2="936" y2="204" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
           <rect x="870" y="204" width="132" height="58" class="svg-review"></rect>
-          <text x="902" y="238" class="svg-small">QualityAgent</text>
+          <text x="884" y="238" class="svg-small">ReportWriterAgent</text>
 
           <path d="M 870 233 C 770 292 650 292 540 248" class="svg-feedback"></path>
-          <text x="590" y="310" class="svg-small">quality_findings present</text>
+          <text x="590" y="310" class="svg-small">旧末端 review 已移除</text>
           <rect x="420" y="204" width="132" height="58" class="svg-risk"></rect>
-          <text x="452" y="238" class="svg-small">RevisionAgent</text>
+          <text x="462" y="238" class="svg-small">Publisher</text>
           <line x1="552" y1="233" x2="636" y2="233" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
 
           <rect x="636" y="204" width="142" height="58" class="svg-output"></rect>
@@ -698,12 +698,12 @@
             </tr>
             <tr>
               <td><span class="tag risk">下一步</span></td>
-              <td><strong>增强 QualityAgent 闭环路由</strong></td>
-              <td>质检失败应该能回到正确节点。</td>
+              <td><strong>设计采集后 Review Gate</strong></td>
+              <td>standard search 结束后立即审查证据质量。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>缺证据回 CollectionAgent，结构化错误回 KnowledgeStructuringAgent，推理过度回 AnalysisAgent，而不是只进入 RevisionAgent 删除 unsupported claims。</p>
+                  <p>明晰 CollectionReviewAgent 与 BranchReviewAgent 的职责边界，再决定融合还是拆分。</p>
                 </details>
               </td>
             </tr>
