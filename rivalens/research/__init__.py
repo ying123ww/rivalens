@@ -1,5 +1,5 @@
 from .agent import ResearchEngine
+from .evidence_collector import ResearchEngineEvidenceCollector
 from .modes import ResearchMode
-from .toolkit import ResearchToolkit
 
-__all__ = ["ResearchEngine", "ResearchMode", "ResearchToolkit"]
+__all__ = ["ResearchEngine", "ResearchEngineEvidenceCollector", "ResearchMode"]

@@ -10,11 +10,9 @@ from rivalens.agents import (
     KnowledgeStructuringAgent,
     PlanningAgent,
     PublisherAgent,
-    QualityAgent,
     ReportWriterAgent,
-    RevisionAgent,
 )
-from rivalens.research import ResearchToolkit
+from rivalens.research import ResearchEngineEvidenceCollector
 from rivalens.schema import CompetitorAnalysisState
 
 
@@ -25,13 +23,11 @@ def build_competitive_analysis_graph(
     headers: dict[str, Any] | None = None,
 ) -> Any:
     """Build the traceable multi-agent competitor-analysis DAG."""
-    research_toolkit = ResearchToolkit(websocket, stream_output, tone=tone, headers=headers)
-    planner = PlanningAgent(research_toolkit)
-    collection = CollectionAgent(research_toolkit)
-    knowledge_structuring = KnowledgeStructuringAgent(research_toolkit)
-    analysis = AnalysisAgent(research_toolkit)
-    reviewer = QualityAgent(research_toolkit)
-    reviser = RevisionAgent()
+    evidence_collector = ResearchEngineEvidenceCollector(websocket, stream_output, tone=tone, headers=headers)
+    planner = PlanningAgent()
+    collection = CollectionAgent(evidence_collector)
+    knowledge_structuring = KnowledgeStructuringAgent()
+    analysis = AnalysisAgent()
     writer = ReportWriterAgent()
     publisher = PublisherAgent()
 
@@ -40,8 +36,6 @@ def build_competitive_analysis_graph(
     workflow.add_node("source_collection", collection.run)
     workflow.add_node("knowledge_structuring", knowledge_structuring.run)
     workflow.add_node("dimension_analysis", analysis.run)
-    workflow.add_node("reviewer", reviewer.run)
-    workflow.add_node("reviser", reviser.run)
     workflow.add_node("report_writer", writer.run)
     workflow.add_node("publisher", publisher.run)
 
@@ -49,13 +43,7 @@ def build_competitive_analysis_graph(
     workflow.add_edge("scope_planner", "source_collection")
     workflow.add_edge("source_collection", "knowledge_structuring")
     workflow.add_edge("knowledge_structuring", "dimension_analysis")
-    workflow.add_edge("dimension_analysis", "reviewer")
-    workflow.add_conditional_edges(
-        "reviewer",
-        lambda state: "revise" if state.get("quality_findings") else "accept",
-        {"revise": "reviser", "accept": "report_writer"},
-    )
-    workflow.add_edge("reviser", "report_writer")
+    workflow.add_edge("dimension_analysis", "report_writer")
     workflow.add_edge("report_writer", "publisher")
     workflow.add_edge("publisher", END)
 
@@ -80,7 +68,7 @@ async def run_competitive_analysis_task(
         "competitors": kwargs.get("competitors", []),
         "files": kwargs.get("files", kwargs.get("file_paths", [])),
         "attachments": kwargs.get("attachments", []),
-        "deep_research": kwargs.get("deep_research", True),
+        "deep_research": kwargs.get("deep_research", False),
         "verbose": kwargs.get("verbose", True),
     }
     graph = build_competitive_analysis_graph(websocket, stream_output, tone, headers).compile()

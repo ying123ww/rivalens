@@ -30,6 +30,8 @@ class Competitor(TypedDict, total=False):
 class EvidenceItem(TypedDict, total=False):
     id: str
     competitor: str
+    branch_id: str
+    parent_branch_id: str | None
     collection_task_id: str
     dimension_id: str
     dimension_name: str
@@ -41,6 +43,98 @@ class EvidenceItem(TypedDict, total=False):
     excerpt: str
     summary: str
     confidence: float
+
+
+class EvidenceCollectionTask(TypedDict, total=False):
+    id: str
+    branch_id: str
+    parent_branch_id: str | None
+    depth: int
+    topic: str
+    expansion_reason: str
+    competitor: str
+    dimension_id: str
+    dimension_name: str
+    dimension_type: str
+    query: str
+
+
+class EvidenceCollectionResult(TypedDict, total=False):
+    task: EvidenceCollectionTask
+    mode: str
+    query: str
+    context: Any
+    evidence_items: list[EvidenceItem]
+    costs: float
+
+
+EvidenceReviewAction = Literal["accept", "retry", "expand", "fail"]
+EvidenceReviewFindingCode = Literal[
+    "no_evidence",
+    "missing_source_url",
+    "insufficient_source_count",
+    "missing_official_source",
+    "missing_pricing_page",
+    "missing_docs_or_security_source",
+    "missing_customer_or_review_source",
+    "competitor_mismatch",
+    "dimension_mismatch",
+]
+
+
+class EvidenceReviewFinding(TypedDict, total=False):
+    id: str
+    severity: Literal["low", "medium", "high"]
+    code: EvidenceReviewFindingCode
+    evidence_id: str | None
+    branch_id: str
+    message: str
+    recommendation: str
+
+
+class EvidenceReviewResult(TypedDict, total=False):
+    id: str
+    branch_id: str
+    collection_task_id: str
+    accepted: bool
+    score: float
+    findings: list[EvidenceReviewFinding]
+    accepted_evidence_ids: list[str]
+    rejected_evidence_ids: list[str]
+    required_action: EvidenceReviewAction
+
+
+BranchDecisionType = Literal["expand", "stop", "retry", "fail", "merge", "redirect"]
+BranchDriftRisk = Literal["low", "medium", "high"]
+
+
+class ResearchBranch(TypedDict, total=False):
+    id: str
+    parent_id: str | None
+    depth: int
+    path: list[str]
+    competitor: str
+    dimension_id: str
+    dimension_name: str
+    dimension_type: str
+    topic: str
+    query: str
+    evidence_ids: list[str]
+    status: Literal["active", "expanded", "stopped", "failed"]
+    expansion_reason: str
+    review_decision: BranchDecisionType | None
+
+
+class BranchReviewDecision(TypedDict, total=False):
+    branch_id: str
+    evidence_review_id: str
+    decision: BranchDecisionType
+    score: float
+    reasons: list[str]
+    evidence_gaps: list[str]
+    next_topics: list[str]
+    next_queries: list[str]
+    drift_risk: BranchDriftRisk
 
 
 class IndustryCandidate(TypedDict, total=False):
@@ -132,14 +226,6 @@ class AnalysisClaim(TypedDict, total=False):
     confidence: float
 
 
-class QualityFinding(TypedDict, total=False):
-    id: str
-    severity: Literal["low", "medium", "high"]
-    target_id: str
-    message: str
-    recommendation: str
-
-
 class AgentEvent(TypedDict, total=False):
     agent: str
     action: str
@@ -155,8 +241,6 @@ AgentMessageType = Literal[
     "evidence",
     "schema",
     "analysis",
-    "review",
-    "revision",
     "report",
     "publish",
 ]
@@ -265,16 +349,11 @@ class AnalysisClaimPayload(StrictPayloadModel):
     confidence: float = 0.5
 
 
-class QualityFindingPayload(StrictPayloadModel):
-    id: str
-    severity: Literal["low", "medium", "high"]
-    target_id: str
-    message: str
-    recommendation: str
-
-
 class EvidenceMessagePayload(StrictPayloadModel):
     evidence_count: int = Field(ge=0)
+    accepted_evidence_count: int = Field(default=0, ge=0)
+    rejected_evidence_count: int = Field(default=0, ge=0)
+    evidence_review_count: int = Field(default=0, ge=0)
     research_runs: int = Field(ge=0)
     collection_task_count: int = Field(default=0, ge=0)
     failed_task_count: int = Field(default=0, ge=0)
@@ -296,17 +375,6 @@ class AnalysisMessagePayload(StrictPayloadModel):
     claims: list[AnalysisClaimPayload] = Field(default_factory=list)
 
 
-class ReviewMessagePayload(StrictPayloadModel):
-    finding_count: int = Field(ge=0)
-    findings: list[QualityFindingPayload] = Field(default_factory=list)
-    accepted: bool
-
-
-class RevisionMessagePayload(StrictPayloadModel):
-    note: str
-    claim_count: int = Field(ge=0)
-
-
 class ReportMessagePayload(StrictPayloadModel):
     report_length: int = Field(ge=0)
 
@@ -320,8 +388,6 @@ AgentMessagePayload = (
     | EvidenceMessagePayload
     | SchemaMessagePayload
     | AnalysisMessagePayload
-    | ReviewMessagePayload
-    | RevisionMessagePayload
     | ReportMessagePayload
     | PublishMessagePayload
 )
@@ -344,6 +410,7 @@ class ResearchArtifact(TypedDict, total=False):
     mode: str
     query: str
     competitor: str
+    branch_id: str
     report: str
     context: Any
     evidence_ids: list[str]
@@ -362,13 +429,14 @@ class CompetitorAnalysisState(TypedDict, total=False):
     messages: list[AgentMessage]
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
+    research_branches: list[ResearchBranch]
+    branch_review_decisions: list[BranchReviewDecision]
+    evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext
     evidence_items: list[EvidenceItem]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
-    quality_findings: list[QualityFinding]
     research_artifacts: list[ResearchArtifact]
-    revision_notes: list[str]
     report: str
     published_artifacts: dict[str, str]
     agent_events: list[AgentEvent]

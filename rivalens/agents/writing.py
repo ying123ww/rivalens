@@ -1,15 +1,12 @@
 """Report writer for structured competitor analysis output."""
 
-from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.agents.messages import create_agent_message
 from rivalens.schema import CompetitorAnalysisState
 
 
 class ReportWriterAgent:
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
-        review_message = latest_message_for(state, receiver="writer", message_type="review", sender="quality")
-        revision_message = latest_message_for(state, receiver="writer", message_type="revision", sender="reviser")
         claims = state.get("analysis_claims", [])
-        findings = state.get("quality_findings", [])
 
         lines = [
             "# Competitor Analysis Report",
@@ -23,19 +20,6 @@ class ReportWriterAgent:
                 lines.append(f"- {claim.get('claim', '')} [evidence: {evidence_ids}]")
         else:
             lines.append("- No claims generated yet.")
-
-        lines.extend(["", "## Quality Findings"])
-        if findings:
-            for finding in findings:
-                lines.append(f"- {finding.get('severity', 'medium')}: {finding.get('message', '')}")
-        else:
-            lines.append("- No blocking traceability issues found.")
-
-        revision_notes = state.get("revision_notes", [])
-        if revision_notes:
-            lines.extend(["", "## Revision Notes"])
-            for note in revision_notes:
-                lines.append(f"- {note}")
 
         return {
             "report": "\n".join(lines),
@@ -56,9 +40,6 @@ class ReportWriterAgent:
                     "action": "compose_structured_report",
                     "input": {
                         "claim_count": len(claims),
-                        "finding_count": len(findings),
-                        "review_message_id": review_message.get("id") if review_message else None,
-                        "revision_message_id": revision_message.get("id") if revision_message else None,
                     },
                     "output": {"report_length": sum(len(line) for line in lines)},
                 }

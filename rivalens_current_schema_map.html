@@ -723,6 +723,7 @@
           <li><span class="tag done">已完成</span><span>AgentMessage 已经按类型验证 payload。</span></li>
           <li><span class="tag done">已完成</span><span>新增 ActiveKnowledgeSchema、CompetitorKnowledge 和行业扩展结构。</span></li>
           <li><span class="tag done">已完成</span><span>新增 SchemaSelectionAgent 和 schema_registry。</span></li>
+          <li><span class="tag done">已完成</span><span>standard search 后接入 EvidenceQualityReviewer，记录 accepted/rejected evidence。</span></li>
           <li><span class="tag next">下一步</span><span>让 KnowledgeStructuringAgent 的抽取更精细，并补 ReportDocument。</span></li>
         </ul>
       </aside>
@@ -757,9 +758,9 @@
           <span>基于 CompetitorKnowledge 形成分析结论，绑定 evidence_ids 和 confidence。</span>
         </div>
         <div class="step">
-          <small>05 当前不足</small>
-          <strong>Report string</strong>
-          <span>Writer 现在主要拼 Markdown 字符串，还不是结构化 ReportDocument。</span>
+          <small>05 当前已有</small>
+          <strong>EvidenceReviewResult</strong>
+          <span>standard search 后记录 accepted/rejected evidence、findings 和 required_action。</span>
         </div>
       </div>
     </section>
@@ -768,7 +769,7 @@
       <div class="section-head">
         <h2>现在的关键问题</h2>
         <p class="note">
-          现在主线已经从 ProductFact 迁走。剩下的问题是：抽取还偏规则化，ReportWriter 还没有输出 ReportDocument。
+          现在主线已经从 ProductFact 迁走，并且采集后证据 review 已前移。剩下的问题是：抽取还偏规则化，ReportWriter 还没有输出 ReportDocument。
         </p>
       </div>
       <div class="compare">
@@ -1017,8 +1018,8 @@
       <div class="section-head">
         <h2>SchemaSelectionAgent 与 KnowledgeStructuringAgent 的联系</h2>
         <p class="note">
-          现在的连接点不只是 ActiveKnowledgeSchema。CollectionAgent 会按 schema 生成并行采集任务，
-          ResearchToolkit 会把搜索结果沉淀到研究结果池，KnowledgeStructuringAgent 再消费 schema、evidence 和池子摘要来产出 CompetitorKnowledge。
+          现在的连接点是 ActiveKnowledgeSchema、ResearchBranch 和 EvidenceItem。CollectionAgent 会按 schema 生成必跑 root branches，
+          EvidenceQualityReviewer 负责 standard search 后的 accepted/rejected evidence 判断；BranchReviewAgent 消费 review result，只负责 expand/retry/fail/stop 和 high drift 控制；KnowledgeStructuringAgent 只消费 accepted evidence 来产出 CompetitorKnowledge。
         </p>
       </div>
       <div class="logic-figure" aria-label="SchemaSelectionAgent 与 KnowledgeStructuringAgent 联系图">
@@ -1070,22 +1071,22 @@
           <line x1="789" y1="342" x2="789" y2="382" class="svg-arrow" marker-end="url(#arrow-link)"></line>
 
           <rect x="38" y="382" width="1044" height="104" class="svg-lane"></rect>
-          <text x="58" y="416" class="svg-label">ResearchToolkit 池子</text>
+          <text x="58" y="416" class="svg-label">证据适配层</text>
           <rect x="204" y="408" width="196" height="54" class="svg-box"></rect>
-          <text x="224" y="440" class="svg-small">collect_schema_evidence()</text>
+          <text x="216" y="440" class="svg-small">collector.collect()</text>
           <line x1="400" y1="435" x2="458" y2="435" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="458" y="396" width="224" height="78" class="svg-industry"></rect>
-          <text x="478" y="424" class="svg-label">ResearchToolkit Pool</text>
-          <text x="478" y="448" class="svg-small">runs / sources / dedupe / coverage</text>
+          <text x="478" y="424" class="svg-label">EvidenceItem adapter</text>
+          <text x="478" y="448" class="svg-small">sources / metadata / costs</text>
           <line x1="682" y1="435" x2="740" y2="435" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="740" y="408" width="202" height="54" class="svg-output"></rect>
-          <text x="760" y="440" class="svg-small">pool summary / snapshot</text>
+          <text x="760" y="440" class="svg-small">EvidenceItem[]</text>
 
           <path d="M 1000 296 C 1028 364 980 424 942 435" class="svg-arrow" marker-end="url(#arrow-link)"></path>
 
           <line x1="842" y1="486" x2="842" y2="520" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="346" y="512" width="438" height="36" class="svg-core"></rect>
-          <text x="366" y="535" class="svg-small">KnowledgeStructuringAgent 输入：ActiveKnowledgeSchema + EvidenceItem[] + research_pool_summary</text>
+          <text x="366" y="535" class="svg-small">KnowledgeStructuringAgent 输入：ActiveKnowledgeSchema + accepted EvidenceItem[]</text>
           <line x1="784" y1="530" x2="850" y2="530" class="svg-arrow" marker-end="url(#arrow-link)"></line>
           <rect x="850" y="512" width="210" height="36" class="svg-output"></rect>
           <text x="872" y="535" class="svg-small">CompetitorKnowledge[]</text>
@@ -1124,8 +1125,8 @@
           <rect x="588" y="92" width="152" height="42" class="svg-box"></rect>
           <text x="610" y="118" class="svg-small">EvidenceLocator</text>
           <line x1="740" y1="113" x2="790" y2="113" class="svg-arrow" marker-end="url(#arrow-data)"></line>
-          <rect x="790" y="92" width="152" height="42" class="svg-box"></rect>
-          <text x="820" y="118" class="svg-small">SourceQuality</text>
+          <rect x="790" y="92" width="178" height="42" class="svg-review"></rect>
+          <text x="808" y="118" class="svg-small">EvidenceReviewResult</text>
 
           <line x1="462" y1="154" x2="462" y2="188" class="svg-arrow" marker-end="url(#arrow-data)"></line>
 
@@ -1155,9 +1156,6 @@
           <line x1="578" y1="367" x2="640" y2="367" class="svg-arrow" marker-end="url(#arrow-data)"></line>
           <rect x="640" y="346" width="166" height="42" class="svg-industry"></rect>
           <text x="684" y="372" class="svg-small">Opportunity</text>
-          <rect x="846" y="346" width="166" height="42" class="svg-review"></rect>
-          <text x="878" y="372" class="svg-small">QualityFinding</text>
-
           <line x1="548" y1="408" x2="548" y2="442" class="svg-arrow" marker-end="url(#arrow-data)"></line>
 
           <rect x="38" y="442" width="1020" height="54" class="svg-lane"></rect>
@@ -1203,7 +1201,7 @@
         <div class="step">
           <small>反馈层</small>
           <strong>FeedbackEvent</strong>
-          <span>用户可以针对句子、claim 或 evidence 反馈，进入修订闭环。</span>
+          <span>用户可以针对句子、claim 或 evidence 反馈，进入人工反馈和再采集闭环。</span>
         </div>
       </div>
     </section>
@@ -1328,22 +1326,25 @@
 
           <rect x="40" y="202" width="1040" height="112" class="svg-lane"></rect>
           <text x="58" y="238" class="svg-label">知识生产层</text>
-          <rect x="150" y="232" width="166" height="52" class="svg-box"></rect>
-          <text x="176" y="264" class="svg-small">CollectionAgent</text>
-          <line x1="316" y1="258" x2="374" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
-          <rect x="374" y="232" width="154" height="52" class="svg-core"></rect>
-          <text x="404" y="264" class="svg-small">EvidenceItem</text>
-          <line x1="528" y1="258" x2="586" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
-          <rect x="586" y="232" width="214" height="52" class="svg-box"></rect>
-          <text x="606" y="264" class="svg-small">KnowledgeStructuringAgent</text>
-          <line x1="800" y1="258" x2="858" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
-          <rect x="858" y="232" width="168" height="52" class="svg-core"></rect>
-          <text x="878" y="264" class="svg-small">CompetitorKnowledge</text>
+          <rect x="80" y="232" width="150" height="52" class="svg-box"></rect>
+          <text x="104" y="264" class="svg-small">CollectionAgent</text>
+          <line x1="230" y1="258" x2="270" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="270" y="232" width="130" height="52" class="svg-core"></rect>
+          <text x="292" y="264" class="svg-small">EvidenceItem</text>
+          <line x1="400" y1="258" x2="432" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="432" y="232" width="198" height="52" class="svg-review"></rect>
+          <text x="450" y="264" class="svg-small">EvidenceQualityReviewer</text>
+          <line x1="630" y1="258" x2="670" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="670" y="232" width="214" height="52" class="svg-box"></rect>
+          <text x="690" y="264" class="svg-small">KnowledgeStructuringAgent</text>
+          <line x1="884" y1="258" x2="920" y2="258" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
+          <rect x="920" y="232" width="140" height="52" class="svg-core"></rect>
+          <text x="930" y="264" class="svg-small">CompetitorKnowledge</text>
 
           <line x1="942" y1="314" x2="942" y2="348" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
 
           <rect x="40" y="348" width="1040" height="108" class="svg-lane"></rect>
-          <text x="58" y="382" class="svg-label">分析 / 质检 / 发布层</text>
+          <text x="58" y="382" class="svg-label">分析 / 撰写 / 发布层</text>
           <rect x="160" y="378" width="158" height="52" class="svg-box"></rect>
           <text x="194" y="410" class="svg-small">AnalysisAgent</text>
           <line x1="318" y1="404" x2="376" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
@@ -1351,13 +1352,12 @@
           <text x="406" y="410" class="svg-small">AnalysisClaim</text>
           <line x1="530" y1="404" x2="588" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
           <rect x="588" y="378" width="146" height="52" class="svg-review"></rect>
-          <text x="624" y="410" class="svg-small">QualityAgent</text>
+          <text x="612" y="410" class="svg-small">ReportWriterAgent</text>
           <line x1="734" y1="404" x2="792" y2="404" class="svg-arrow" marker-end="url(#arrow-agent)"></line>
           <rect x="792" y="378" width="154" height="52" class="svg-output"></rect>
-          <text x="816" y="410" class="svg-small">ReportWriter</text>
+          <text x="836" y="410" class="svg-small">Publisher</text>
 
-          <path d="M 661 378 C 656 320 520 318 451 232" class="svg-feedback" marker-end="url(#arrow-agent-red)"></path>
-          <text x="475" y="340" class="svg-small">质检失败：补采 / 重构知识 / 重分析</text>
+          <text x="450" y="340" class="svg-small">standard search 后审查 accepted/rejected evidence</text>
         </svg>
       </div>
 
@@ -1372,19 +1372,23 @@
         </div>
         <div class="card">
           <h3>CollectionAgent</h3>
-          <p>调用 ResearchToolkit，只产出 <code>EvidenceItem[]</code>，不负责分析。</p>
+          <p>维护 research branch frontier，先完成 competitor x schema dimension 的 root coverage，调用 ResearchEngineEvidenceCollector 产出 <code>EvidenceItem[]</code>，并在 standard search 后触发证据 review。</p>
+        </div>
+        <div class="card">
+          <h3>EvidenceQualityReviewer</h3>
+          <p>审查 <code>EvidenceItem</code> 的 URL、competitor、dimension、source type 和覆盖数量，输出 accepted/rejected evidence、findings、score 与 required_action。</p>
         </div>
         <div class="card">
           <h3>KnowledgeStructuringAgent</h3>
-          <p>把 evidence 填入 <code>CompetitorKnowledge</code>，不再经过 ProductFact 兜底。</p>
+          <p>只消费 accepted evidence，把证据填入 <code>CompetitorKnowledge</code>，不再经过 ProductFact 兜底。</p>
         </div>
         <div class="card">
           <h3>AnalysisAgent</h3>
           <p>基于 <code>CompetitorKnowledge[]</code> 做横向比较，输出 <code>AnalysisClaim[]</code>。</p>
         </div>
         <div class="card">
-          <h3>QualityAgent</h3>
-          <p>审查 schema 字段、claim、evidence 绑定和置信度，输出 <code>QualityFinding[]</code>。</p>
+          <h3>BranchReviewAgent</h3>
+          <p>消费 EvidenceQualityReviewer 的 findings 和 required_action，只负责 collection-time branch expand / retry / fail / stop、drift 与预算决策。</p>
         </div>
         <div class="card">
           <h3>ReportWriterAgent</h3>

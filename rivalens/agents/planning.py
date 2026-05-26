@@ -9,7 +9,6 @@ from rivalens.file_context import (
     file_context_summary,
     get_task_file_references,
 )
-from rivalens.research import ResearchToolkit
 from rivalens.schema import (
     ActiveKnowledgeSchema,
     Competitor,
@@ -22,27 +21,20 @@ from rivalens.schema_registry import CORE_SCHEMA_FIELDS, SchemaRegistry
 class PlanningAgent:
     def __init__(
         self,
-        research_toolkit: ResearchToolkit | None = None,
         schema_registry: SchemaRegistry | None = None,
     ):
-        self.research_toolkit = research_toolkit or ResearchToolkit()
         self.schema_registry = schema_registry or SchemaRegistry()
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
         query = task.get("query", "")
         competitors = state.get("competitors") or task.get("competitors") or []
-        verbose = bool(task.get("verbose", True))
 
         file_context = state.get("file_context") or build_file_context(
             get_task_file_references(task)
         )
         planning_query = self._planning_query(query, file_context)
         normalized = self._normalize_competitors(competitors)
-        outline = await self.research_toolkit.generate_outline(
-            query=planning_query,
-            verbose=verbose,
-        )
         active_schema = self._select_active_schema(
             planning_query,
             normalized,
@@ -53,19 +45,24 @@ class PlanningAgent:
 
         research_artifacts = state.get("research_artifacts", []) + [
             {
-                "id": "artifact_planning_outline_1",
+                "id": "artifact_planning_schema_1",
                 "agent": "planner",
-                "mode": outline["mode"],
+                "mode": "schema_selection",
                 "query": query,
-                "report": outline["report"],
+                "report": (
+                    "Selected active knowledge schema "
+                    f"{active_schema.get('id', '')} for "
+                    f"{active_schema.get('selected_industry', {}).get('name', 'unknown industry')}."
+                ),
                 "context": {
-                    "outline_context": outline["context"],
+                    "planning_query": planning_query,
+                    "candidate_industries": candidate_industries,
+                    "industry_extensions": industry_extensions,
                     "file_context_summary": file_context.get("summary", ""),
                 },
-                "costs": outline["costs"],
+                "costs": 0.0,
             }
         ]
-        artifact_id = research_artifacts[-1]["id"]
         message = create_agent_message(
             sender="planner",
             receiver="collection",
@@ -74,7 +71,6 @@ class PlanningAgent:
                 "active_schema": active_schema,
                 "candidate_count": len(candidate_industries),
             },
-            artifact_ids=[artifact_id],
         )
 
         return {
@@ -87,11 +83,10 @@ class PlanningAgent:
             + [
                 {
                     "agent": "planner",
-                    "action": "normalize_scope_generate_outline_and_select_schema",
+                    "action": "normalize_scope_and_select_schema",
                     "input": {"query": query, "competitors": competitors},
                     "output": {
                         "competitor_count": len(normalized),
-                        "research_mode": outline["mode"],
                         "file_count": len(file_context.get("sources", [])),
                         "file_chunk_count": len(file_context.get("chunks", [])),
                         "selected_industry": active_schema.get(

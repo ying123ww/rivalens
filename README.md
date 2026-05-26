@@ -6,10 +6,10 @@ The project is being shaped into a traceable multi-agent workflow for market
 intelligence. The main package is `rivalens`, with these primary domains:
 
 - `rivalens/workflows`: DAG task orchestration for competitor analysis.
-- `rivalens/agents`: specialist agents for collection, analysis, writing, and quality review.
+- `rivalens/agents`: specialist agents for planning, collection, collection-time evidence review, branch control, knowledge structuring, analysis, writing, and publishing.
 - `rivalens/file_context`: reusable CSV, Excel, JSON, and screenshot context helpers.
 - `rivalens/schema`: structured competitor knowledge and evidence schema.
-- `rivalens/research`: research modes, tools, retrievers, and the underlying research engine.
+- `rivalens/research`: evidence collection adapters, retrievers, and the underlying research engine.
 
 The generic research implementation lives inside `rivalens/research` as the web
 research engine beneath Rivalens agents.
@@ -33,12 +33,10 @@ future schema and repository wiring.
 flowchart TB
     User["User / product team"] --> Workflow["rivalens.workflows\nLangGraph DAG"]
 
-    Workflow --> Planner["PlanningAgent\nscope, outline, active schema"]
+    Workflow --> Planner["PlanningAgent\nscope, active schema"]
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
     Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
     Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
-    Workflow --> Reviewer["QualityAgent\ntraceability and coverage review"]
-    Workflow --> Reviser["RevisionAgent\nrespond to review findings"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
@@ -46,37 +44,30 @@ flowchart TB
     Collector --> MsgEvidence["AgentMessage(type=evidence)"]
     Knowledge --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
-    Reviewer --> MsgReview["AgentMessage(type=review)"]
     MsgSelection --> MsgGuard
     MsgEvidence --> MsgGuard
     MsgSchema --> MsgGuard
     MsgAnalysis --> MsgGuard
-    MsgReview --> MsgGuard
 
-    Planner --> Toolkit["ResearchToolkit\nagent-facing research tools"]
-    Collector --> Toolkit
-    Knowledge --> Toolkit
-    Analyst --> Toolkit
-    Reviewer --> Toolkit
-
-    Toolkit --> Modes["ResearchMode\nRivalens-level mode names"]
-    Modes --> Engine["ResearchEngine\nsearch, scrape, context, reports"]
+    Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
+    Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
+    Collector --> BranchReview["BranchReviewAgent\nexpand/retry/fail/stop"]
+    EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
+    Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
 
     Planner --> State["CompetitorAnalysisState"]
     Collector --> State
     Knowledge --> State
     Analyst --> State
-    Reviewer --> State
-    Reviser --> State
     Writer --> State
     Publisher --> State
 
     State --> Evidence["EvidenceItem"]
+    State --> EvidenceReviews["EvidenceReviewResult"]
     State --> ActiveSchema["ActiveKnowledgeSchema"]
     State --> KnowledgeState["CompetitorKnowledge"]
     State --> Claims["AnalysisClaim"]
-    State --> QA["QualityFinding"]
     State --> Messages["AgentMessage[]"]
     State --> Artifacts["research_artifacts / agent_events"]
 ```
@@ -91,25 +82,22 @@ flowchart LR
     A["scope_planner\nPlanningAgent"] --> B["source_collection\nCollectionAgent"]
     B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
     C --> D["dimension_analysis\nAnalysisAgent"]
-    D --> E["reviewer\nQualityAgent"]
-    E -->|quality_findings present| F["reviser\nRevisionAgent"]
-    E -->|accepted| G["report_writer\nReportWriterAgent"]
-    F --> G
-    G --> H["publisher\nPublisherAgent"]
+    D --> E["report_writer\nReportWriterAgent"]
+    E --> F["publisher\nPublisherAgent"]
 ```
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
-inputs, generates an outline, selects and freezes an `ActiveKnowledgeSchema`
-from the schema registry, then emits one `schema_selection` handoff to
+inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
+then emits one `schema_selection` handoff to
 `source_collection`. `source_collection` expands that schema into competitor-by-
 dimension collection tasks and runs them concurrently through
-`ResearchToolkit.collect_evidence()`, which wraps
-`rivalens.research.ResearchEngine` search and deep-research capability as an
-evidence collection tool. `ResearchToolkit` also keeps a pooled research
-snapshot for deduplicated sources, run metadata, and coverage by competitor and
-schema dimension. The final report is produced only after evidence has been
-structured into `CompetitorKnowledge`, analyzed, and reviewed over traceable
-evidence.
+`ResearchEngineEvidenceCollector`, which wraps
+`rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
+research sources into `EvidenceItem` records with collection task and schema
+dimension metadata, reviews each standard-search result, and passes only
+accepted evidence into knowledge structuring. The final report is produced only
+after accepted evidence has been structured into `CompetitorKnowledge` and
+analyzed into traceable claims.
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
@@ -122,16 +110,14 @@ context while preserving the external evidence pipeline.
 Agents exchange validated JSON messages through
 `CompetitorAnalysisState.messages`. Each `AgentMessage` contains `sender`,
 `receiver`, `type`, `payload`, `artifact_ids`, `evidence_ids`, and `created_at`.
-The payload is validated before it is appended to state, using a dedicated
-Pydantic schema for each message type:
+The payload is validated before it is appended to state. Active handoffs
+currently use these Pydantic payloads:
 
 ```text
 schema_selection -> SchemaSelectionMessagePayload
 evidence -> EvidenceMessagePayload
 schema   -> SchemaMessagePayload
 analysis -> AnalysisMessagePayload
-review   -> ReviewMessagePayload
-revision -> RevisionMessagePayload
 report   -> ReportMessagePayload
 publish  -> PublishMessagePayload
 ```
@@ -141,49 +127,51 @@ Downstream agents consume the latest validated message addressed to them with
 function-calling contract: the shared state remains observable, but the handoff
 between agents has explicit typed inputs instead of arbitrary free-form text.
 
-## Research Modes
+## Evidence Collection Boundary
 
-Agents call `ResearchToolkit` methods instead of low-level report types:
+Search is intentionally owned by `CollectionAgent`. Other agents consume
+structured state and messages; they do not call the research engine directly.
+
+`CollectionAgent` calls `ResearchEngineEvidenceCollector`, which keeps the
+ResearchEngine wiring out of agent business logic:
 
 ```text
-standard_evidence  -> research_report
-deep_evidence      -> deep
-source_discovery   -> resource_report
-outline_assisted   -> outline_report
-schema_extraction  -> custom_report
-focused_analysis   -> detailed_report
-subtopic_evidence  -> subtopic_report
+CollectionAgent
+  -> ResearchBranch frontier
+  -> EvidenceCollectionTask
+  -> ResearchEngineEvidenceCollector (standard evidence)
+  -> ResearchEngine
+  -> EvidenceItem[]
+  -> EvidenceQualityReviewer (accept/retry/expand/fail recommendation)
+  -> BranchReviewAgent (expand/retry/fail/stop branch decision)
 ```
 
-This keeps agent responsibilities separate from the underlying research engine
-while still giving every agent a channel to use the right research capability.
+The collection path uses standard evidence collection for each branch. Deep
+research recursion is not used as a black box inside `ResearchEngine`; instead,
+Rivalens keeps branch lineage, evidence reviews, branch review decisions,
+depth, and budget in `CompetitorAnalysisState.research_branches`,
+`CompetitorAnalysisState.evidence_reviews`, and
+`CompetitorAnalysisState.branch_review_decisions`.
 
-## Current Caveat
+Root branches are required schema coverage: every competitor x active schema
+dimension is collected before any depth expansion is considered. The expansion
+budget applies only to child branches created by `BranchReviewAgent`, with
+`max_root_branch_hard_limit` acting as a defensive cap for unusually large
+schemas and `max_expansion_branches` controlling follow-up breadth.
 
-The current `ResearchToolkit` wiring is intentionally provisional. Some mappings
-are useful as capability channels, but they are still too mechanical:
+This keeps provider calls, source normalization, costs, and evidence metadata in
+one place while preserving the main Rivalens chain:
 
-- `PlanningAgent -> generate_outline() -> outline_report` can help when the user
-  has not provided analysis dimensions. It also selects the task's active
-  schema before handing off to collection.
-- `CollectionAgent -> collect_evidence() -> research_report/deep` is the most
-  natural mapping and remains the primary evidence-gathering path. It now
-  generates schema-aware collection tasks from core fields and industry
-  extensions, then runs them concurrently.
-- `KnowledgeStructuringAgent -> extract_schema() -> custom_report` is plausible
-  for structured extraction, but its current deterministic assembly is still
-  basic. The source of truth is now `EvidenceItem -> CompetitorKnowledge`, not
-  a generic `ProductFact` fallback.
-- `AnalysisAgent -> focused_analysis() -> detailed_report` can support complex
-  analysis, but running it by default risks recreating a long-form report path
-  instead of reasoning from `CompetitorKnowledge`.
-- `QualityAgent -> discover_sources() -> resource_report` is the weakest current
-  mapping. Quality review should first audit existing claims and evidence; it
-  should only request more source discovery when it finds a coverage or citation
-  gap.
+```text
+EvidenceItem -> CompetitorKnowledge -> AnalysisClaim -> Report
+```
 
-The intended next step is to make research-tool calls conditional. Agents should
-first execute their core responsibilities against `CompetitorAnalysisState`, then
-call `ResearchToolkit` only when the state shows a genuine need: missing scope,
-insufficient evidence, ambiguous schema extraction, weak analysis confidence, or
-failed quality review.
+`PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
+`ReportWriterAgent` do not run their own research/report modes by default. The
+previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
+because they created a late, claim-deletion-oriented pseudo loop.
+`EvidenceQualityReviewer` now runs immediately after each standard search and
+produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
+findings, score, and required action. `BranchReviewAgent` consumes that result
+and remains responsible for branch-level search control: depth, budget, drift
+risk, child query generation, and the final expand/retry/fail/stop decision.
