@@ -1,6 +1,7 @@
 """Analysis agent that turns evidence into traceable claims."""
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchToolkit
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
 
@@ -21,12 +22,18 @@ class AnalysisAgent:
         schema_payload = knowledge_message.get("payload", {}) if knowledge_message else {}
         competitor_knowledge = state.get("competitor_knowledge") or schema_payload.get("competitor_knowledge", [])
         claims: list[AnalysisClaim] = []
+        file_rag = format_rag_context(
+            state.get("file_context", {}),
+            f"{task.get('query', '')} competitive implications",
+            limit=8,
+        )
 
         focused_research = await self.research_toolkit.focused_analysis(
             query=f"Analyze competitive implications for: {task.get('query', '')}",
             context={
                 "active_schema": state.get("active_knowledge_schema", {}),
                 "competitor_knowledge": competitor_knowledge,
+                "local_file_rag": file_rag,
             },
             verbose=verbose,
         )

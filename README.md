@@ -7,11 +7,25 @@ intelligence. The main package is `rivalens`, with these primary domains:
 
 - `rivalens/workflows`: DAG task orchestration for competitor analysis.
 - `rivalens/agents`: specialist agents for collection, analysis, writing, and quality review.
+- `rivalens/file_context`: reusable CSV, Excel, JSON, and screenshot context helpers.
 - `rivalens/schema`: structured competitor knowledge and evidence schema.
 - `rivalens/research`: research modes, tools, retrievers, and the underlying research engine.
 
 The generic research implementation lives inside `rivalens/research` as the web
 research engine beneath Rivalens agents.
+
+## Persistence
+
+Docker Compose provisions two persistence services:
+
+- `postgres`: PostgreSQL 16, default database `rivalens`.
+- `redis`: Redis 7 with append-only persistence enabled.
+
+The application receives these endpoints through `DATABASE_URL` and `REDIS_URL`.
+PostgreSQL data is stored in the `rivalens-postgres-data` Docker volume, and
+Redis data is stored in `rivalens-redis-data`. No application tables are created
+yet; `backend/server/persistence.py` only centralizes endpoint configuration for
+future schema and repository wiring.
 
 ## Architecture
 
@@ -96,6 +110,12 @@ snapshot for deduplicated sources, run metadata, and coverage by competitor and
 schema dimension. The final report is produced only after evidence has been
 structured into `CompetitorKnowledge`, analyzed, and reviewed over traceable
 evidence.
+
+CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
+instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
+and search hints during outline generation and schema selection. Collection,
+knowledge structuring, and analysis reuse the same file chunks as local RAG
+context while preserving the external evidence pipeline.
 
 ## Structured Agent Messages
 

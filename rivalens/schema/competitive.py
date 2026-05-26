@@ -350,11 +350,19 @@ class ResearchArtifact(TypedDict, total=False):
     costs: float
 
 
+class FileContext(TypedDict, total=False):
+    sources: list[dict[str, Any]]
+    chunks: list[dict[str, Any]]
+    summary: str
+    search_hints: list[str]
+
+
 class CompetitorAnalysisState(TypedDict, total=False):
     task: dict[str, Any]
     messages: list[AgentMessage]
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
+    file_context: FileContext
     evidence_items: list[EvidenceItem]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]

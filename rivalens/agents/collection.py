@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState
 
@@ -32,6 +33,12 @@ class CollectionAgent:
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
         collection_tasks = self._build_collection_tasks(query, competitors, active_schema)
+        file_context = state.get("file_context", {})
+        for collection_task in collection_tasks:
+            collection_task["query"] = self._with_file_rag(
+                collection_task["query"],
+                file_context,
+            )
 
         results = await asyncio.gather(
             *[
@@ -218,6 +225,16 @@ class CollectionAgent:
                 "Collect public, source-backed evidence only. Prefer official pages, pricing pages, docs, reviews, news, and marketplace listings when relevant.",
             ]
         )
+
+    def _with_file_rag(
+        self,
+        query: str,
+        file_context: dict[str, Any],
+    ) -> str:
+        rag_context = format_rag_context(file_context, query, limit=4)
+        if not rag_context:
+            return query
+        return "\n".join([query, "", rag_context])
 
     def _task_id(self, competitor: str, dimension_id: str) -> str:
         competitor_slug = self._slug(competitor or "query")

@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchToolkit
 from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge
 
@@ -23,12 +24,19 @@ class KnowledgeStructuringAgent:
         )
         active_schema = state.get("active_knowledge_schema", {})
         evidence_items = state.get("evidence_items", [])
+        file_context = state.get("file_context", {})
+        file_rag = format_rag_context(
+            file_context,
+            f"{task.get('query', '')} competitor knowledge extraction",
+            limit=8,
+        )
 
         schema_research = await self.research_toolkit.extract_schema(
             query=f"Extract competitor knowledge according to active schema for: {task.get('query', '')}",
             context={
                 "active_schema": active_schema,
                 "evidence_items": evidence_items,
+                "local_file_rag": file_rag,
             },
             verbose=verbose,
         )
