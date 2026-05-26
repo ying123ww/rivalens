@@ -1017,8 +1017,8 @@
       <div class="section-head">
         <h2>SchemaSelectionAgent 与 KnowledgeStructuringAgent 的联系</h2>
         <p class="note">
-          现在的连接点是 ActiveKnowledgeSchema、ResearchBranch 和 EvidenceItem。CollectionAgent 会按 schema 生成 root branches，
-          BranchReviewAgent 审查是否展开子分支，ResearchEngineEvidenceCollector 会把 ResearchEngine sources 标准化为 EvidenceItem，KnowledgeStructuringAgent 再消费 schema 和 evidence 来产出 CompetitorKnowledge。
+          现在的连接点是 ActiveKnowledgeSchema、ResearchBranch 和 EvidenceItem。CollectionAgent 会按 schema 生成必跑 root branches，
+          BranchReviewAgent 只审查 child candidates 是否应展开，并过滤 high drift 分支；ResearchEngineEvidenceCollector 会把 ResearchEngine sources 标准化为 EvidenceItem，KnowledgeStructuringAgent 再消费 schema 和 evidence 来产出 CompetitorKnowledge。
         </p>
       </div>
       <div class="logic-figure" aria-label="SchemaSelectionAgent 与 KnowledgeStructuringAgent 联系图">
@@ -1372,7 +1372,7 @@
         </div>
         <div class="card">
           <h3>CollectionAgent</h3>
-          <p>维护 research branch frontier，调用 BranchReviewAgent 和 ResearchEngineEvidenceCollector，只产出 <code>EvidenceItem[]</code>，不负责分析。</p>
+          <p>维护 research branch frontier，先完成 competitor x schema dimension 的 root coverage，再用 BranchReviewAgent 审查 child candidates 与展开预算，调用 ResearchEngineEvidenceCollector 产出 <code>EvidenceItem[]</code>，不负责分析。</p>
         </div>
         <div class="card">
           <h3>KnowledgeStructuringAgent</h3>

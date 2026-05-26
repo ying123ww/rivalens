@@ -446,9 +446,9 @@
           <li><span class="tag done">已完成</span><span>新增 <code>schema_registry</code> 和行业模板。</span></li>
           <li><span class="tag done">已完成</span><span>新增 <code>ActiveKnowledgeSchema</code> 与 <code>CompetitorKnowledge</code>。</span></li>
           <li><span class="tag done">已完成</span><span>DAG 接入 <code>schema_selection</code> 和 <code>knowledge_structuring</code>。</span></li>
-          <li><span class="tag done">已完成</span><span><code>CollectionAgent</code> 会按 schema 维度生成并行采集任务。</span></li>
+          <li><span class="tag done">已完成</span><span><code>CollectionAgent</code> 会按 schema 维度生成必跑 root branch。</span></li>
           <li><span class="tag done">已完成</span><span>删除 <code>ResearchToolkit</code>，Search 收束到 <code>CollectionAgent</code>。</span></li>
-          <li><span class="tag done">已完成</span><span>新增 <code>BranchReviewAgent</code> 控制采集分支是否展开。</span></li>
+          <li><span class="tag done">已完成</span><span>新增 <code>BranchReviewAgent</code> 审查 child candidate 的 drift 与展开预算。</span></li>
           <li><span class="tag next">下一步</span><span>增强结构化抽取、补 ReportDocument、做可交互报告。</span></li>
           <li><span class="tag risk">注意</span><span>当前行业判断是 registry 规则信号，尚未接官方 PDF。</span></li>
         </ul>
@@ -637,7 +637,7 @@
               <td>
                 <details open>
                   <summary>查看展开</summary>
-                  <p>现在会为每个 competitor x schema dimension 生成 root branch，并用 asyncio.gather 并行调用 ResearchEngineEvidenceCollector。EvidenceItem 会带 branch_id、collection_task_id、dimension_id 和 dimension_name。</p>
+                  <p>现在会为每个 competitor x schema dimension 生成必跑 root branch，并用 asyncio.gather 并行调用 ResearchEngineEvidenceCollector。root coverage 不消耗展开预算；EvidenceItem 会带 branch_id、collection_task_id、dimension_id 和 dimension_name。</p>
                 </details>
               </td>
             </tr>
@@ -648,7 +648,7 @@
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>新增 ResearchEngineEvidenceCollector，负责把 ResearchEngine sources 标准化为 EvidenceItem。CollectionAgent 维护 research_branches 和 branch_review_decisions；Knowledge、Analysis、Quality 不再直接调用 research/report mode。</p>
+                  <p>新增 ResearchEngineEvidenceCollector，负责把 ResearchEngine sources 标准化为 EvidenceItem。CollectionAgent 维护 research_branches 和 branch_review_decisions；Knowledge、Analysis、Quality 不再直接调用 research/report mode。BranchReviewAgent 只为证据缺口生成 child candidates，并过滤 high drift 分支，max_expansion_branches 只限制这些子分支。</p>
                 </details>
               </td>
             </tr>

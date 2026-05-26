@@ -138,8 +138,13 @@ The collection path uses standard evidence collection for each branch. Deep
 research recursion is not used as a black box inside `ResearchEngine`; instead,
 Rivalens keeps branch lineage, review decisions, depth, and budget in
 `CompetitorAnalysisState.research_branches` and
-`CompetitorAnalysisState.branch_review_decisions`. Root branches are treated as
-required schema coverage; expansion budget applies only to child branches.
+`CompetitorAnalysisState.branch_review_decisions`.
+
+Root branches are required schema coverage: every competitor x active schema
+dimension is collected before any depth expansion is considered. The expansion
+budget applies only to child branches created by `BranchReviewAgent`, with
+`max_root_branch_hard_limit` acting as a defensive cap for unusually large
+schemas and `max_expansion_branches` controlling follow-up breadth.
 
 This keeps provider calls, source normalization, costs, and evidence metadata in
 one place while preserving the main Rivalens chain:
@@ -150,8 +155,9 @@ EvidenceItem -> CompetitorKnowledge -> AnalysisClaim -> Report
 
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
 `QualityAgent` no longer run their own research/report modes by default.
-`BranchReviewAgent` handles collection-time branch expansion using schema
-alignment, source coverage, evidence gaps, drift risk, and branch budget.
+`BranchReviewAgent` handles collection-time branch expansion by reviewing child
+query candidates against the current competitor, schema dimension, evidence
+gaps, drift risk, and expansion budget.
 Quality review should still audit final claims and evidence; when it finds a
 coverage or citation gap, the next design step is to route a structured
 collection request back to `CollectionAgent`.
