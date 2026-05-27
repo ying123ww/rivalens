@@ -6,7 +6,6 @@ export const preprocessOrderedData = (data: Data[]) => {
   let currentAccordionGroup: any = null;
   let currentSourceGroup: any = null;
   let currentReportGroup: any = null;
-  let finalReportGroup: any = null;
   let sourceBlockEncountered = false;
   let lastSubqueriesIndex = -1;
   const seenUrls = new Set<string>();
@@ -34,12 +33,6 @@ export const preprocessOrderedData = (data: Data[]) => {
       }
     } else if (content === 'selected_images') {
       groupedData.push({ type: 'imagesBlock', metadata });
-    } else if (type === 'logs' && content === 'research_report') {
-      if (!finalReportGroup) {
-        finalReportGroup = { type: 'reportBlock', content: '' };
-        groupedData.push(finalReportGroup);
-      }
-      finalReportGroup.content += output.report;
     } else if (type === 'langgraphButton') {
       groupedData.push({ type: 'langgraphButton', link });
     } else if (type === 'chat') {

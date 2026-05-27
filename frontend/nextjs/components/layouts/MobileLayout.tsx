@@ -228,16 +228,9 @@ export default function MobileLayout({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Report Type</label>
-                <select 
-                  className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
-                  value={chatBoxSettings.report_type}
-                  onChange={(e) => setChatBoxSettings({...chatBoxSettings, report_type: e.target.value})}
-                >
-                  <option value="research_report">Summary - Short and fast (~2 min)</option>
-                  <option value="deep">Deep Research Report</option>
-                  <option value="rivalens">Rivalens Report</option>
-                  <option value="detailed_report">Detailed - In depth and longer (~5 min)</option>
-                </select>
+                <div className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300">
+                  Rivalens Report
+                </div>
               </div>
               
               <div>
