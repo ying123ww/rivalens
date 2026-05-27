@@ -322,6 +322,169 @@
       font-size: 14px;
     }
 
+    .research-tree-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .branch-tree,
+    .tree-examples {
+      min-width: 0;
+      padding: 20px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .branch-tree {
+      overflow-x: auto;
+    }
+
+    .tree-list,
+    .tree-list ul {
+      position: relative;
+      margin: 0;
+      padding: 0 0 0 28px;
+      list-style: none;
+    }
+
+    .tree-list {
+      min-width: 760px;
+      padding-left: 0;
+    }
+
+    .tree-list ul::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 10px;
+      border-left: 2px solid var(--line);
+    }
+
+    .tree-list li {
+      position: relative;
+      margin: 12px 0 0;
+    }
+
+    .tree-list > li:first-child {
+      margin-top: 0;
+    }
+
+    .tree-list ul li::before {
+      content: "";
+      position: absolute;
+      top: 30px;
+      left: -18px;
+      width: 18px;
+      border-top: 2px solid var(--line);
+    }
+
+    .branch-node {
+      min-width: 0;
+      padding: 13px 14px;
+      background: #fbfcfd;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .branch-node header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 7px;
+    }
+
+    .branch-node strong {
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .branch-node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .branch-node code {
+      display: block;
+      margin-top: 8px;
+      padding: 8px;
+      color: #24445f;
+      background: #eef3f5;
+      border: 1px solid #d9e2e8;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .node-root {
+      background: var(--soft-blue);
+      border-color: #91b4d6;
+    }
+
+    .node-search {
+      background: #fff;
+      border-color: #cbd5df;
+    }
+
+    .node-review {
+      background: var(--soft-amber);
+      border-color: #d7b27e;
+    }
+
+    .node-branch {
+      background: var(--soft-green);
+      border-color: #8bbcaf;
+    }
+
+    .node-stop {
+      background: #eef1f3;
+      border-color: #b8c4ce;
+    }
+
+    .step-dot {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      color: #fff;
+      background: var(--green);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .tree-examples h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .example-item {
+      padding: 12px 0 12px 12px;
+      border-left: 3px solid var(--line);
+    }
+
+    .example-item + .example-item {
+      border-top: 1px solid var(--line);
+    }
+
+    .example-item strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .example-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     code {
       color: var(--blue);
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -390,7 +553,8 @@
 
     @media (max-width: 980px) {
       .hero,
-      .grid {
+      .grid,
+      .research-tree-layout {
         grid-template-columns: 1fr;
       }
 
@@ -424,6 +588,7 @@
     <nav class="nav" aria-label="页面导航">
       <a href="#architecture">架构</a>
       <a href="#dag">DAG</a>
+      <a href="#research-tree">Research Tree</a>
       <a href="#schema">Schema</a>
       <a href="#roadmap">TODO</a>
     </nav>
@@ -581,6 +746,132 @@
           <rect x="850" y="306" width="172" height="58" class="svg-output"></rect>
           <text x="872" y="340" class="svg-small">ReportWriter -> Publisher</text>
         </svg>
+      </div>
+    </section>
+
+    <section id="research-tree">
+      <div class="section-head">
+        <h2>Research Branch Tree</h2>
+        <p class="section-note">
+          CollectionAgent 内部不是一次性 search 完就结束，而是先为每个 competitor x schema dimension 建 root branch，
+          再由 EvidenceQualityReviewer 判断证据质量，BranchReviewAgent 决定是否继续拆 child branch。
+        </p>
+      </div>
+      <div class="research-tree-layout">
+        <div class="branch-tree" aria-label="research branch tree example">
+          <ul class="tree-list">
+            <li>
+              <div class="branch-node node-root">
+                <header>
+                  <span class="tag next">User Task</span>
+                  <strong>Compare Notion and ClickUp for enterprise workspace adoption</strong>
+                </header>
+                <p>PlanningAgent 先冻结 ActiveKnowledgeSchema，CollectionAgent 再把任务拆成 schema-aware root branches。</p>
+              </div>
+              <ul>
+                <li>
+                  <div class="branch-node node-search">
+                    <header>
+                      <span class="step-dot">1</span>
+                      <strong>Root branch: Notion x Pricing Model</strong>
+                    </header>
+                    <p>第一个子主题回答“Notion 的公开定价、套餐边界、enterprise 购买入口是什么”。</p>
+                    <code>Notion pricing plans enterprise add-ons official</code>
+                  </div>
+                  <ul>
+                    <li>
+                      <div class="branch-node node-review">
+                        <header>
+                          <span class="tag risk">EvidenceQualityReviewer</span>
+                          <strong>standard search 后做证据质检</strong>
+                        </header>
+                        <p>检查是否有 URL、是否匹配 Notion、是否属于 pricing_model、是否有 pricing_page 和 official source。</p>
+                      </div>
+                    </li>
+                    <li>
+                      <div class="branch-node node-branch">
+                        <header>
+                          <span class="tag done">BranchReviewAgent</span>
+                          <strong>required_action = expand</strong>
+                        </header>
+                        <p>发现缺少 enterprise packaging 证据，于是批准一个仍然贴着 pricing_model 的 child branch。</p>
+                      </div>
+                      <ul>
+                        <li>
+                          <div class="branch-node node-search">
+                            <header>
+                              <span class="step-dot">2</span>
+                              <strong>Child branch: enterprise packaging</strong>
+                            </header>
+                            <p>根据 root branch 的证据缺口继续深入挖掘，拆成更窄的 sub-query。</p>
+                            <code>Notion enterprise pricing SSO audit log admin controls official docs</code>
+                          </div>
+                          <ul>
+                            <li>
+                              <div class="branch-node node-stop">
+                                <header>
+                                  <span class="tag done">accepted</span>
+                                  <strong>accepted evidence 进入 KnowledgeStructuringAgent</strong>
+                                </header>
+                                <p>EvidenceItem 保留 branch_id、collection_task_id、dimension_id，后续 claim 可以回查到原始 URL。</p>
+                              </div>
+                            </li>
+                          </ul>
+                        </li>
+                      </ul>
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  <div class="branch-node node-search">
+                    <header>
+                      <span class="step-dot">1</span>
+                      <strong>Root branch: ClickUp x Security Compliance</strong>
+                    </header>
+                    <p>另一个并行 root branch 回答“ClickUp 是否有安全、合规、管理能力的公开证据”。</p>
+                    <code>ClickUp security compliance trust center docs admin governance</code>
+                  </div>
+                  <ul>
+                    <li>
+                      <div class="branch-node node-review">
+                        <header>
+                          <span class="tag risk">EvidenceQualityReviewer</span>
+                          <strong>required_action = retry</strong>
+                        </header>
+                        <p>如果 search 返回了摘要但缺 URL，证据会被 rejected，BranchReviewAgent 会生成 retry 型 child query。</p>
+                      </div>
+                    </li>
+                    <li>
+                      <div class="branch-node node-branch">
+                        <header>
+                          <span class="step-dot">3</span>
+                          <strong>Retry branch: source-backed security docs</strong>
+                        </header>
+                        <p>branch extension 不是泛泛扩写主题，而是补齐具体缺口，同时过滤 founder、funding、culture 这类 high drift 分支。</p>
+                        <code>ClickUp trust center SOC 2 SSO security documentation official source URL</code>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+        <aside class="tree-examples" aria-label="research tree examples">
+          <h3>读图方式</h3>
+          <div class="example-item">
+            <strong>1. 第一个子主题要干嘛</strong>
+            <p>root branch 由 ActiveKnowledgeSchema 生成，目标是补齐某个 competitor x dimension 的基础覆盖。</p>
+          </div>
+          <div class="example-item">
+            <strong>2. 为什么继续拆 sub-query</strong>
+            <p>EvidenceQualityReviewer 发现 no_evidence、missing_pricing_page、missing_docs_or_security_source 等缺口后，BranchReviewAgent 才允许 expand 或 retry。</p>
+          </div>
+          <div class="example-item">
+            <strong>3. 两个 review 的分工</strong>
+            <p>EvidenceQualityReviewer 判断证据能不能用；BranchReviewAgent 判断分支要不要扩、怎么扩、是否超过深度和预算。</p>
+          </div>
+        </aside>
       </div>
     </section>
 

@@ -80,9 +80,9 @@ multi-agent DAG is:
 ```mermaid
 flowchart LR
     A["scope_planner\nPlanningAgent"] --> B["source_collection\nCollectionAgent"]
-    B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
-    C --> D["dimension_analysis\nAnalysisAgent"]
-    D --> E["report_writer\nReportWriterAgent"]
+    B --> D["dimension_analysis\nAnalysisAgent"]
+    D --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
+    C --> E["report_writer\nReportWriterAgent"]
     E --> F["publisher\nPublisherAgent"]
 ```
 
@@ -94,10 +94,11 @@ dimension collection tasks and runs them concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and schema
-dimension metadata, reviews each standard-search result, and passes only
-accepted evidence into knowledge structuring. The final report is produced only
-after accepted evidence has been structured into `CompetitorKnowledge` and
-analyzed into traceable claims.
+dimension metadata, reviews each standard-search result, and hands accepted
+branch evidence directly to `AnalysisAgent` for branch/dimension-level claim
+generation. `KnowledgeStructuringAgent` then structures the same accepted
+evidence into `CompetitorKnowledge` before report writing, so the report keeps
+both quality-gated claims and structured competitor knowledge in state.
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
@@ -163,7 +164,8 @@ This keeps provider calls, source normalization, costs, and evidence metadata in
 one place while preserving the main Rivalens chain:
 
 ```text
-EvidenceItem -> CompetitorKnowledge -> AnalysisClaim -> Report
+EvidenceItem -> EvidenceReviewResult -> AnalysisClaim
+EvidenceItem -> CompetitorKnowledge -> Report
 ```
 
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
@@ -175,3 +177,6 @@ produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
 findings, score, and required action. `BranchReviewAgent` consumes that result
 and remains responsible for branch-level search control: depth, budget, drift
 risk, child query generation, and the final expand/retry/fail/stop decision.
+`AnalysisAgent` consumes accepted review records immediately after collection
+and records `branch_id`, `evidence_review_id`, and `evidence_ids` on each
+generated `AnalysisClaim`.

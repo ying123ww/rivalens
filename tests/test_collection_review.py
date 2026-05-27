@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 
+from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.branch_review import BranchReviewAgent
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
@@ -137,6 +138,53 @@ class CollectionReviewTest(unittest.TestCase):
         serialized = str(knowledge)
         self.assertIn("Acme pricing", serialized)
         self.assertNotIn("Rejected scrape", serialized)
+
+    def test_analysis_uses_quality_accepted_branch_evidence(self):
+        state = {
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Acme pricing",
+                    "summary": "Acme publishes a starter pricing plan.",
+                    "confidence": 0.8,
+                },
+                {
+                    "id": "ev_2",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Rejected scrape",
+                    "summary": "This should not become a claim.",
+                    "confidence": 0.9,
+                },
+            ],
+            "research_branches": [pricing_branch()],
+            "evidence_reviews": [
+                {
+                    "id": "ev_review_collect_acme_pricing_model",
+                    "branch_id": "collect_acme_pricing_model",
+                    "accepted": True,
+                    "score": 0.9,
+                    "accepted_evidence_ids": ["ev_1"],
+                    "rejected_evidence_ids": ["ev_2"],
+                    "required_action": "accept",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+        claim = result["analysis_claims"][0]
+
+        self.assertEqual(claim["branch_id"], "collect_acme_pricing_model")
+        self.assertEqual(claim["evidence_review_id"], "ev_review_collect_acme_pricing_model")
+        self.assertEqual(claim["evidence_ids"], ["ev_1"])
+        self.assertIn("quality-reviewed Pricing Model evidence", claim["claim"])
+        self.assertIn("Acme publishes a starter pricing plan", claim["claim"])
+        self.assertNotIn("Rejected scrape", claim["claim"])
 
 
 if __name__ == "__main__":

@@ -175,29 +175,37 @@ class CollectionAgent:
 
         accepted_evidence_ids = self._accepted_evidence_ids(evidence_reviews)
         rejected_evidence_ids = self._rejected_evidence_ids(evidence_reviews)
-        evidence_ids = [item.get("id", "") for item in evidence_items]
         collection_coverage = self._summarize_collection_coverage(evidence_items)
+        evidence_payload = {
+            "evidence_count": len(evidence_items),
+            "accepted_evidence_count": len(accepted_evidence_ids),
+            "rejected_evidence_count": len(rejected_evidence_ids),
+            "evidence_review_count": len(evidence_reviews),
+            "research_runs": len(contexts),
+            "collection_task_count": processed_branch_count,
+            "failed_task_count": len(failed_tasks),
+            "dimensions": sorted(
+                {branch["dimension_id"] for branch in research_branches}
+            ),
+        }
         message = create_agent_message(
             sender="collection",
             receiver="knowledge_structuring",
             message_type="evidence",
-            payload={
-                "evidence_count": len(evidence_items),
-                "accepted_evidence_count": len(accepted_evidence_ids),
-                "rejected_evidence_count": len(rejected_evidence_ids),
-                "evidence_review_count": len(evidence_reviews),
-                "research_runs": len(contexts),
-                "collection_task_count": processed_branch_count,
-                "failed_task_count": len(failed_tasks),
-                "dimensions": sorted(
-                    {branch["dimension_id"] for branch in research_branches}
-                ),
-            },
+            payload=evidence_payload,
             artifact_ids=[
                 artifact.get("id", "")
                 for artifact in research_artifacts
                 if artifact.get("agent") == "collection"
             ],
+            evidence_ids=accepted_evidence_ids,
+        )
+        analysis_message = create_agent_message(
+            sender="collection",
+            receiver="analysis",
+            message_type="evidence",
+            payload=evidence_payload,
+            artifact_ids=message["artifact_ids"],
             evidence_ids=accepted_evidence_ids,
         )
 
@@ -207,7 +215,7 @@ class CollectionAgent:
             "research_branches": research_branches,
             "branch_review_decisions": branch_review_decisions,
             "research_artifacts": research_artifacts,
-            "messages": state.get("messages", []) + [message],
+            "messages": state.get("messages", []) + [message, analysis_message],
             "agent_events": state.get("agent_events", [])
             + [
                 {

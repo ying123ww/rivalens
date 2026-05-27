@@ -41,9 +41,9 @@ def build_competitive_analysis_graph(
 
     workflow.set_entry_point("scope_planner")
     workflow.add_edge("scope_planner", "source_collection")
-    workflow.add_edge("source_collection", "knowledge_structuring")
-    workflow.add_edge("knowledge_structuring", "dimension_analysis")
-    workflow.add_edge("dimension_analysis", "report_writer")
+    workflow.add_edge("source_collection", "dimension_analysis")
+    workflow.add_edge("dimension_analysis", "knowledge_structuring")
+    workflow.add_edge("knowledge_structuring", "report_writer")
     workflow.add_edge("report_writer", "publisher")
     workflow.add_edge("publisher", END)
 

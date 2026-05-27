@@ -219,6 +219,8 @@ class CompetitorKnowledge(TypedDict, total=False):
 class AnalysisClaim(TypedDict, total=False):
     id: str
     dimension: str
+    branch_id: str
+    evidence_review_id: str
     claim: str
     competitors: list[str]
     evidence_ids: list[str]
@@ -342,6 +344,8 @@ class CompetitorKnowledgePayload(StrictPayloadModel):
 class AnalysisClaimPayload(StrictPayloadModel):
     id: str
     dimension: str
+    branch_id: str | None = None
+    evidence_review_id: str | None = None
     claim: str
     competitors: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
