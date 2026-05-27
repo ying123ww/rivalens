@@ -166,6 +166,30 @@ one place while preserving the main Rivalens chain:
 EvidenceItem -> CompetitorKnowledge -> AnalysisClaim -> Report
 ```
 
+## Search Retrievers
+
+Rivalens can run multiple search retrievers for the same collection task by
+setting a comma-separated `RETRIEVER` value. For the MVP Chinese-plus-English
+search setup, use UniFuncs Deep Search for Chinese ecosystem discovery and
+Tavily for broader English web discovery:
+
+```env
+RETRIEVER=unifuncs_deepsearch,tavily
+
+UNIFUNCS_API_KEY=sk-your-unifuncs-key
+UNIFUNCS_DEEPSEARCH_BASE_URL=https://api.unifuncs.com/deepsearch/v1
+UNIFUNCS_DEEPSEARCH_MODEL=s3
+UNIFUNCS_DEEPSEARCH_LANGUAGE=zh
+UNIFUNCS_DEEPSEARCH_REFERENCE_STYLE=link
+UNIFUNCS_DEEPSEARCH_MAX_DEPTH=8
+
+TAVILY_API_KEY=tvly-your-tavily-key
+```
+
+The UniFuncs retriever is used for source discovery, not final report writing.
+It returns source URLs and short snippets, then the existing scraper fetches full
+page content before evidence review and downstream analysis.
+
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
 `ReportWriterAgent` do not run their own research/report modes by default. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
