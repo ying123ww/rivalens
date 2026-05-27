@@ -39,10 +39,10 @@ export const ResearchEngine = ({
   const [loading, setLoading] = useState(false);
   const [chatBoxSettings, setChatBoxSettings] = useState<ChatBoxSettings>({ 
     report_source: 'web', 
-    report_type: 'research_report', 
+    report_type: 'rivalens', 
     tone: 'Objective',
     domains: [],
-    defaultReportType: 'research_report',
+    defaultReportType: 'rivalens',
     layoutType: 'default',
     mcp_enabled: false,
     mcp_configs: [],
@@ -172,7 +172,13 @@ export const ResearchEngine = ({
       apiVariables.API_KEY = apiKey;
     }
     
-    initializeWebSocket(newQuestion, chatBoxSettings);
+    const rivalensSettings = {
+      ...chatBoxSettings,
+      report_type: 'rivalens',
+      defaultReportType: 'rivalens',
+    };
+    setChatBoxSettings(rivalensSettings);
+    initializeWebSocket(newQuestion, rivalensSettings);
 
   };
 

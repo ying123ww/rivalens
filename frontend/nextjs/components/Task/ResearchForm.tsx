@@ -28,7 +28,7 @@ export default function ResearchForm({
   const [newDomain, setNewDomain] = useState('');
 
   // Destructure necessary fields from chatBoxSettings
-  let { report_type, report_source, tone, layoutType } = chatBoxSettings;
+  let { report_source, tone, layoutType } = chatBoxSettings;
 
   const [domains, setDomains] = useState<Domain[]>(() => {
     if (typeof window !== 'undefined') {
@@ -95,10 +95,12 @@ export default function ResearchForm({
     if (onFormSubmit) {
       const updatedSettings = {
         ...chatBoxSettings,
+        report_type: "rivalens",
+        defaultReportType: "rivalens",
         domains: domains.map(domain => domain.value)
       };
       setChatBoxSettings(updatedSettings);
-      onFormSubmit(task, report_type, report_source, domains);
+      onFormSubmit(task, "rivalens", report_source, domains);
     }
   };
 
@@ -109,25 +111,8 @@ export default function ResearchForm({
       onSubmit={handleSubmit}
     >
       <div className="form-group">
-        <label htmlFor="report_type" className="agent_question">
-          Report Type{" "}
-        </label>
-        <select
-          name="report_type"
-          value={report_type}
-          onChange={onFormChange}
-          className="form-control-static"
-          required
-        >
-          <option value="research_report">
-            Summary - Short and fast (~2 min)
-          </option>
-          <option value="deep">Deep Research Report</option>
-          <option value="rivalens">Rivalens Report</option>
-          <option value="detailed_report">
-            Detailed - In depth and longer (~5 min)
-          </option>
-        </select>
+        <label className="agent_question">Report Type</label>
+        <div className="form-control-static">Rivalens Report</div>
       </div>
 
       <div className="form-group">
