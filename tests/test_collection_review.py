@@ -5,6 +5,7 @@ from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.branch_review import BranchReviewAgent
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
+from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
 
 
 def pricing_branch():
@@ -19,6 +20,39 @@ def pricing_branch():
 
 
 class CollectionReviewTest(unittest.TestCase):
+    def test_evidence_item_uses_query_relevant_chunk(self):
+        irrelevant_intro = "General company overview. " * 80
+        pricing_signal = (
+            "Acme pricing includes a starter plan, enterprise billing, "
+            "and public package details for buyer comparison. "
+        )
+        trailing = "Unrelated footer navigation. " * 20
+
+        evidence = ResearchEngineEvidenceCollector()._to_evidence_items(
+            collection_task={
+                "id": "collect_acme_pricing_model",
+                "branch_id": "collect_acme_pricing_model",
+                "competitor": "Acme",
+                "dimension_id": "pricing_model",
+                "dimension_name": "Pricing Model",
+                "query": "Compare Acme pricing model starter plan enterprise billing",
+            },
+            sources=[
+                {
+                    "title": "Acme overview",
+                    "url": "https://acme.example/overview",
+                    "raw_content": irrelevant_intro + pricing_signal + trailing,
+                }
+            ],
+        )[0]
+
+        self.assertIn("starter plan", evidence["excerpt"])
+        self.assertIn("enterprise billing", evidence["summary"])
+        self.assertNotEqual(
+            evidence["excerpt"],
+            (irrelevant_intro + pricing_signal + trailing)[:1000],
+        )
+
     def test_evidence_review_accepts_url_backed_branch_evidence(self):
         review = EvidenceQualityReviewer(min_sources_per_branch=2).review(
             pricing_branch(),
@@ -99,6 +133,44 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(decision["decision"], "retry")
         self.assertEqual(decision["evidence_review_id"], evidence_review["id"])
         self.assertIn("missing_source_url", decision["evidence_gaps"])
+        self.assertTrue(decision["next_queries"])
+
+    def test_competitor_mismatch_retries_instead_of_failing_branch(self):
+        branch = pricing_branch()
+        evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            branch,
+            [
+                {
+                    "id": "ev_1",
+                    "collection_task_id": branch["id"],
+                    "competitor": "OtherCo",
+                    "dimension_id": "pricing_model",
+                    "url": "https://other.example/pricing",
+                    "source_type": "pricing_page",
+                }
+            ],
+        )
+
+        decision = BranchReviewAgent(min_sources_per_branch=1).review(
+            branch=branch,
+            evidence_items=[
+                {
+                    "id": "ev_1",
+                    "collection_task_id": branch["id"],
+                    "competitor": "OtherCo",
+                    "dimension_id": "pricing_model",
+                    "url": "https://other.example/pricing",
+                    "source_type": "pricing_page",
+                }
+            ],
+            active_schema={},
+            root_query="Compare Acme pricing",
+            evidence_review=evidence_review,
+        )
+
+        self.assertEqual(evidence_review["required_action"], "retry")
+        self.assertEqual(decision["decision"], "retry")
+        self.assertIn("competitor_mismatch", decision["evidence_gaps"])
         self.assertTrue(decision["next_queries"])
 
     def test_knowledge_structuring_uses_only_accepted_evidence(self):

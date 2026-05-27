@@ -68,7 +68,7 @@ class EvidenceCollectionResult(TypedDict, total=False):
     costs: float
 
 
-EvidenceReviewAction = Literal["accept", "retry", "expand", "fail"]
+EvidenceReviewAction = Literal["accept", "retry", "expand"]
 EvidenceReviewFindingCode = Literal[
     "no_evidence",
     "missing_source_url",
@@ -104,7 +104,7 @@ class EvidenceReviewResult(TypedDict, total=False):
     required_action: EvidenceReviewAction
 
 
-BranchDecisionType = Literal["expand", "stop", "retry", "fail", "merge", "redirect"]
+BranchDecisionType = Literal["expand", "stop", "retry", "merge", "redirect"]
 BranchDriftRisk = Literal["low", "medium", "high"]
 
 
@@ -120,7 +120,7 @@ class ResearchBranch(TypedDict, total=False):
     topic: str
     query: str
     evidence_ids: list[str]
-    status: Literal["active", "expanded", "stopped", "failed"]
+    status: Literal["active", "expanded", "stopped"]
     expansion_reason: str
     review_decision: BranchDecisionType | None
 

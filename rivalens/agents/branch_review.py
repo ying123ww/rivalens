@@ -44,21 +44,6 @@ class BranchReviewAgent:
                 evidence_review=evidence_review,
             )
 
-        if evidence_review and evidence_review.get("required_action") == "fail":
-            return {
-                "branch_id": branch["id"],
-                "evidence_review_id": review_id,
-                "decision": "fail",
-                "score": evidence_review.get("score", 0.0),
-                "reasons": [
-                    "Evidence quality review found a branch-level blocking mismatch.",
-                ],
-                "evidence_gaps": evidence_gaps,
-                "next_topics": [],
-                "next_queries": [],
-                "drift_risk": "high",
-            }
-
         if evidence_review and evidence_review.get("required_action") == "accept":
             return self._stop(
                 branch,
@@ -211,6 +196,7 @@ class BranchReviewAgent:
             "missing_customer_or_review_source": (
                 f"{competitor} customer reviews personas use cases"
             ),
+            "competitor_mismatch": f"{competitor} {dimension_name} official evidence",
             "dimension_mismatch": f"{competitor} {dimension_name} schema-specific evidence",
         }
         candidates = []

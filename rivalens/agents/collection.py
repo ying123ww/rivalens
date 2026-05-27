@@ -97,7 +97,7 @@ class CollectionAgent:
                 strict=True,
             ):
                 if isinstance(result, Exception):
-                    branch["status"] = "failed"
+                    branch["status"] = "stopped"
                     failed_tasks.append(
                         {
                             "collection_task_id": collection_task["id"],
@@ -162,8 +162,6 @@ class CollectionAgent:
                     expansion_branch_count += len(children)
                     next_frontier.extend(children)
                     research_branches.extend(children)
-                elif decision["decision"] == "fail":
-                    branch["status"] = "failed"
                 else:
                     branch["status"] = "stopped"
 

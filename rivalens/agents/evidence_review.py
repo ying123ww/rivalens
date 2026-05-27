@@ -198,7 +198,7 @@ class EvidenceQualityReviewer:
             if finding.get("severity") == "high"
         }
         if "competitor_mismatch" in high_codes and accepted_count == 0:
-            return "fail"
+            return "retry"
         if "no_evidence" in high_codes:
             return "expand"
         if "missing_source_url" in high_codes and accepted_count == 0:

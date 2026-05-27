@@ -51,7 +51,7 @@ flowchart TB
 
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
     Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
-    Collector --> BranchReview["BranchReviewAgent\nexpand/retry/fail/stop"]
+    Collector --> BranchReview["BranchReviewAgent\nexpand/retry/stop"]
     EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
@@ -143,8 +143,8 @@ CollectionAgent
   -> ResearchEngineEvidenceCollector (standard evidence)
   -> ResearchEngine
   -> EvidenceItem[]
-  -> EvidenceQualityReviewer (accept/retry/expand/fail recommendation)
-  -> BranchReviewAgent (expand/retry/fail/stop branch decision)
+  -> EvidenceQualityReviewer (accept/retry/expand recommendation)
+  -> BranchReviewAgent (expand/retry/stop branch decision)
 ```
 
 The collection path uses standard evidence collection for each branch. Deep
@@ -176,7 +176,7 @@ because they created a late, claim-deletion-oriented pseudo loop.
 produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
 findings, score, and required action. `BranchReviewAgent` consumes that result
 and remains responsible for branch-level search control: depth, budget, drift
-risk, child query generation, and the final expand/retry/fail/stop decision.
+risk, child query generation, and the final expand/retry/stop decision.
 `AnalysisAgent` consumes accepted review records immediately after collection
 and records `branch_id`, `evidence_review_id`, and `evidence_ids` on each
 generated `AnalysisClaim`.

@@ -82,7 +82,7 @@ AI agent 在修改本仓库时，应按以下顺序建立上下文：
 
 - 不要绕过 `rivalens/schema/competitive.py` 中的结构化状态和消息协议。
 - 不要生成没有 `evidence_ids` 的关键分析结论。
-- 不要恢复末端“删 claim 即通过”的伪质检闭环。review 应优先在 standard search 后作为证据质量门运行，并由 BranchReviewAgent 只负责分支级 expand/retry/fail/stop 决策。
+- 不要恢复末端“删 claim 即通过”的伪质检闭环。review 应优先在 standard search 后作为证据质量门运行，并由 BranchReviewAgent 只负责分支级 expand/retry/stop 决策。
 - 不要把大段原始网页内容直接传给下游 Agent。应保留证据摘要、URL、source metadata 和必要 excerpt。
 - 不要为了演示效果隐藏失败。失败、重试、降级应进入可观测日志或 agent events。
 

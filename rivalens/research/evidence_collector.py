@@ -1,5 +1,6 @@
 """Evidence collection adapter for Rivalens collection workflows."""
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,10 @@ from rivalens.schema import EvidenceCollectionResult, EvidenceCollectionTask, Ev
 
 class ResearchEngineEvidenceCollector:
     """Collect public evidence through ResearchEngine and normalize sources."""
+
+    excerpt_chars = 1000
+    summary_chars = 500
+    chunk_overlap_chars = 100
 
     def __init__(
         self,
@@ -71,8 +76,13 @@ class ResearchEngineEvidenceCollector:
         for source in sources:
             url = source.get("url") or source.get("href") or ""
             title = source.get("title") or url or "Untitled evidence"
-            content = source.get("content") or source.get("raw_content") or source.get("body") or ""
-            summary = source.get("summary") or content[:500]
+            content = self._source_content(source)
+            relevant_chunk = self._most_relevant_chunk(
+                content,
+                query=collection_task.get("query", ""),
+                title=title,
+            )
+            summary = relevant_chunk[: self.summary_chars]
 
             evidence_items.append(
                 {
@@ -87,13 +97,99 @@ class ResearchEngineEvidenceCollector:
                     "source_type": source.get("source_type") or self._infer_source_type(url, title),
                     "published_at": source.get("published_at"),
                     "retrieved_at": retrieved_at,
-                    "excerpt": content[:1000],
+                    "excerpt": relevant_chunk,
                     "summary": summary,
                     "confidence": 0.7 if url else 0.4,
                 }
             )
 
         return evidence_items
+
+    def _source_content(self, source: dict[str, Any]) -> str:
+        content = (
+            source.get("content")
+            or source.get("raw_content")
+            or source.get("body")
+            or source.get("summary")
+            or ""
+        )
+        return " ".join(str(content).split())
+
+    def _most_relevant_chunk(self, content: str, query: str, title: str) -> str:
+        if len(content) <= self.excerpt_chars:
+            return content
+
+        chunks = self._chunks(content)
+        query_tokens = self._query_tokens(f"{query} {title}")
+        if not query_tokens:
+            return chunks[0]
+
+        best_chunk = chunks[0]
+        best_score = -1
+        for position, chunk in enumerate(chunks):
+            chunk_tokens = set(self._tokens(chunk))
+            overlap = sum(1 for token in query_tokens if token in chunk_tokens)
+            phrase_bonus = sum(
+                2
+                for token in query_tokens
+                if len(token) > 4 and token in chunk.lower()
+            )
+            score = overlap + phrase_bonus
+            if score > best_score:
+                best_score = score
+                best_chunk = chunk
+            elif score == best_score and position == 0:
+                best_chunk = chunk
+
+        return best_chunk
+
+    def _chunks(self, content: str) -> list[str]:
+        step = self.excerpt_chars - self.chunk_overlap_chars
+        chunks = []
+        for start in range(0, len(content), step):
+            chunk = content[start : start + self.excerpt_chars]
+            if chunk:
+                chunks.append(chunk)
+            if start + self.excerpt_chars >= len(content):
+                break
+        return chunks or [content]
+
+    def _query_tokens(self, text: str) -> list[str]:
+        stopwords = {
+            "and",
+            "are",
+            "branch",
+            "collect",
+            "competitor",
+            "definition",
+            "evidence",
+            "focus",
+            "from",
+            "industry",
+            "only",
+            "pages",
+            "prefer",
+            "public",
+            "query",
+            "relevant",
+            "research",
+            "schema",
+            "selected",
+            "source",
+            "sources",
+            "the",
+            "this",
+            "when",
+            "with",
+        }
+        return [
+            token
+            for token in dict.fromkeys(self._tokens(text))
+            if len(token) > 2 and token not in stopwords
+        ]
+
+    def _tokens(self, text: str) -> list[str]:
+        return re.findall(r"[a-z0-9]+", text.lower())
 
     def _infer_source_type(self, url: str, title: str) -> str:
         normalized = f"{url} {title}".lower()
