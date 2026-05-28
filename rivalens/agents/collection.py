@@ -368,13 +368,10 @@ class CollectionAgent:
         collection_task: EvidenceCollectionTask,
         verbose: bool,
     ) -> EvidenceCollectionResult:
-        deep = (
-            collection_task.get("search_stage") == "verification"
-            or bool(collection_task.get("target_urls"))
-        )
         return await self.evidence_collector.collect(
             collection_task=collection_task,
-            deep=deep,
+            deep=False,
+            source_urls=collection_task.get("target_urls", []),
             verbose=verbose,
         )
 

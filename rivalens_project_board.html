@@ -1049,12 +1049,12 @@
             </tr>
             <tr>
               <td><span class="tag done">已接上</span></td>
-              <td><strong>candidate URL 会触发 deep focused collection</strong></td>
-              <td>landscape candidate source 会写入 <code>target_urls</code>，对应 focused task 使用 <code>deep=True</code>。</td>
+              <td><strong>candidate URL 会走 source_urls 定向抽取</strong></td>
+              <td>landscape candidate source 会写入 <code>target_urls</code>，对应 focused task 下推为 <code>ResearchEngine.source_urls</code>。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>verification task 也会使用 deep collection。后续还可以进一步把 <code>target_urls</code> 下推成 domain-constrained fetch。</p>
+                  <p>verification 不再自动使用 DeepResearch；它保留 claim-specific query，后续由 ClaimSupportReviewer 判断支持或反驳。</p>
                 </details>
               </td>
             </tr>
@@ -1087,7 +1087,7 @@
   </main>
 
   <footer>
-    当前结论：research 三阶段已经有主链路、一次 verification 回环、split/disambiguation follow-up 和 candidate URL deep collection；下一步优先补更强 claim support 与 report-level QA。
+    当前结论：research 三阶段已经有主链路、一次 verification 回环、split/disambiguation follow-up 和 candidate URL 定向抽取；下一步优先补更强 claim support 与 report-level QA。
   </footer>
 </body>
 </html>

@@ -34,6 +34,7 @@ class ResearchEngineEvidenceCollector:
         deep: bool = False,
         verbose: bool = True,
         source: str = ReportSource.Web.value,
+        source_urls: list[str] | None = None,
         query_domains: list[str] | None = None,
     ) -> EvidenceCollectionResult:
         """Run evidence collection for one schema-aware collection task."""
@@ -43,6 +44,7 @@ class ResearchEngineEvidenceCollector:
             report_type=REPORT_TYPE_BY_MODE[mode],
             report_source=source,
             tone=self.tone,
+            source_urls=source_urls,
             verbose=verbose,
             websocket=self.websocket,
             headers=self.headers,
