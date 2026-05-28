@@ -15,8 +15,44 @@ EvidenceType = Literal[
     "marketplace",
     "social",
     "job_posting",
+    "regulator_database",
+    "financial_filing",
+    "standards_body",
+    "complaint_database",
+    "incident_database",
+    "case_study",
+    "trust_center",
+    "status_page",
+    "benchmark",
+    "analyst_report",
+    "public_registry",
     "other",
 ]
+
+
+SOURCE_TYPE_PRIORITY: dict[str, int] = {
+    "regulator_database": 1,
+    "public_registry": 1,
+    "standards_body": 1,
+    "financial_filing": 1,
+    "complaint_database": 1,
+    "incident_database": 1,
+    "pricing_page": 2,
+    "docs": 2,
+    "trust_center": 2,
+    "status_page": 2,
+    "benchmark": 2,
+    "official_site": 3,
+    "case_study": 3,
+    "analyst_report": 3,
+    "marketplace": 4,
+    "review": 5,
+    "news": 5,
+    "blog": 6,
+    "job_posting": 6,
+    "social": 7,
+    "other": 8,
+}
 
 
 class Competitor(TypedDict, total=False):
@@ -42,6 +78,8 @@ class EvidenceItem(TypedDict, total=False):
     retrieved_at: str
     excerpt: str
     summary: str
+    source_priority: int
+    is_primary_source: bool
     confidence: float
 
 
@@ -148,6 +186,7 @@ class IndustryProfileDirection(TypedDict, total=False):
     direction_id: str
     name: str
     reason: str
+    source_hints: list[str]
     required: bool
 
 
@@ -190,6 +229,7 @@ class SchemaExtension(TypedDict, total=False):
     description: str
     origin: Literal["core", "schema_registry", "evidence_inferred", "user_requested"]
     evidence_ids: list[str]
+    source_hints: list[str]
     confidence: float
     approved: bool
 
@@ -311,6 +351,7 @@ class IndustryProfileDirectionPayload(StrictPayloadModel):
     direction_id: str
     name: str
     reason: str = ""
+    source_hints: list[str] = Field(default_factory=list)
     required: bool = True
 
 
@@ -355,6 +396,7 @@ class SchemaExtensionPayload(StrictPayloadModel):
     description: str = ""
     origin: Literal["core", "schema_registry", "evidence_inferred", "user_requested"]
     evidence_ids: list[str] = Field(default_factory=list)
+    source_hints: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
     approved: bool = False
 

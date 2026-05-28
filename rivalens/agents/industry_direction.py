@@ -14,6 +14,10 @@ from rivalens.schema import (
 )
 
 
+DEFAULT_SOURCE_HINTS = ["official_site", "pricing_page", "docs", "news", "review"]
+USER_DIRECTION_SOURCE_HINTS = ["official_site", "news", "review"]
+
+
 @dataclass(frozen=True)
 class IndustryDirectionTemplate:
     industry: str
@@ -41,6 +45,10 @@ def _load_templates(
                         "direction_id": str(item["direction_id"]),
                         "name": str(item["name"]),
                         "reason": str(item.get("reason", "")),
+                        "source_hints": [
+                            str(source_hint)
+                            for source_hint in item.get("source_hints", [])
+                        ],
                         "required": bool(item.get("required", True)),
                     }
                     for item in raw.get("default_directions")
@@ -170,13 +178,14 @@ class IndustryDirectionSkill:
         direction_id = direction.get("direction_id") or f"template_direction_{index}"
         name = direction.get("name") or direction_id
         reason = direction.get("reason", "")
+        source_hints = direction.get("source_hints") or DEFAULT_SOURCE_HINTS
         return {
             "direction_id": direction_id,
             "name": name,
             "reason": reason,
             "description": reason,
             "search_focus": name,
-            "source_hints": ["official_site", "pricing_page", "docs", "news", "review"],
+            "source_hints": list(source_hints),
             "required": bool(direction.get("required", True)),
             "origin": "industry_template",
         }
@@ -197,7 +206,7 @@ class IndustryDirectionSkill:
                             "reason": "用户补充的重点分析方向",
                             "description": "用户补充的重点分析方向",
                             "search_focus": text,
-                            "source_hints": ["official_site", "news", "review"],
+                            "source_hints": list(USER_DIRECTION_SOURCE_HINTS),
                             "required": True,
                             "origin": "user_requested",
                         }
@@ -222,7 +231,7 @@ class IndustryDirectionSkill:
                     "source_hints": list(
                         direction.get(
                             "source_hints",
-                            ["official_site", "news", "review"],
+                            USER_DIRECTION_SOURCE_HINTS,
                         )
                     ),
                     "required": bool(direction.get("required", True)),
@@ -277,8 +286,6 @@ class IndustryDirectionSkill:
     def _custom_direction_id(self, text: str, index: int) -> str:
         lowered = text.lower()
         if "ai" in lowered or "人工智能" in text:
-            if "写作" in text:
-                return "ai_capability"
             return "ai_capability"
         if "私有化" in text or "私有部署" in text:
             return "private_deployment"
@@ -289,7 +296,13 @@ class IndustryDirectionSkill:
 
     def _split_user_direction_text(self, text: str) -> list[str]:
         cleaned = text.strip().strip("。.")
-        for prefix in ("我还想重点看", "还想重点看", "重点看", "补充", "我还想看"):
+        for prefix in (
+            "我还想重点看",
+            "还想重点看",
+            "重点看",
+            "补充",
+            "我还想看",
+        ):
             if cleaned.startswith(prefix):
                 cleaned = cleaned[len(prefix):].strip()
 

@@ -14,6 +14,7 @@ from rivalens.schema import (
     EvidenceCollectionResult,
     EvidenceCollectionTask,
     ResearchBranch,
+    SOURCE_TYPE_PRIORITY,
 )
 
 
@@ -358,7 +359,7 @@ class CollectionAgent:
             normalized.append(name)
         return [name for name in normalized if name] or [""]
 
-    def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, str]]:
+    def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, Any]]:
         core_descriptions = {
             "feature_tree": (
                 "product capabilities, feature availability, feature maturity, "
@@ -386,6 +387,7 @@ class CollectionAgent:
                     "name": field.replace("_", " ").title(),
                     "type": "core",
                     "description": core_descriptions.get(field, field.replace("_", " ")),
+                    "source_hints": [],
                 }
             )
 
@@ -405,10 +407,13 @@ class CollectionAgent:
                         "description",
                         extension_id.replace("_", " "),
                     ),
+                    "source_hints": self._ranked_source_hints(
+                        extension.get("source_hints", []),
+                    ),
                 }
             )
 
-        deduped: dict[str, dict[str, str]] = {}
+        deduped: dict[str, dict[str, Any]] = {}
         for dimension in dimensions:
             deduped[dimension["id"]] = dimension
         return list(deduped.values())
@@ -417,7 +422,7 @@ class CollectionAgent:
         self,
         query: str,
         competitor: str,
-        dimension: dict[str, str],
+        dimension: dict[str, Any],
         active_schema: dict[str, Any],
     ) -> str:
         selected_industry = active_schema.get("selected_industry", {}).get(
@@ -429,17 +434,31 @@ class CollectionAgent:
             if competitor
             else "Competitor: infer from the user query"
         )
-        return "\n".join(
-            [
-                query,
-                competitor_line,
-                f"Selected industry: {selected_industry}",
-                f"Research focus: {dimension['name']} ({dimension['type']})",
-                f"Focus definition: {dimension['description']}",
-                "Collect public, source-backed evidence only. Prefer official "
-                "pages, pricing pages, docs, reviews, news, and marketplace "
-                "listings when relevant.",
-            ]
+        lines = [
+            query,
+            competitor_line,
+            f"Selected industry: {selected_industry}",
+            f"Research focus: {dimension['name']} ({dimension['type']})",
+            f"Focus definition: {dimension['description']}",
+        ]
+        source_hints = dimension.get("source_hints", [])
+        if source_hints:
+            lines.append(
+                "Preferred evidence sources, in priority order: "
+                + ", ".join(source_hints)
+                + ".",
+            )
+        lines.append(
+            "Collect public, source-backed evidence only. Prefer official "
+            "pages, pricing pages, docs, reviews, news, and marketplace "
+            "listings when relevant.",
+        )
+        return "\n".join(lines)
+
+    def _ranked_source_hints(self, source_hints: list[str]) -> list[str]:
+        return sorted(
+            dict.fromkeys(source_hints),
+            key=lambda source_type: SOURCE_TYPE_PRIORITY.get(source_type, 99),
         )
 
     def _with_file_rag(

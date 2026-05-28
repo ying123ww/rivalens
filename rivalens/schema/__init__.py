@@ -51,6 +51,7 @@ from .competitive import (
     SchemaExtensionPayload,
     SchemaMessagePayload,
     SchemaSelectionMessagePayload,
+    SOURCE_TYPE_PRIORITY,
     UserPersona,
     UserPersonaPayload,
 )
@@ -106,6 +107,7 @@ __all__ = [
     "SchemaExtensionPayload",
     "SchemaMessagePayload",
     "SchemaSelectionMessagePayload",
+    "SOURCE_TYPE_PRIORITY",
     "UserPersona",
     "UserPersonaPayload",
 ]

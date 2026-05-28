@@ -4,6 +4,8 @@ import unittest
 from rivalens.agents.branch_review import BranchReviewAgent
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
+from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
+from rivalens.schema import SOURCE_TYPE_PRIORITY
 
 
 def pricing_branch():
@@ -18,6 +20,34 @@ def pricing_branch():
 
 
 class CollectionReviewTest(unittest.TestCase):
+    def test_evidence_collector_infers_priority_source_metadata(self):
+        collector = ResearchEngineEvidenceCollector()
+        task = {
+            "id": "collect_acme_safety",
+            "branch_id": "collect_acme_safety",
+            "competitor": "Acme",
+            "dimension_id": "safety_recalls",
+            "dimension_name": "Safety Recalls",
+        }
+
+        evidence = collector._to_evidence_items(
+            task,
+            [
+                {
+                    "title": "NHTSA recalls database",
+                    "url": "https://www.nhtsa.gov/recalls",
+                    "content": "Recall and safety campaign records.",
+                }
+            ],
+        )[0]
+
+        self.assertEqual(evidence["source_type"], "regulator_database")
+        self.assertEqual(
+            evidence["source_priority"],
+            SOURCE_TYPE_PRIORITY["regulator_database"],
+        )
+        self.assertTrue(evidence["is_primary_source"])
+
     def test_evidence_review_accepts_url_backed_branch_evidence(self):
         review = EvidenceQualityReviewer(min_sources_per_branch=2).review(
             pricing_branch(),

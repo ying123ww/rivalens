@@ -267,6 +267,7 @@ class PlanningAgent:
                         else "schema_registry"
                     ),
                     "evidence_ids": [],
+                    "source_hints": list(direction.get("source_hints", [])),
                     "confidence": 0.82 if direction.get("required", True) else 0.6,
                     "approved": True,
                 }
