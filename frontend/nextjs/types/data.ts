@@ -38,6 +38,38 @@ export interface MCPConfig {
   env: Record<string, string>;
 }
 
+export interface IndustryCandidate {
+  industry_id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+}
+
+export interface AnalysisDirection {
+  direction_id: string;
+  name: string;
+  reason?: string;
+  description: string;
+  search_focus: string;
+  source_hints: string[];
+  required: boolean;
+  origin: "industry_template" | "user_requested";
+}
+
+export interface IndustryDirectionPlan {
+  id: string;
+  detected_industry?: string;
+  industry: IndustryCandidate;
+  candidate_industries: IndustryCandidate[];
+  suggested_directions?: AnalysisDirection[];
+  default_directions: AnalysisDirection[];
+  user_added_directions: AnalysisDirection[];
+  final_directions: AnalysisDirection[];
+  final_analysis_plan: Record<string, any>;
+  user_confirmed: boolean;
+  created_at: string;
+}
+
 export interface ChatBoxSettings {
   report_type: string;
   report_source: string;
@@ -48,6 +80,7 @@ export interface ChatBoxSettings {
   mcp_enabled: boolean;
   mcp_configs: MCPConfig[];
   mcp_strategy?: string;
+  industry_direction_plan?: IndustryDirectionPlan;
 }
 
 export interface Domain {
@@ -68,4 +101,4 @@ export interface ResearchHistoryItem {
   timestamp: number;
   orderedData: Data[];
   chatMessages?: ChatMessage[];
-} 
+}
