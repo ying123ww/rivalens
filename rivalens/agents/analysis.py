@@ -134,15 +134,14 @@ class AnalysisAgent:
         dimension_name: str,
         evidence_items: list[dict[str, Any]],
     ) -> str:
-        summary = self._evidence_summary(evidence_items)
-        return f"{competitor} has quality-reviewed {dimension_name} evidence: {summary}"
+        evidence_preview = self._evidence_excerpt_preview(evidence_items)
+        return f"{competitor} has quality-reviewed {dimension_name} evidence: {evidence_preview}"
 
-    def _evidence_summary(self, evidence_items: list[dict[str, Any]]) -> str:
+    def _evidence_excerpt_preview(self, evidence_items: list[dict[str, Any]]) -> str:
         snippets = []
         for evidence in evidence_items[:2]:
             text = (
-                evidence.get("summary")
-                or evidence.get("excerpt")
+                evidence.get("excerpt")
                 or evidence.get("title")
                 or evidence.get("url")
                 or ""

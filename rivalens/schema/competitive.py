@@ -41,7 +41,6 @@ class EvidenceItem(TypedDict, total=False):
     published_at: str | None
     retrieved_at: str
     excerpt: str
-    summary: str
     confidence: float
 
 

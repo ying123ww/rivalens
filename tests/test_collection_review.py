@@ -47,7 +47,7 @@ class CollectionReviewTest(unittest.TestCase):
         )[0]
 
         self.assertIn("starter plan", evidence["excerpt"])
-        self.assertIn("enterprise billing", evidence["summary"])
+        self.assertNotIn("summary", evidence)
         self.assertNotEqual(
             evidence["excerpt"],
             (irrelevant_intro + pricing_signal + trailing)[:1000],
@@ -181,7 +181,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_1",
                     "competitor": "Acme",
                     "title": "Acme pricing",
-                    "summary": "Acme pricing starts with a public plan.",
+                    "excerpt": "Acme pricing starts with a public plan.",
                     "source_type": "pricing_page",
                     "confidence": 0.8,
                 },
@@ -189,7 +189,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_2",
                     "competitor": "Acme",
                     "title": "Rejected scrape",
-                    "summary": "This should not enter knowledge.",
+                    "excerpt": "This should not enter knowledge.",
                     "source_type": "other",
                     "confidence": 0.8,
                 },
@@ -220,7 +220,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "dimension_id": "pricing_model",
                     "dimension_name": "Pricing Model",
                     "title": "Acme pricing",
-                    "summary": "Acme publishes a starter pricing plan.",
+                    "excerpt": "Acme publishes a starter pricing plan.",
                     "confidence": 0.8,
                 },
                 {
@@ -229,7 +229,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "dimension_id": "pricing_model",
                     "dimension_name": "Pricing Model",
                     "title": "Rejected scrape",
-                    "summary": "This should not become a claim.",
+                    "excerpt": "This should not become a claim.",
                     "confidence": 0.9,
                 },
             ],

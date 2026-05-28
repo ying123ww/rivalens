@@ -14,7 +14,6 @@ class ResearchEngineEvidenceCollector:
     """Collect public evidence through ResearchEngine and normalize sources."""
 
     excerpt_chars = 1000
-    summary_chars = 500
     chunk_overlap_chars = 100
 
     def __init__(
@@ -82,7 +81,6 @@ class ResearchEngineEvidenceCollector:
                 query=collection_task.get("query", ""),
                 title=title,
             )
-            summary = relevant_chunk[: self.summary_chars]
 
             evidence_items.append(
                 {
@@ -98,7 +96,6 @@ class ResearchEngineEvidenceCollector:
                     "published_at": source.get("published_at"),
                     "retrieved_at": retrieved_at,
                     "excerpt": relevant_chunk,
-                    "summary": summary,
                     "confidence": 0.7 if url else 0.4,
                 }
             )
@@ -110,7 +107,6 @@ class ResearchEngineEvidenceCollector:
             source.get("content")
             or source.get("raw_content")
             or source.get("body")
-            or source.get("summary")
             or ""
         )
         return " ".join(str(content).split())

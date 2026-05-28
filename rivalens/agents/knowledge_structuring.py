@@ -79,8 +79,7 @@ class KnowledgeStructuringAgent:
             for feature_index, evidence in enumerate(competitor_evidence, start=1):
                 evidence_id = evidence.get("id", "")
                 text = (
-                    evidence.get("summary")
-                    or evidence.get("excerpt")
+                    evidence.get("excerpt")
                     or evidence.get("title")
                     or ""
                 )
