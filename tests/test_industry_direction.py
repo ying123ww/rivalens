@@ -272,7 +272,6 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             "care_operations",
             "interoperability_ehr_fhir",
             "search_packaging",
-            "merchant_marketing_tools",
             "merchant_qualification_safety",
             "discovery_reviews_ranking",
             "safety_moderation_compliance",
@@ -312,6 +311,31 @@ class IndustryDirectionSkillTest(unittest.TestCase):
                     source_hint,
                     direction_index[direction_id]["source_hints"],
                 )
+
+    def test_scenario_specific_directions_are_optional_defaults(self):
+        optional_direction_ids = {
+            "live_content_commerce",
+            "merchant_developer_api",
+            "payment_success_settlement",
+            "ai_personalization_learning",
+            "disruption_support_insurance",
+            "merchant_marketing_tools",
+            "smart_cockpit_system",
+            "sales_volume_market_share",
+            "context_window_long_context",
+            "inference_speed_latency",
+            "multimodal_capabilities",
+        }
+        direction_index = {
+            direction["direction_id"]: direction
+            for template in INDUSTRY_DIRECTION_TEMPLATES
+            for direction in template.get("directions", [])
+        }
+
+        for direction_id in optional_direction_ids:
+            with self.subTest(direction_id=direction_id):
+                self.assertIn(direction_id, direction_index)
+                self.assertFalse(direction_index[direction_id]["required"])
 
 
 if __name__ == "__main__":
