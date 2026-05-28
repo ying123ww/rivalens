@@ -269,6 +269,12 @@
       stroke: #d99da0;
     }
 
+    .svg-hole {
+      fill: var(--soft-red);
+      stroke: #d99da0;
+      stroke-dasharray: 5 4;
+    }
+
     .svg-output {
       fill: #eef1f3;
       stroke: #b8c4ce;
@@ -588,48 +594,49 @@
     <nav class="nav" aria-label="页面导航">
       <a href="#architecture">架构</a>
       <a href="#dag">DAG</a>
-      <a href="#research-tree">Research Tree</a>
-      <a href="#schema">Schema</a>
-      <a href="#roadmap">TODO</a>
+      <a href="#research-tree">三阶段</a>
+      <a href="#schema">对象</a>
+      <a href="#roadmap">漏洞</a>
     </nav>
   </header>
 
   <main>
     <section class="hero">
       <div>
-        <p class="eyebrow">当前代码主线：行业感知的竞品知识结构化系统</p>
-        <h1>Rivalens 从“搜索写报告”升级为“先定 Schema，再产出可溯源知识”</h1>
+        <p class="eyebrow">当前代码主线：landscape / focused / verification research control</p>
+        <h1>Rivalens 现在是“先发现入口，再采证据，最后按 claim 验证”的研究链路</h1>
         <p class="lead">
-          当前项目已经移除旧的 ProductFact 兜底，主流程改为：
-          SchemaSelectionAgent 冻结 ActiveKnowledgeSchema，CollectionAgent 采集证据，
-          KnowledgeStructuringAgent 产出 CompetitorKnowledge，AnalysisAgent 再生成可审查 claim。
+          当前主流程已经调整为：
+          PlanningAgent 生成竞品和 10 个 analysis dimensions，CollectionAgent 按 competitor x dimension
+          建 research branches，并按 search_stage 执行 landscape、focused 或 verification。landscape 只发现入口，
+          focused 才产出 EvidenceItem，ClaimSupportReviewer 会把弱 claim 推回一次 verification 补采。
         </p>
       </div>
       <aside class="status-card">
         <h2>当前状态</h2>
         <ul class="status-list">
-          <li><span class="tag done">已完成</span><span>新增 <code>schema_registry</code> 和行业模板。</span></li>
-          <li><span class="tag done">已完成</span><span>新增 <code>ActiveKnowledgeSchema</code> 与 <code>CompetitorKnowledge</code>。</span></li>
-          <li><span class="tag done">已完成</span><span>DAG 接入 <code>schema_selection</code> 和 <code>knowledge_structuring</code>。</span></li>
-          <li><span class="tag done">已完成</span><span><code>CollectionAgent</code> 会按 schema 维度生成必跑 root branch。</span></li>
-          <li><span class="tag done">已完成</span><span>删除 <code>ResearchToolkit</code>，Search 收束到 <code>CollectionAgent</code>。</span></li>
-          <li><span class="tag done">已完成</span><span>新增 <code>BranchReviewAgent</code> 审查 child candidate 的 drift 与展开预算。</span></li>
-          <li><span class="tag done">已完成</span><span>新增 <code>EvidenceQualityReviewer</code>，standard search 后立即记录 accepted/rejected evidence。</span></li>
-          <li><span class="tag next">下一步</span><span>增强结构化抽取、补 ReportDocument、做可交互报告。</span></li>
-          <li><span class="tag risk">注意</span><span>当前行业判断是 registry 规则信号，尚未接官方 PDF。</span></li>
+          <li><span class="tag done">已接上</span><span>DAG 顺序是 <code>scope_planner -> source_collection -> knowledge_structuring -> dimension_analysis -> claim_support_review</code>。</span></li>
+          <li><span class="tag done">已接上</span><span><code>landscape</code> 产出 <code>LandscapeAssessment</code> 和 <code>focused_task_specs</code>，不会伪装成最终证据。</span></li>
+          <li><span class="tag done">已接上</span><span><code>focused</code> 和 <code>verification</code> 才生成 <code>EvidenceItem</code>，再过 evidence / coverage review。</span></li>
+          <li><span class="tag done">已接上</span><span><code>ClaimSupportReviewer</code> 会为 weak / unverifiable claim 创建一次 <code>verification_task_queue</code>。</span></li>
+          <li><span class="tag risk">漏洞</span><span><code>dimension_split_suggestions</code> 已记录，但还没有真正生成拆分后的 child dimension tasks。</span></li>
+          <li><span class="tag risk">漏洞</span><span><code>competitor_disambiguation</code> 仍靠通用 refinement specs，没有专门 disambiguation task。</span></li>
+          <li><span class="tag risk">漏洞</span><span>claim support 现在是词面 overlap 检查，还不是严格 entailment / contradiction 判断。</span></li>
+          <li><span class="tag next">下一步</span><span>补 dimension split、竞品消歧、verification 深采和更强 claim 生成。</span></li>
         </ul>
       </aside>
     </section>
 
     <section id="architecture">
       <div class="section-head">
-        <h2>系统逻辑架构</h2>
+        <h2>Research 逻辑架构</h2>
         <p class="section-note">
-          Rivalens 的核心不是让底层 research engine 直接写报告，而是用 Agent DAG 把证据、行业 schema、竞品知识、分析 claim 和报告文档分层生产。
+          当前不是固定三轮，而是每个 <code>ResearchTask.search_stage</code> 决定这次采集的目标：
+          landscape 发现 source universe，focused 采 EvidenceItem，verification 只验证具体 claim。
         </p>
       </div>
       <div class="logic-figure" aria-label="系统逻辑架构图">
-        <svg viewBox="0 0 1120 520" role="img">
+        <svg viewBox="0 0 1120 640" role="img">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
@@ -639,7 +646,7 @@
             </marker>
           </defs>
 
-          <text x="24" y="34" class="svg-title">Rivalens 逻辑架构：Schema 先行，证据驱动分析</text>
+          <text x="24" y="34" class="svg-title">Rivalens Research Control：阶段是 task 类型，不是固定流水线</text>
 
           <rect x="42" y="78" width="170" height="72" class="svg-box"></rect>
           <text x="64" y="106" class="svg-label">用户任务</text>
@@ -647,54 +654,84 @@
 
           <line x1="212" y1="114" x2="276" y2="114" class="svg-arrow"></line>
 
-          <rect x="276" y="64" width="766" height="110" class="svg-lane"></rect>
-          <text x="300" y="96" class="svg-label">Schema 决策层</text>
-          <rect x="454" y="92" width="156" height="48" class="svg-box"></rect>
-          <text x="480" y="122" class="svg-small">PlanningAgent</text>
-          <line x1="610" y1="116" x2="672" y2="116" class="svg-arrow"></line>
-          <rect x="672" y="92" width="188" height="48" class="svg-industry"></rect>
-          <text x="696" y="122" class="svg-small">SchemaSelectionAgent</text>
-          <line x1="860" y1="116" x2="910" y2="116" class="svg-arrow"></line>
-          <rect x="910" y="92" width="110" height="48" class="svg-output"></rect>
-          <text x="930" y="122" class="svg-small">ActiveSchema</text>
+          <rect x="276" y="64" width="762" height="100" class="svg-lane"></rect>
+          <text x="300" y="94" class="svg-label">Planning</text>
+          <rect x="440" y="88" width="164" height="50" class="svg-box"></rect>
+          <text x="466" y="119" class="svg-small">PlanningAgent</text>
+          <line x1="604" y1="113" x2="666" y2="113" class="svg-arrow"></line>
+          <rect x="666" y="88" width="220" height="50" class="svg-industry"></rect>
+          <text x="686" y="119" class="svg-small">competitors + dimensions</text>
+          <line x1="886" y1="113" x2="930" y2="113" class="svg-arrow"></line>
+          <rect x="930" y="88" width="88" height="50" class="svg-output"></rect>
+          <text x="944" y="119" class="svg-small">State</text>
 
-          <line x1="966" y1="174" x2="966" y2="212" class="svg-arrow"></line>
+          <line x1="974" y1="164" x2="974" y2="198" class="svg-arrow"></line>
 
-          <rect x="42" y="212" width="1000" height="118" class="svg-lane"></rect>
-          <text x="64" y="246" class="svg-label">证据与知识生产层</text>
-          <rect x="90" y="246" width="150" height="52" class="svg-box"></rect>
-          <text x="106" y="278" class="svg-small">EvidenceCollector</text>
-          <line x1="240" y1="272" x2="284" y2="272" class="svg-arrow"></line>
-          <rect x="284" y="246" width="130" height="52" class="svg-core"></rect>
-          <text x="306" y="278" class="svg-small">EvidenceItem</text>
-          <line x1="414" y1="272" x2="456" y2="272" class="svg-arrow"></line>
-          <rect x="456" y="246" width="190" height="52" class="svg-review"></rect>
-          <text x="474" y="278" class="svg-small">EvidenceQualityReviewer</text>
-          <line x1="646" y1="272" x2="690" y2="272" class="svg-arrow"></line>
-          <rect x="690" y="246" width="218" height="52" class="svg-box"></rect>
-          <text x="712" y="278" class="svg-small">KnowledgeStructuringAgent</text>
-          <line x1="908" y1="272" x2="944" y2="272" class="svg-arrow"></line>
-          <rect x="944" y="246" width="96" height="52" class="svg-core"></rect>
-          <text x="952" y="278" class="svg-small">Knowledge</text>
+          <rect x="42" y="198" width="1000" height="194" class="svg-lane"></rect>
+          <text x="64" y="232" class="svg-label">CollectionAgent 内部 research control</text>
+          <rect x="86" y="258" width="170" height="52" class="svg-box"></rect>
+          <text x="108" y="290" class="svg-small">ResearchBrief</text>
+          <line x1="256" y1="284" x2="304" y2="284" class="svg-arrow"></line>
+          <rect x="304" y="258" width="168" height="52" class="svg-industry"></rect>
+          <text x="322" y="290" class="svg-small">ResearchTask.stage</text>
+          <line x1="472" y1="284" x2="520" y2="284" class="svg-arrow"></line>
+          <rect x="520" y="222" width="142" height="48" class="svg-review"></rect>
+          <text x="544" y="252" class="svg-small">landscape</text>
+          <rect x="520" y="284" width="142" height="48" class="svg-core"></rect>
+          <text x="552" y="314" class="svg-small">focused</text>
+          <rect x="520" y="346" width="142" height="48" class="svg-risk"></rect>
+          <text x="542" y="376" class="svg-small">verification</text>
 
-          <line x1="958" y1="330" x2="958" y2="366" class="svg-arrow"></line>
+          <line x1="662" y1="246" x2="706" y2="246" class="svg-arrow"></line>
+          <rect x="706" y="220" width="172" height="52" class="svg-review"></rect>
+          <text x="724" y="252" class="svg-small">LandscapeAssessment</text>
+          <line x1="878" y1="246" x2="930" y2="246" class="svg-arrow"></line>
+          <rect x="930" y="220" width="88" height="52" class="svg-output"></rect>
+          <text x="944" y="252" class="svg-small">follow-up</text>
 
-          <rect x="42" y="366" width="1000" height="96" class="svg-lane"></rect>
-          <text x="64" y="400" class="svg-label">分析 / 撰写 / 发布层</text>
-          <rect x="214" y="394" width="150" height="44" class="svg-box"></rect>
-          <text x="248" y="422" class="svg-small">AnalysisAgent</text>
-          <line x1="364" y1="416" x2="424" y2="416" class="svg-arrow"></line>
-          <rect x="424" y="394" width="144" height="44" class="svg-industry"></rect>
-          <text x="450" y="422" class="svg-small">AnalysisClaim</text>
-          <line x1="568" y1="416" x2="628" y2="416" class="svg-arrow"></line>
-          <rect x="628" y="394" width="138" height="44" class="svg-review"></rect>
-          <text x="642" y="422" class="svg-small">ReportWriterAgent</text>
-          <line x1="766" y1="416" x2="826" y2="416" class="svg-arrow"></line>
-          <rect x="826" y="394" width="150" height="44" class="svg-output"></rect>
-          <text x="872" y="422" class="svg-small">Publisher</text>
+          <line x1="662" y1="308" x2="706" y2="308" class="svg-arrow"></line>
+          <line x1="662" y1="370" x2="706" y2="370" class="svg-arrow"></line>
+          <rect x="706" y="310" width="160" height="52" class="svg-core"></rect>
+          <text x="732" y="342" class="svg-small">EvidenceItem</text>
+          <line x1="866" y1="336" x2="922" y2="336" class="svg-arrow"></line>
+          <rect x="922" y="310" width="98" height="52" class="svg-review"></rect>
+          <text x="936" y="333" class="svg-small">evidence</text>
+          <text x="942" y="351" class="svg-small">review</text>
 
-          <path d="M 552 394 C 548 350 548 326 552 298" class="svg-feedback"></path>
-          <text x="560" y="356" class="svg-small">accepted evidence only</text>
+          <path d="M 974 220 C 974 186 420 184 386 258" class="svg-feedback"></path>
+          <text x="530" y="204" class="svg-small">landscape follow-up: focused / refinement</text>
+
+          <line x1="780" y1="392" x2="780" y2="428" class="svg-arrow"></line>
+          <rect x="42" y="428" width="1000" height="92" class="svg-lane"></rect>
+          <text x="64" y="462" class="svg-label">Knowledge 与 analysis</text>
+          <rect x="190" y="456" width="210" height="44" class="svg-box"></rect>
+          <text x="212" y="484" class="svg-small">KnowledgeStructuringAgent</text>
+          <line x1="400" y1="478" x2="460" y2="478" class="svg-arrow"></line>
+          <rect x="460" y="456" width="156" height="44" class="svg-core"></rect>
+          <text x="488" y="484" class="svg-small">AnalysisAgent</text>
+          <line x1="616" y1="478" x2="676" y2="478" class="svg-arrow"></line>
+          <rect x="676" y="456" width="170" height="44" class="svg-industry"></rect>
+          <text x="704" y="484" class="svg-small">AnalysisClaim</text>
+
+          <line x1="760" y1="520" x2="760" y2="548" class="svg-arrow"></line>
+          <rect x="42" y="548" width="1000" height="68" class="svg-lane"></rect>
+          <rect x="138" y="558" width="176" height="44" class="svg-review"></rect>
+          <text x="160" y="586" class="svg-small">ClaimSupportReviewer</text>
+          <line x1="314" y1="580" x2="374" y2="580" class="svg-arrow"></line>
+          <rect x="374" y="558" width="168" height="44" class="svg-risk"></rect>
+          <text x="396" y="586" class="svg-small">verification queue</text>
+          <path d="M 458 558 C 458 418 516 380 520 370" class="svg-feedback"></path>
+          <text x="466" y="534" class="svg-small">one bounded loop</text>
+          <line x1="542" y1="580" x2="604" y2="580" class="svg-arrow"></line>
+          <rect x="604" y="558" width="150" height="44" class="svg-box"></rect>
+          <text x="626" y="586" class="svg-small">ReportWriter</text>
+          <line x1="754" y1="580" x2="814" y2="580" class="svg-arrow"></line>
+          <rect x="814" y="558" width="120" height="44" class="svg-output"></rect>
+          <text x="848" y="586" class="svg-small">Publisher</text>
+
+          <rect x="86" y="334" width="332" height="54" class="svg-hole"></rect>
+          <text x="104" y="356" class="svg-small">漏洞：dimension split 与 competitor disambiguation</text>
+          <text x="104" y="374" class="svg-small">现在有标记和 specs，但不是专用 task planner</text>
         </svg>
       </div>
     </section>
@@ -703,58 +740,73 @@
       <div class="section-head">
         <h2>当前 DAG 流转</h2>
         <p class="section-note">
-          这是当前代码中的主流程节点。`SchemaBuilderAgent` 和 `ProductFact` 已经从主线移除。
+          这是 <code>rivalens/workflows/competitive_analysis.py</code> 的主链路。关键变化是 analysis 现在在 knowledge 之后，
+          claim support 在 writer 之前，并且只有 weak / unverifiable claim 能触发一次 verification 回采。
         </p>
       </div>
       <div class="logic-figure" aria-label="当前 DAG 流转图">
-        <svg viewBox="0 0 1120 420" role="img">
+        <svg viewBox="0 0 1120 430" role="img">
           <defs>
             <marker id="arrow-dag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
             </marker>
+            <marker id="arrow-dag-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
+            </marker>
           </defs>
 
-          <text x="24" y="34" class="svg-title">LangGraph DAG：确定性流转</text>
+          <text x="24" y="34" class="svg-title">LangGraph DAG：claim support 前置到写作之前</text>
 
-          <rect x="44" y="96" width="132" height="58" class="svg-box"></rect>
-          <text x="66" y="130" class="svg-small">PlanningAgent</text>
-          <line x1="176" y1="125" x2="226" y2="125" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
+          <rect x="38" y="110" width="132" height="58" class="svg-box"></rect>
+          <text x="58" y="134" class="svg-small">scope_planner</text>
+          <text x="66" y="152" class="svg-small">PlanningAgent</text>
+          <line x1="170" y1="139" x2="214" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
 
-          <rect x="226" y="96" width="164" height="58" class="svg-industry"></rect>
-          <text x="248" y="130" class="svg-small">SchemaSelectionAgent</text>
-          <line x1="390" y1="125" x2="440" y2="125" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
+          <rect x="214" y="110" width="150" height="58" class="svg-industry"></rect>
+          <text x="234" y="134" class="svg-small">source_collection</text>
+          <text x="242" y="152" class="svg-small">CollectionAgent</text>
+          <line x1="364" y1="139" x2="408" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
 
-          <rect x="440" y="96" width="132" height="58" class="svg-box"></rect>
-          <text x="462" y="130" class="svg-small">CollectionAgent</text>
-          <line x1="572" y1="125" x2="622" y2="125" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
+          <rect x="408" y="110" width="190" height="58" class="svg-core"></rect>
+          <text x="434" y="134" class="svg-small">knowledge_structuring</text>
+          <text x="428" y="152" class="svg-small">KnowledgeStructuringAgent</text>
+          <line x1="598" y1="139" x2="642" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
 
-          <rect x="622" y="96" width="190" height="58" class="svg-review"></rect>
-          <text x="640" y="130" class="svg-small">EvidenceQualityReviewer</text>
-          <line x1="812" y1="125" x2="850" y2="125" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
+          <rect x="642" y="110" width="154" height="58" class="svg-box"></rect>
+          <text x="664" y="134" class="svg-small">dimension_analysis</text>
+          <text x="680" y="152" class="svg-small">AnalysisAgent</text>
+          <line x1="796" y1="139" x2="840" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
 
-          <rect x="850" y="96" width="198" height="58" class="svg-core"></rect>
-          <text x="872" y="130" class="svg-small">KnowledgeStructuringAgent</text>
+          <rect x="840" y="110" width="184" height="58" class="svg-review"></rect>
+          <text x="860" y="134" class="svg-small">claim_support_review</text>
+          <text x="864" y="152" class="svg-small">ClaimSupportReviewer</text>
 
-          <path d="M 717 154 C 716 208 770 224 850 224" class="svg-feedback"></path>
-          <text x="628" y="206" class="svg-small">accepted evidence only</text>
+          <path d="M 932 168 C 930 248 300 250 290 168" class="svg-feedback" marker-end="url(#arrow-dag-red)"></path>
+          <text x="480" y="232" class="svg-small">needs_verification: 仅当 queue 非空且 verification_rounds == 0</text>
 
-          <line x1="949" y1="154" x2="949" y2="204" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-          <rect x="870" y="204" width="158" height="58" class="svg-box"></rect>
-          <text x="902" y="238" class="svg-small">AnalysisAgent</text>
+          <line x1="932" y1="168" x2="932" y2="216" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
+          <rect x="854" y="216" width="156" height="58" class="svg-box"></rect>
+          <text x="884" y="240" class="svg-small">report_writer</text>
+          <text x="886" y="258" class="svg-small">ReportWriterAgent</text>
 
-          <line x1="949" y1="262" x2="949" y2="306" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-          <rect x="850" y="306" width="172" height="58" class="svg-output"></rect>
-          <text x="872" y="340" class="svg-small">ReportWriter -> Publisher</text>
+          <line x1="932" y1="274" x2="932" y2="316" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
+          <rect x="854" y="316" width="156" height="58" class="svg-output"></rect>
+          <text x="902" y="340" class="svg-small">publisher</text>
+          <text x="904" y="358" class="svg-small">Publisher</text>
+
+          <rect x="58" y="302" width="660" height="72" class="svg-hole"></rect>
+          <text x="82" y="330" class="svg-small">仍要补：Final QA 还没有单独节点；writer 过滤 supported claims，但报告级 coverage / contradiction replay 还弱。</text>
+          <text x="82" y="352" class="svg-small">当前 source_collection 里 evidence review / coverage review 是内部控制，不是 LangGraph 显式节点。</text>
         </svg>
       </div>
     </section>
 
     <section id="research-tree">
       <div class="section-head">
-        <h2>Research Branch Tree</h2>
+        <h2>三阶段衔接图</h2>
         <p class="section-note">
-          CollectionAgent 内部不是一次性 search 完就结束，而是先为每个 competitor x schema dimension 建 root branch，
-          再由 EvidenceQualityReviewer 判断证据质量，BranchReviewAgent 决定是否继续拆 child branch。
+          现在 landscape、focused、verification 都是 <code>ResearchTask.search_stage</code>。它们共享 branch lineage，
+          但输出对象不同，所以不能把 landscape 结果直接送进 analysis。
         </p>
       </div>
       <div class="research-tree-layout">
@@ -763,92 +815,89 @@
             <li>
               <div class="branch-node node-root">
                 <header>
-                  <span class="tag next">User Task</span>
-                  <strong>Compare Notion and ClickUp for enterprise workspace adoption</strong>
+                  <span class="tag next">Root Branch</span>
+                  <strong>Competitor x Analysis Dimension</strong>
                 </header>
-                <p>PlanningAgent 先冻结 ActiveKnowledgeSchema，CollectionAgent 再把任务拆成 schema-aware root branches。</p>
+                <p>PlanningAgent 给出竞品和确认维度，CollectionAgent 生成 root branch、ResearchBrief 和 ResearchTask。</p>
               </div>
               <ul>
                 <li>
                   <div class="branch-node node-search">
                     <header>
-                      <span class="step-dot">1</span>
-                      <strong>Root branch: Notion x Pricing Model</strong>
+                      <span class="tag risk">landscape</span>
+                      <strong>source-universe discovery</strong>
                     </header>
-                    <p>第一个子主题回答“Notion 的公开定价、套餐边界、enterprise 购买入口是什么”。</p>
-                    <code>Notion pricing plans enterprise add-ons official</code>
+                    <p>用于 market_growth、competitive_moat 或 high-risk / source universe 不清楚的维度。输出候选 source、source type、消歧状态和 follow-up specs。</p>
+                    <code>LandscapeAssessment: candidate_sources, focused_task_specs, next_action</code>
                   </div>
                   <ul>
                     <li>
-                      <div class="branch-node node-review">
+                      <div class="branch-node node-branch">
                         <header>
-                          <span class="tag risk">EvidenceQualityReviewer</span>
-                          <strong>standard search 后做证据质检</strong>
+                          <span class="tag done">needs_focused_collection</span>
+                          <strong>candidate source -> focused child branch</strong>
                         </header>
-                        <p>检查是否有 URL、是否匹配 Notion、是否属于 pricing_model、是否有 pricing_page 和 official source。</p>
+                        <p>前两个候选 URL 或缺失 source type 会变成 focused task，带 parent_task_id 保留血缘。</p>
                       </div>
                     </li>
                     <li>
-                      <div class="branch-node node-branch">
+                      <div class="branch-node node-review">
                         <header>
-                          <span class="tag done">BranchReviewAgent</span>
-                          <strong>required_action = expand</strong>
+                          <span class="tag risk">漏洞</span>
+                          <strong>needs_dimension_split / disambiguation 还不完整</strong>
                         </header>
-                        <p>发现缺少 enterprise packaging 证据，于是批准一个仍然贴着 pricing_model 的 child branch。</p>
+                        <p>代码已接受这些 next_action，但 split suggestions 还没真正变成新的 child dimensions；消歧也还不是专用 task。</p>
                       </div>
-                      <ul>
-                        <li>
-                          <div class="branch-node node-search">
-                            <header>
-                              <span class="step-dot">2</span>
-                              <strong>Child branch: enterprise packaging</strong>
-                            </header>
-                            <p>根据 root branch 的证据缺口继续深入挖掘，拆成更窄的 sub-query。</p>
-                            <code>Notion enterprise pricing SSO audit log admin controls official docs</code>
-                          </div>
-                          <ul>
-                            <li>
-                              <div class="branch-node node-stop">
-                                <header>
-                                  <span class="tag done">accepted</span>
-                                  <strong>accepted evidence 进入 KnowledgeStructuringAgent</strong>
-                                </header>
-                                <p>EvidenceItem 保留 branch_id、collection_task_id、dimension_id，后续 claim 可以回查到原始 URL。</p>
-                              </div>
-                            </li>
-                          </ul>
-                        </li>
-                      </ul>
                     </li>
                   </ul>
                 </li>
                 <li>
                   <div class="branch-node node-search">
                     <header>
-                      <span class="step-dot">1</span>
-                      <strong>Root branch: ClickUp x Security Compliance</strong>
+                      <span class="tag done">focused</span>
+                      <strong>evidence collection</strong>
                     </header>
-                    <p>另一个并行 root branch 回答“ClickUp 是否有安全、合规、管理能力的公开证据”。</p>
-                    <code>ClickUp security compliance trust center docs admin governance</code>
+                    <p>默认阶段。大多数 pricing、docs、review、marketplace 维度直接从 focused 开始，或者由 landscape follow-up 生成。</p>
+                    <code>EvidenceItem -> EvidenceQualityReviewer -> CoverageReviewer</code>
                   </div>
                   <ul>
                     <li>
                       <div class="branch-node node-review">
                         <header>
-                          <span class="tag risk">EvidenceQualityReviewer</span>
-                          <strong>required_action = retry</strong>
+                          <span class="tag done">accepted evidence</span>
+                          <strong>进入 KnowledgeStructuringAgent</strong>
                         </header>
-                        <p>如果 search 返回了摘要但缺 URL，证据会被 rejected，BranchReviewAgent 会生成 retry 型 child query。</p>
+                        <p>EvidenceItem 保留 branch_id、collection_task_id、research_task_id、dimension_id 和 URL，用于后续 claim 回查。</p>
                       </div>
                     </li>
                     <li>
                       <div class="branch-node node-branch">
                         <header>
-                          <span class="step-dot">3</span>
-                          <strong>Retry branch: source-backed security docs</strong>
+                          <span class="tag risk">coverage gap</span>
+                          <strong>collect_more / refine_query</strong>
                         </header>
-                        <p>branch extension 不是泛泛扩写主题，而是补齐具体缺口，同时过滤 founder、funding、culture 这类 high drift 分支。</p>
-                        <code>ClickUp trust center SOC 2 SSO security documentation official source URL</code>
+                        <p>CoverageReviewer 可以生成 follow_up_task_specs，继续扩一个 depth 以内的 child branch。</p>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  <div class="branch-node node-search">
+                    <header>
+                      <span class="tag risk">verification</span>
+                      <strong>claim-driven follow-up</strong>
+                    </header>
+                    <p>不是普通覆盖率补采。只有 ClaimSupportReviewer 发现 weak / unverifiable claim 时才会把 verification_task_queue 推回 CollectionAgent。</p>
+                    <code>ClaimSupportReview -> verification_task_queue -> verify_* branch</code>
+                  </div>
+                  <ul>
+                    <li>
+                      <div class="branch-node node-stop">
+                        <header>
+                          <span class="tag done">bounded loop</span>
+                          <strong>最多一轮 verification</strong>
+                        </header>
+                        <p>route_after_claim_support 只有在 queue 非空且 verification_rounds 为 0 时回 source_collection，避免无限循环。</p>
                       </div>
                     </li>
                   </ul>
@@ -860,16 +909,20 @@
         <aside class="tree-examples" aria-label="research tree examples">
           <h3>读图方式</h3>
           <div class="example-item">
-            <strong>1. 第一个子主题要干嘛</strong>
-            <p>root branch 由 ActiveKnowledgeSchema 生成，目标是补齐某个 competitor x dimension 的基础覆盖。</p>
+            <strong>1. landscape 不是证据</strong>
+            <p>它只产生 source universe、query refinements 和 focused_task_specs。只有 focused / verification 的结果会变成 EvidenceItem。</p>
           </div>
           <div class="example-item">
-            <strong>2. 为什么继续拆 sub-query</strong>
-            <p>EvidenceQualityReviewer 发现 no_evidence、missing_pricing_page、missing_docs_or_security_source 等缺口后，BranchReviewAgent 才允许 expand 或 retry。</p>
+            <strong>2. focused 是主采集</strong>
+            <p>它接受 root branch、landscape follow-up 或 coverage follow-up，产出可被 knowledge / analysis 使用的 accepted evidence。</p>
           </div>
           <div class="example-item">
-            <strong>3. 两个 review 的分工</strong>
-            <p>EvidenceQualityReviewer 判断证据能不能用；BranchReviewAgent 判断分支要不要扩、怎么扩、是否超过深度和预算。</p>
+            <strong>3. verification 只服务 claim</strong>
+            <p>它从 ClaimSupportReview 生成，目标是支持或推翻具体 claim，不负责扩大普通维度覆盖。</p>
+          </div>
+          <div class="example-item">
+            <strong>4. 当前漏洞</strong>
+            <p>dimension split、competitor disambiguation、strong entailment 和 deep candidate URL collection 还需要继续补。</p>
           </div>
         </aside>
       </div>
@@ -877,32 +930,44 @@
 
     <section id="schema">
       <div class="section-head">
-        <h2>当前核心 Schema</h2>
+        <h2>当前核心对象</h2>
         <p class="section-note">
-          当前主线是 `ActiveKnowledgeSchema -> CompetitorKnowledge -> AnalysisClaim`。报告层的 `ReportDocument` 是下一步。
+          现在最重要的不是前后端，而是这些对象之间的血缘：task、branch、evidence、claim、claim support review 必须能互相回查。
         </p>
       </div>
       <div class="grid">
         <div class="card">
-          <h3>ActiveKnowledgeSchema</h3>
-          <p>本次任务冻结后的 schema，包括候选行业、选中行业、core fields、industry extensions 和 candidate extensions。</p>
+          <h3>ResearchBrief / ResearchTask</h3>
+          <p>ResearchBrief 定义 competitor x dimension 的目标；ResearchTask 带 <code>search_stage</code>、query、parent_task_id 和 generated_from_gap。</p>
+        </div>
+        <div class="card">
+          <h3>LandscapeAssessment</h3>
+          <p>只描述 source universe：candidate_sources、discovered_source_types、competitor_disambiguation、dimension_split_suggestions 和 follow-up specs。</p>
+        </div>
+        <div class="card">
+          <h3>EvidenceItem / CoverageAssessment</h3>
+          <p>focused / verification 产出 EvidenceItem；EvidenceQualityReviewer 和 CoverageReviewer 决定 accepted evidence 与补采任务。</p>
         </div>
         <div class="card">
           <h3>CompetitorKnowledge</h3>
-          <p>每个竞品的结构化知识对象，包含 feature tree、pricing model、user personas、industry extensions 和 evidence ids。</p>
+          <p>KnowledgeStructuringAgent 只消费 accepted evidence，结构化每个竞品的公开证据和维度知识。</p>
         </div>
         <div class="card">
           <h3>AnalysisClaim</h3>
-          <p>基于 CompetitorKnowledge 生成的分析结论，必须绑定 evidence ids、reasoning 和 confidence。</p>
+          <p>AnalysisAgent 基于 CompetitorKnowledge 生成 claim，每条 claim 必须绑定 evidence_ids、dimension、competitors 和 confidence。</p>
+        </div>
+        <div class="card">
+          <h3>ClaimSupportReview</h3>
+          <p>ClaimSupportReviewer 标记 supported / weak / contradicted / unverifiable，并为弱 claim 生成一次 verification task。</p>
         </div>
       </div>
     </section>
 
     <section id="roadmap">
       <div class="section-head">
-        <h2>TODO 看板</h2>
+        <h2>漏洞看板</h2>
         <p class="section-note">
-          每条 TODO 都是“总结 + 展开”，按当前项目真实状态重新排序。
+          这里按现在 research 三阶段的实际断点排序。绿色是已经接上，黄色是还能跑但语义不够强，红色是下一步应该优先补的洞。
         </p>
       </div>
       <div class="table-wrap">
@@ -917,101 +982,101 @@
           </thead>
           <tbody>
             <tr>
-              <td><span class="tag done">已完成</span></td>
-              <td><strong>Schema-aware 并行采集</strong></td>
-              <td>CollectionAgent 根据 core fields 和 industry extensions 生成采集任务。</td>
+              <td><span class="tag done">已接上</span></td>
+              <td><strong>DAG stage 顺序</strong></td>
+              <td>analysis 已移到 knowledge_structuring 之后，writer 之前新增 claim support gate。</td>
               <td>
                 <details open>
                   <summary>查看展开</summary>
-                  <p>现在会为每个 competitor x schema dimension 生成必跑 root branch，并用 asyncio.gather 并行调用 ResearchEngineEvidenceCollector。root coverage 不消耗展开预算；EvidenceItem 会带 branch_id、collection_task_id、dimension_id 和 dimension_name。</p>
+                  <p>当前代码是 <code>scope_planner -> source_collection -> knowledge_structuring -> dimension_analysis -> claim_support_review -> report_writer -> publisher</code>。这解决了之前 analysis 读不到 structured knowledge 的问题。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag done">已完成</span></td>
-              <td><strong>ResearchToolkit 删除与边界收束</strong></td>
-              <td>不再让多个 Agent 共享泛 research 工具；Search 只属于 CollectionAgent。</td>
+              <td><span class="tag done">已接上</span></td>
+              <td><strong>landscape -> focused 衔接</strong></td>
+              <td>landscape 不进 evidence，改为生成 LandscapeAssessment 和 focused_task_specs。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>新增 ResearchEngineEvidenceCollector，负责把 ResearchEngine sources 标准化为 EvidenceItem。CollectionAgent 维护 research_branches 和 branch_review_decisions；Knowledge、Analysis、Writing 不直接调用 research/report mode。EvidenceQualityReviewer 负责证据可用性，BranchReviewAgent 只消费 review result 来做 expand/retry/fail/stop 和 high drift 控制。</p>
+                  <p>candidate_sources 前两个会变成 focused child tasks，缺失的 expected_source_types 也会生成 focused task。无 candidate source 时会生成 landscape refinement task。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag next">现在</span></td>
-              <td><strong>接入官方行业分类 PDF</strong></td>
-              <td>把当前内置 registry 升级为“官方 taxonomy + 本地扩展”。</td>
+              <td><span class="tag done">已接上</span></td>
+              <td><strong>claim-driven verification 回环</strong></td>
+              <td>weak / unverifiable claim 可以触发一次 verification pass。</td>
               <td>
                 <details open>
                   <summary>查看展开</summary>
-                  <p>新增 TaxonomyLoader，解析官方 PDF 或人工整理后的 JSON。SchemaSelectionAgent 应优先使用官方行业边界，再结合 query、竞品名和初步证据做候选行业排序。</p>
+                  <p>ClaimSupportReviewer 生成 <code>verification_task_queue</code>；LangGraph conditional edge 在 <code>verification_rounds == 0</code> 时回到 source_collection。CollectionAgent verification pass 只消费 queue，不重建普通 root branches。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag next">现在</span></td>
-              <td><strong>增强 KnowledgeStructuringAgent</strong></td>
-              <td>从规则拼装升级为 schema-guided extraction。</td>
+              <td><span class="tag risk">漏洞</span></td>
+              <td><strong>dimension split 还没真正执行</strong></td>
+              <td><code>dimension_split_suggestions</code> 已记录，但不会生成新的 split child dimensions。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>按 ActiveKnowledgeSchema 分别抽取 feature、pricing、persona 和 industry extension。每个字段都要绑定 evidence_ids、confidence 和抽取理由。</p>
+                  <p>例如 competitive_moat 会建议 switching_cost、ecosystem_lock_in、proprietary_data、brand_distribution，但 CollectionAgent 目前只消费 focused_task_specs。下一步要把 split suggestions 转成带 dimension lineage 的 child tasks。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag next">现在</span></td>
-              <td><strong>新增 ReportDocument</strong></td>
-              <td>最终报告背后必须是结构化文档，而不是 Markdown 字符串。</td>
+              <td><span class="tag risk">漏洞</span></td>
+              <td><strong>competitor disambiguation 还不专用</strong></td>
+              <td>LandscapeReviewer 会标记 ambiguous / unknown，但只是通过通用 refinement specs 处理。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>定义 sections、blocks、spans。每个 span 绑定 claim_ids、evidence_ids、confidence。Markdown/HTML/PDF 都从 ReportDocument 渲染。</p>
+                  <p>下一步需要显式 disambiguation task：约束 official domain、别名、产品线、国家/地区、竞品同名公司，并把 recommended_constraint 写入后续 query。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">下一步</span></td>
-              <td><strong>补 SchemaReviewAgent</strong></td>
-              <td>AI 可以提出候选字段，但不能直接发布 schema。</td>
+              <td><span class="tag risk">漏洞</span></td>
+              <td><strong>claim support 仍然浅</strong></td>
+              <td>当前支持判断主要是 claim tokens 和 evidence text 的词面 overlap。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>candidate_extensions 必须带 reason、signals、evidence_ids、confidence。SchemaReviewAgent 负责去重、拒绝过度细分、判断是否纳入本次 ActiveKnowledgeSchema。</p>
+                  <p>这能挡住无 evidence claim，但不能可靠判断“证据是否真的蕴含 claim”或是否 contradicted。下一步需要句子级 evidence spans、claim decomposition 和 contradiction checks。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag done">完成</span></td>
-              <td><strong>采集后 Evidence Review Gate</strong></td>
-              <td>standard search 结束后立即审查证据质量，只让 accepted evidence 进入结构化。</td>
+              <td><span class="tag risk">漏洞</span></td>
+              <td><strong>focused / verification 深采还不够</strong></td>
+              <td><code>_run_collection_task</code> 现在统一 <code>deep=False</code>。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>新增 EvidenceQualityReviewer 负责 accepted/rejected evidence、findings、required_action；BranchReviewAgent 消费 review result 后只负责分支级 expand/retry/fail/stop。</p>
+                  <p>landscape 找到候选 URL 后，focused child task 理论上应该更像 targeted fetch / deep collect；verification 也应优先拉证据片段，而不是只做浅搜索。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">后续</span></td>
-              <td><strong>建设交互式报告 Viewer</strong></td>
-              <td>支持 hover 高亮、点击证据、原文跳转和用户反馈。</td>
+              <td><span class="tag risk">漏洞</span></td>
+              <td><strong>Analysis claim 质量仍要增强</strong></td>
+              <td>AnalysisAgent 已经接在 knowledge 后面，但 claim 可能仍偏浅。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>基于 ReportDocument 渲染 HTML viewer。ReportSpan hover 展示 claim、confidence、evidence；点击 evidence 跳转网页原文或 snapshot 片段。</p>
+                  <p>下一步应按 dimension 生成可比较的 claims，避免“has quality-reviewed evidence”这类占位式 claim，并为每条 claim 绑定最小充分 evidence set。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">后续</span></td>
-              <td><strong>新增 FeedbackEvent</strong></td>
-              <td>用户反馈要写回结构化对象，而不是只改文本。</td>
+              <td><span class="tag next">后续</span></td>
+              <td><strong>前端 replay / source review</strong></td>
+              <td>现在 HTML 看板只说明架构，产品里还要能看 research decisions。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>FeedbackEvent 绑定 report_span_id、claim_id、evidence_id，支持 mark wrong、edit claim、request source、approve 和 lower confidence。</p>
+                  <p>需要展示 ResearchBrief、ResearchTask、LandscapeAssessment、CoverageAssessment、ClaimSupportReview，让用户能从报告句子回到 claim、evidence、URL 和当时为什么补采。</p>
                 </details>
               </td>
             </tr>
@@ -1022,7 +1087,7 @@
   </main>
 
   <footer>
-    当前结论：Rivalens 已经从旧的 ProductFact 路线转向行业感知的 CompetitorKnowledge 路线；下一步应补官方 taxonomy、结构化报告文档和交互溯源。
+    当前结论：research 三阶段已经有主链路和一次 verification 回环；下一步优先补 dimension split、竞品消歧、深采策略和更强 claim support。
   </footer>
 </body>
 </html>
