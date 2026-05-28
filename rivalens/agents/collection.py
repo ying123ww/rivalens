@@ -5,6 +5,7 @@ from typing import Any
 
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
+from rivalens.agents.landscape_review import LandscapeReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector
@@ -24,6 +25,7 @@ class CollectionAgent:
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
         evidence_reviewer: EvidenceQualityReviewer | None = None,
         coverage_reviewer: CoverageReviewer | None = None,
+        landscape_reviewer: LandscapeReviewer | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 24,
         max_root_branch_hard_limit: int = 80,
@@ -31,6 +33,7 @@ class CollectionAgent:
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
         self.coverage_reviewer = coverage_reviewer or CoverageReviewer()
+        self.landscape_reviewer = landscape_reviewer or LandscapeReviewer()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
@@ -57,6 +60,7 @@ class CollectionAgent:
         research_branches = list(state.get("research_branches", []))
         research_briefs = list(state.get("research_briefs", []))
         research_tasks = list(state.get("research_tasks", []))
+        landscape_assessments = list(state.get("landscape_assessments", []))
         coverage_assessments = list(state.get("coverage_assessments", []))
         evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
@@ -124,6 +128,58 @@ class CollectionAgent:
                             "error": str(result),
                         }
                     )
+                    continue
+
+                if research_task.get("search_stage") == "landscape":
+                    landscape_assessment = self.landscape_reviewer.review(
+                        branch=branch,
+                        research_task=research_task,
+                        sources=result.get("evidence_items", []),
+                    )
+                    landscape_assessments.append(landscape_assessment)
+                    contexts.append(result)
+                    research_artifacts.append(
+                        {
+                            "id": f"artifact_collection_{len(research_artifacts) + 1}",
+                            "agent": "collection",
+                            "mode": "landscape",
+                            "query": result["query"],
+                            "competitor": collection_task["competitor"],
+                            "branch_id": branch["id"],
+                            "research_brief_id": collection_task.get("research_brief_id", ""),
+                            "research_task_id": collection_task.get("research_task_id", ""),
+                            "search_stage": "landscape",
+                            "generated_from_gap": collection_task.get("generated_from_gap", ""),
+                            "dimension_id": collection_task["dimension_id"],
+                            "dimension_name": collection_task["dimension_name"],
+                            "collection_task_id": collection_task["id"],
+                            "context": {
+                                "candidate_sources": landscape_assessment.get("candidate_sources", []),
+                                "user_visible_summary": landscape_assessment.get("user_visible_summary", ""),
+                            },
+                            "evidence_ids": [],
+                            "costs": result["costs"],
+                        }
+                    )
+                    follow_up_specs = landscape_assessment.get("focused_task_specs", [])
+                    if (
+                        landscape_assessment.get("next_action") == "needs_focused_collection"
+                        and follow_up_specs
+                        and branch.get("depth", 0) < self.max_branch_depth
+                    ):
+                        branch["status"] = "expanded"
+                        remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
+                        if remaining_branch_slots <= 0:
+                            branch["status"] = "stopped"
+                            continue
+                        children = self._build_child_branches(branch, follow_up_specs)[
+                            :remaining_branch_slots
+                        ]
+                        expansion_branch_count += len(children)
+                        next_frontier.extend(children)
+                        research_branches.extend(children)
+                    else:
+                        branch["status"] = "stopped"
                     continue
 
                 sources = self._assign_evidence_ids(
@@ -237,6 +293,7 @@ class CollectionAgent:
             "research_branches": research_branches,
             "research_briefs": research_briefs,
             "research_tasks": research_tasks,
+            "landscape_assessments": landscape_assessments,
             "coverage_assessments": coverage_assessments,
             "research_artifacts": research_artifacts,
             "messages": state.get("messages", []) + [message, analysis_message],
@@ -266,6 +323,7 @@ class CollectionAgent:
                         "branch_count": len(research_branches),
                         "research_brief_count": len(research_briefs),
                         "research_task_count": len(research_tasks),
+                        "landscape_assessment_count": len(landscape_assessments),
                         "expanded_branch_count": expansion_branch_count,
                         "evidence_review_count": len(evidence_reviews),
                         "coverage_assessment_count": len(coverage_assessments),
@@ -621,6 +679,8 @@ class CollectionAgent:
         return "Expected source types: " + ", ".join(str(source) for source in expected_source_types)
 
     def _initial_search_stage_from_dimension(self, dimension: dict[str, Any]) -> str:
+        if dimension.get("id") in {"market_growth", "competitive_moat"}:
+            return "landscape"
         expected_source_types = set(dimension.get("expected_source_types", []))
         if {"pricing_page", "docs", "review", "marketplace"} & expected_source_types:
             return "focused"

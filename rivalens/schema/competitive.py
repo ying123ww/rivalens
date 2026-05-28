@@ -143,6 +143,13 @@ CoverageNextAction = Literal[
     "split_dimension",
     "stop_with_limit",
 ]
+LandscapeNextAction = Literal[
+    "needs_focused_collection",
+    "needs_refinement",
+    "needs_competitor_disambiguation",
+    "needs_dimension_split",
+    "stop_with_limit",
+]
 
 
 class ResearchBrief(TypedDict, total=False):
@@ -185,6 +192,33 @@ class FollowUpTaskSpec(TypedDict, total=False):
     generated_from_gap: str
     reason: str
     search_stage: SearchStage
+
+
+class CandidateSource(TypedDict, total=False):
+    url: str
+    title: str
+    source_type: EvidenceType
+    domain: str
+    relevance_reason: str
+    confidence: float
+    should_collect_deeply: bool
+
+
+class LandscapeAssessment(TypedDict, total=False):
+    id: str
+    branch_id: str
+    research_task_id: str
+    competitor: str
+    dimension_id: str
+    discovered_source_types: list[str]
+    candidate_sources: list[CandidateSource]
+    source_universe_confidence: float
+    competitor_disambiguation: dict[str, Any]
+    dimension_split_suggestions: list[str]
+    query_refinements: list[str]
+    focused_task_specs: list[FollowUpTaskSpec]
+    next_action: LandscapeNextAction
+    user_visible_summary: str
 
 
 class CoverageAssessment(TypedDict, total=False):
@@ -517,6 +551,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     research_branches: list[ResearchBranch]
     research_briefs: list[ResearchBrief]
     research_tasks: list[ResearchTask]
+    landscape_assessments: list[LandscapeAssessment]
     coverage_assessments: list[CoverageAssessment]
     evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext

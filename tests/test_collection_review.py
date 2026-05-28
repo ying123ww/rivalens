@@ -176,6 +176,79 @@ class CollectionReviewTest(unittest.TestCase):
             )
         )
 
+    def test_landscape_task_creates_assessment_without_evidence_items(self):
+        class FakeLandscapeCollector:
+            async def collect(self, collection_task, deep=False, verbose=True):
+                if collection_task.get("search_stage") == "landscape":
+                    sources = [
+                        {
+                            "title": "Acme product overview",
+                            "url": "https://acme.example/product",
+                            "source_type": "official_site",
+                            "excerpt": "Acme product overview.",
+                            "confidence": 0.7,
+                        }
+                    ]
+                else:
+                    sources = []
+                return {
+                    "task": dict(collection_task),
+                    "mode": "standard_evidence",
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": sources,
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme moat",
+                "competitors": [{"name": "Acme"}],
+                "verbose": False,
+            },
+            "active_knowledge_schema": {
+                "id": "schema_productivity",
+                "selected_industry": {"name": "Productivity SaaS"},
+            },
+            "analysis_dimensions": [
+                {
+                    "id": "competitive_moat",
+                    "name": "竞争壁垒",
+                    "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
+                    "priority": "P1",
+                    "guiding_questions": ["各竞品的核心壁垒是什么？"],
+                    "search_intent": "搜索竞争壁垒公开线索。",
+                    "expected_source_types": ["official_site", "review"],
+                    "minimum_coverage": ["Landscape first, then focused collection."],
+                    "risk_level": "high",
+                    "expected_claim_types": ["moat"],
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=FakeLandscapeCollector(),
+                max_branch_depth=1,
+                max_expansion_branches=2,
+            ).run(state)
+        )
+
+        self.assertEqual(len(result["evidence_items"]), 0)
+        self.assertEqual(len(result["landscape_assessments"]), 1)
+        landscape = result["landscape_assessments"][0]
+        self.assertEqual(landscape["next_action"], "needs_focused_collection")
+        self.assertIn("official_site", landscape["discovered_source_types"])
+        self.assertTrue(landscape["focused_task_specs"])
+        self.assertTrue(
+            any(
+                task["search_stage"] == "focused"
+                and task["generated_from_gap"] == "landscape_candidate_source"
+                for task in result["research_tasks"]
+            )
+        )
+
     def test_evidence_item_uses_query_relevant_chunk(self):
         irrelevant_intro = "General company overview. " * 80
         pricing_signal = (
