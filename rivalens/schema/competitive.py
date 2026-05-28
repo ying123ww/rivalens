@@ -61,6 +61,8 @@ class EvidenceCollectionTask(TypedDict, total=False):
     dimension_id: str
     dimension_name: str
     dimension_type: str
+    parent_dimension_id: str
+    target_urls: list[str]
     query: str
 
 
@@ -118,6 +120,8 @@ class ResearchBranch(TypedDict, total=False):
     id: str
     research_brief_id: str
     parent_id: str | None
+    parent_task_id: str | None
+    parent_dimension_id: str
     depth: int
     path: list[str]
     competitor: str
@@ -126,6 +130,7 @@ class ResearchBranch(TypedDict, total=False):
     dimension_type: str
     topic: str
     query: str
+    target_urls: list[str]
     search_stage: str
     generated_from_gap: str
     expected_source_types: list[str]
@@ -180,6 +185,7 @@ class ResearchTask(TypedDict, total=False):
     search_stage: SearchStage
     objective: str
     query: str
+    target_urls: list[str]
     expected_source_types: list[str]
     generated_from_gap: str
     reason: str
@@ -189,6 +195,11 @@ class ResearchTask(TypedDict, total=False):
 class FollowUpTaskSpec(TypedDict, total=False):
     objective: str
     query: str
+    dimension_id: str
+    dimension_name: str
+    dimension_type: str
+    parent_dimension_id: str
+    target_urls: list[str]
     target_source_types: list[str]
     generated_from_gap: str
     reason: str
@@ -218,6 +229,7 @@ class LandscapeAssessment(TypedDict, total=False):
     dimension_split_suggestions: list[str]
     query_refinements: list[str]
     focused_task_specs: list[FollowUpTaskSpec]
+    split_task_specs: list[FollowUpTaskSpec]
     next_action: LandscapeNextAction
     user_visible_summary: str
 

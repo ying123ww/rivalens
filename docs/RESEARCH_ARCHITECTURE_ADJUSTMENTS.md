@@ -29,8 +29,11 @@
 - `ClaimSupportReviewer` 作为 claim-level support gate，输出 `ClaimSupportReview` 和一次性的 `verification_task_queue`。
 - `claim_support_review` 可通过 LangGraph conditional edge 回到 `source_collection` 执行 claim-driven `verification` 搜索阶段。
 - `CollectionAgent` 区分 initial/gap collection 与 verification pass，verification pass 只消费 `verification_task_queue`，不会重建 root branches。
-- landscape 的 `needs_refinement`、`needs_competitor_disambiguation`、`needs_dimension_split` 不再直接吞掉；可转为带血缘的后续 task。
-- `ResearchTask.parent_task_id` 已贯通 landscape/focused follow-up 任务，便于回放阶段衔接。
+- landscape 的 `needs_refinement`、`needs_competitor_disambiguation`、`needs_dimension_split` 不再直接吞掉；已转为带血缘的后续 task。
+- `ResearchTask.parent_task_id` 已贯通 landscape/focused/split follow-up 任务，便于回放阶段衔接。
+- landscape candidate source 会写入 `target_urls`，对应 focused child task 使用 deep collection。
+- `competitor_disambiguation` 会生成专用 follow-up task，而不是落回通用 refinement。
+- `dimension_split_suggestions` 会生成 split child dimensions，例如 `competitive_moat.switching_cost`。
 
 原始问题是：
 

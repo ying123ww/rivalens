@@ -7,6 +7,7 @@ from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
+from rivalens.agents.landscape_review import LandscapeReviewer
 from rivalens.agents.planning import PlanningAgent
 from rivalens.agents.writing import ReportWriterAgent
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
@@ -178,8 +179,16 @@ class CollectionReviewTest(unittest.TestCase):
         )
 
     def test_landscape_task_creates_assessment_without_evidence_items(self):
+        seen_calls = []
+
         class FakeLandscapeCollector:
             async def collect(self, collection_task, deep=False, verbose=True):
+                seen_calls.append(
+                    {
+                        "task": dict(collection_task),
+                        "deep": deep,
+                    }
+                )
                 if collection_task.get("search_stage") == "landscape":
                     sources = [
                         {
@@ -213,16 +222,16 @@ class CollectionReviewTest(unittest.TestCase):
             },
             "analysis_dimensions": [
                 {
-                    "id": "competitive_moat",
-                    "name": "竞争壁垒",
-                    "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
+                    "id": "market_growth",
+                    "name": "市场增长",
+                    "description": "市场规模、增长速度、需求变化和商业机会。",
                     "priority": "P1",
-                    "guiding_questions": ["各竞品的核心壁垒是什么？"],
-                    "search_intent": "搜索竞争壁垒公开线索。",
+                    "guiding_questions": ["公开市场增长线索是什么？"],
+                    "search_intent": "搜索市场增长公开线索。",
                     "expected_source_types": ["official_site", "review"],
                     "minimum_coverage": ["Landscape first, then focused collection."],
                     "risk_level": "high",
-                    "expected_claim_types": ["moat"],
+                    "expected_claim_types": ["market_signal"],
                 }
             ],
             "messages": [],
@@ -242,14 +251,121 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(landscape["next_action"], "needs_focused_collection")
         self.assertIn("official_site", landscape["discovered_source_types"])
         self.assertTrue(landscape["focused_task_specs"])
+        self.assertEqual(
+            landscape["focused_task_specs"][0]["target_urls"],
+            ["https://acme.example/product"],
+        )
         self.assertTrue(
             any(
                 task["search_stage"] == "focused"
                 and task["generated_from_gap"] == "landscape_candidate_source"
-                and task["parent_task_id"] == "task_collect_acme_competitive_moat"
+                and task["parent_task_id"] == "task_collect_acme_market_growth"
+                and task["target_urls"] == ["https://acme.example/product"]
                 for task in result["research_tasks"]
             )
         )
+        self.assertTrue(
+            any(
+                call["task"].get("search_stage") == "focused" and call["deep"]
+                for call in seen_calls
+            )
+        )
+
+    def test_landscape_competitor_disambiguation_is_reachable(self):
+        assessment = LandscapeReviewer().review(
+            branch={
+                "id": "collect_acme_market_growth",
+                "competitor": "Acme",
+                "dimension_id": "market_growth",
+                "dimension_name": "市场增长",
+                "expected_source_types": ["official_site"],
+            },
+            research_task={
+                "id": "task_collect_acme_market_growth",
+                "query": "Compare Acme market growth",
+            },
+            sources=[
+                {
+                    "title": "Unrelated Acme listing",
+                    "url": "https://directory.example/acme",
+                    "source_type": "other",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            assessment["next_action"],
+            "needs_competitor_disambiguation",
+        )
+        self.assertEqual(
+            assessment["focused_task_specs"][0]["generated_from_gap"],
+            "competitor_disambiguation",
+        )
+        self.assertIn("Acme official site", assessment["focused_task_specs"][0]["query"])
+
+    def test_landscape_dimension_split_creates_child_dimension_tasks(self):
+        class FakeSplitCollector:
+            async def collect(self, collection_task, deep=False, verbose=True):
+                sources = []
+                if collection_task.get("search_stage") == "landscape":
+                    sources = [
+                        {
+                            "title": "Acme moat overview",
+                            "url": "https://acme.example/moat",
+                            "source_type": "official_site",
+                            "excerpt": "Acme product overview.",
+                            "confidence": 0.7,
+                        }
+                    ]
+                return {
+                    "task": dict(collection_task),
+                    "mode": "standard_evidence",
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": sources,
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme moat",
+                "competitors": [{"name": "Acme"}],
+                "verbose": False,
+            },
+            "analysis_dimensions": [
+                {
+                    "id": "competitive_moat",
+                    "name": "竞争壁垒",
+                    "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
+                    "expected_source_types": ["official_site", "review"],
+                    "risk_level": "high",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=FakeSplitCollector(),
+                max_branch_depth=1,
+                max_expansion_branches=4,
+            ).run(state)
+        )
+
+        landscape = result["landscape_assessments"][0]
+        self.assertEqual(landscape["next_action"], "needs_dimension_split")
+        self.assertTrue(landscape["split_task_specs"])
+        split_tasks = [
+            task
+            for task in result["research_tasks"]
+            if task.get("generated_from_gap", "").startswith("dimension_split:")
+        ]
+        self.assertTrue(split_tasks)
+        self.assertEqual(
+            split_tasks[0]["dimension_id"],
+            "competitive_moat.switching_cost",
+        )
+        self.assertEqual(split_tasks[0]["parent_task_id"], "task_collect_acme_competitive_moat")
 
     def test_claim_support_review_generates_verification_task_for_unverifiable_claim(self):
         state = {

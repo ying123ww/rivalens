@@ -40,10 +40,17 @@ class LandscapeReviewer:
             research_task,
         )
         disambiguation = self._competitor_disambiguation(branch, candidate_sources)
+        split_suggestions = self._dimension_split_suggestions(branch)
+        split_task_specs = self._split_task_specs(branch, split_suggestions)
+        if disambiguation.get("status") in {"ambiguous", "unknown"}:
+            focused_task_specs = self._disambiguation_task_specs(
+                branch,
+                disambiguation,
+            )
         next_action = self._next_action(
-            candidate_sources,
             focused_task_specs,
             disambiguation,
+            split_task_specs,
         )
 
         return {
@@ -56,9 +63,10 @@ class LandscapeReviewer:
             "candidate_sources": candidate_sources,
             "source_universe_confidence": self._confidence(candidate_sources, missing_source_types),
             "competitor_disambiguation": disambiguation,
-            "dimension_split_suggestions": self._dimension_split_suggestions(branch),
+            "dimension_split_suggestions": split_suggestions,
             "query_refinements": [spec.get("query", "") for spec in focused_task_specs],
             "focused_task_specs": focused_task_specs,
+            "split_task_specs": split_task_specs,
             "next_action": next_action,
             "user_visible_summary": self._summary(
                 discovered_source_types,
@@ -110,6 +118,7 @@ class LandscapeReviewer:
                     "generated_from_gap": "landscape_candidate_source",
                     "reason": "Landscape scan found a candidate source worth focused collection.",
                     "search_stage": "focused",
+                    "target_urls": [source.get("url", "")],
                 }
             )
         for source_type in missing_source_types[:2]:
@@ -135,6 +144,43 @@ class LandscapeReviewer:
                 }
             )
         return specs[:3]
+
+    def _disambiguation_task_specs(
+        self,
+        branch: ResearchBranch,
+        disambiguation: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        competitor = branch.get("competitor", "")
+        if not competitor:
+            return []
+        candidate_domains = [
+            domain for domain in disambiguation.get("candidates", []) if domain
+        ]
+        candidate_line = (
+            "Candidate domains to check: " + ", ".join(candidate_domains[:4])
+            if candidate_domains
+            else "No reliable candidate domain was found."
+        )
+        constraint = disambiguation.get("recommended_constraint") or f"{competitor} official site"
+        return [
+            {
+                "objective": f"Disambiguate competitor identity for {competitor}",
+                "query": "\n".join(
+                    [
+                        f"{competitor} official product website",
+                        f"Competitor: {competitor}",
+                        f"Research focus: {branch.get('dimension_name', branch.get('dimension_id', ''))}",
+                        candidate_line,
+                        f"Required constraint: {constraint}",
+                        "Find public sources that clearly refer to the intended competitor, not a same-name company or unrelated product.",
+                    ]
+                ),
+                "target_source_types": ["official_site"],
+                "generated_from_gap": "competitor_disambiguation",
+                "reason": "Landscape scan could not bind candidate sources to the intended competitor.",
+                "search_stage": "focused",
+            }
+        ]
 
     def _source_query(self, branch: ResearchBranch, source: dict[str, Any]) -> str:
         return "\n".join(
@@ -200,21 +246,55 @@ class LandscapeReviewer:
             ]
         return []
 
+    def _split_task_specs(
+        self,
+        branch: ResearchBranch,
+        split_suggestions: list[str],
+    ) -> list[dict[str, Any]]:
+        specs = []
+        for suggestion in split_suggestions[:4]:
+            split_name = suggestion.replace("_", " ").title()
+            specs.append(
+                {
+                    "objective": f"Collect focused evidence for {split_name}",
+                    "query": "\n".join(
+                        [
+                            f"{branch.get('competitor', '')} {split_name} public evidence".strip(),
+                            f"Competitor: {branch.get('competitor', '')}",
+                            f"Parent dimension: {branch.get('dimension_name', branch.get('dimension_id', ''))}",
+                            f"Split focus: {split_name}",
+                            "Prefer stable public URLs that directly address this split dimension.",
+                        ]
+                    ),
+                    "dimension_id": f"{branch.get('dimension_id', 'dimension')}.{suggestion}",
+                    "dimension_name": split_name,
+                    "dimension_type": "dimension_split",
+                    "parent_dimension_id": branch.get("dimension_id", ""),
+                    "target_source_types": branch.get("expected_source_types", []),
+                    "generated_from_gap": f"dimension_split:{suggestion}",
+                    "reason": "Landscape scan marked this broad dimension as needing focused sub-dimensions.",
+                    "search_stage": "focused",
+                }
+            )
+        return specs
+
     def _next_action(
         self,
-        candidate_sources: list[dict[str, Any]],
         focused_task_specs: list[dict[str, Any]],
         disambiguation: dict[str, Any],
+        split_task_specs: list[dict[str, Any]],
     ) -> str:
-        if disambiguation.get("status") == "ambiguous" and not candidate_sources:
+        if disambiguation.get("status") in {"ambiguous", "unknown"} and focused_task_specs:
             return "needs_competitor_disambiguation"
+        if split_task_specs:
+            return "needs_dimension_split"
         if focused_task_specs and any(
             spec.get("search_stage") == "focused" for spec in focused_task_specs
         ):
             return "needs_focused_collection"
         if focused_task_specs:
             return "needs_refinement"
-        if not candidate_sources:
+        if disambiguation.get("status") == "unknown":
             return "needs_refinement"
         return "stop_with_limit"
 

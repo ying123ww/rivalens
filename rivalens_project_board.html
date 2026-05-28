@@ -619,10 +619,10 @@
           <li><span class="tag done">已接上</span><span><code>landscape</code> 产出 <code>LandscapeAssessment</code> 和 <code>focused_task_specs</code>，不会伪装成最终证据。</span></li>
           <li><span class="tag done">已接上</span><span><code>focused</code> 和 <code>verification</code> 才生成 <code>EvidenceItem</code>，再过 evidence / coverage review。</span></li>
           <li><span class="tag done">已接上</span><span><code>ClaimSupportReviewer</code> 会为 weak / unverifiable claim 创建一次 <code>verification_task_queue</code>。</span></li>
-          <li><span class="tag risk">漏洞</span><span><code>dimension_split_suggestions</code> 已记录，但还没有真正生成拆分后的 child dimension tasks。</span></li>
-          <li><span class="tag risk">漏洞</span><span><code>competitor_disambiguation</code> 仍靠通用 refinement specs，没有专门 disambiguation task。</span></li>
+          <li><span class="tag done">已接上</span><span><code>dimension_split_suggestions</code> 会生成带血缘的 split child dimension tasks。</span></li>
+          <li><span class="tag done">已接上</span><span><code>competitor_disambiguation</code> 会生成专用 follow-up task，不再落回通用 refinement。</span></li>
           <li><span class="tag risk">漏洞</span><span>claim support 现在是词面 overlap 检查，还不是严格 entailment / contradiction 判断。</span></li>
-          <li><span class="tag next">下一步</span><span>补 dimension split、竞品消歧、verification 深采和更强 claim 生成。</span></li>
+          <li><span class="tag next">下一步</span><span>补更强 claim support、verification span 判断和更强 claim 生成。</span></li>
         </ul>
       </aside>
     </section>
@@ -730,8 +730,8 @@
           <text x="848" y="586" class="svg-small">Publisher</text>
 
           <rect x="86" y="334" width="332" height="54" class="svg-hole"></rect>
-          <text x="104" y="356" class="svg-small">漏洞：dimension split 与 competitor disambiguation</text>
-          <text x="104" y="374" class="svg-small">现在有标记和 specs，但不是专用 task planner</text>
+          <text x="104" y="356" class="svg-small">剩余漏洞：claim support 与 report-level QA</text>
+          <text x="104" y="374" class="svg-small">split / disambiguation 已接成带血缘 follow-up task</text>
         </svg>
       </div>
     </section>
@@ -843,10 +843,10 @@
                     <li>
                       <div class="branch-node node-review">
                         <header>
-                          <span class="tag risk">漏洞</span>
-                          <strong>needs_dimension_split / disambiguation 还不完整</strong>
+                          <span class="tag done">已接上</span>
+                          <strong>needs_dimension_split / disambiguation 会生成 child task</strong>
                         </header>
-                        <p>代码已接受这些 next_action，但 split suggestions 还没真正变成新的 child dimensions；消歧也还不是专用 task。</p>
+                        <p>split suggestions 会变成新的 child dimensions；消歧会生成 <code>competitor_disambiguation</code> follow-up task。</p>
                       </div>
                     </li>
                   </ul>
@@ -922,7 +922,7 @@
           </div>
           <div class="example-item">
             <strong>4. 当前漏洞</strong>
-            <p>dimension split、competitor disambiguation、strong entailment 和 deep candidate URL collection 还需要继续补。</p>
+            <p>strong entailment、verification span 判断、report-level QA 和更强 analysis claim 还需要继续补。</p>
           </div>
         </aside>
       </div>
@@ -1015,24 +1015,24 @@
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">漏洞</span></td>
-              <td><strong>dimension split 还没真正执行</strong></td>
-              <td><code>dimension_split_suggestions</code> 已记录，但不会生成新的 split child dimensions。</td>
+              <td><span class="tag done">已接上</span></td>
+              <td><strong>dimension split 会生成 child dimensions</strong></td>
+              <td><code>dimension_split_suggestions</code> 会转成带 parent lineage 的 split child tasks。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>例如 competitive_moat 会建议 switching_cost、ecosystem_lock_in、proprietary_data、brand_distribution，但 CollectionAgent 目前只消费 focused_task_specs。下一步要把 split suggestions 转成带 dimension lineage 的 child tasks。</p>
+                  <p>例如 competitive_moat 会建议 switching_cost、ecosystem_lock_in、proprietary_data、brand_distribution，并生成 <code>competitive_moat.switching_cost</code> 这类 child dimension。</p>
                 </details>
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">漏洞</span></td>
-              <td><strong>competitor disambiguation 还不专用</strong></td>
-              <td>LandscapeReviewer 会标记 ambiguous / unknown，但只是通过通用 refinement specs 处理。</td>
+              <td><span class="tag done">已接上</span></td>
+              <td><strong>competitor disambiguation 有专用 task</strong></td>
+              <td>LandscapeReviewer 标记 ambiguous / unknown 后会生成 <code>competitor_disambiguation</code> follow-up。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>下一步需要显式 disambiguation task：约束 official domain、别名、产品线、国家/地区、竞品同名公司，并把 recommended_constraint 写入后续 query。</p>
+                  <p>follow-up query 会写入 official site constraint、候选 domain 和同名公司排除要求，避免把模糊 candidate source 直接推进 focused evidence。</p>
                 </details>
               </td>
             </tr>
@@ -1048,13 +1048,13 @@
               </td>
             </tr>
             <tr>
-              <td><span class="tag risk">漏洞</span></td>
-              <td><strong>focused / verification 深采还不够</strong></td>
-              <td><code>_run_collection_task</code> 现在统一 <code>deep=False</code>。</td>
+              <td><span class="tag done">已接上</span></td>
+              <td><strong>candidate URL 会触发 deep focused collection</strong></td>
+              <td>landscape candidate source 会写入 <code>target_urls</code>，对应 focused task 使用 <code>deep=True</code>。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>landscape 找到候选 URL 后，focused child task 理论上应该更像 targeted fetch / deep collect；verification 也应优先拉证据片段，而不是只做浅搜索。</p>
+                  <p>verification task 也会使用 deep collection。后续还可以进一步把 <code>target_urls</code> 下推成 domain-constrained fetch。</p>
                 </details>
               </td>
             </tr>
@@ -1087,7 +1087,7 @@
   </main>
 
   <footer>
-    当前结论：research 三阶段已经有主链路和一次 verification 回环；下一步优先补 dimension split、竞品消歧、深采策略和更强 claim support。
+    当前结论：research 三阶段已经有主链路、一次 verification 回环、split/disambiguation follow-up 和 candidate URL deep collection；下一步优先补更强 claim support 与 report-level QA。
   </footer>
 </body>
 </html>

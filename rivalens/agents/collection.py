@@ -170,7 +170,9 @@ class CollectionAgent:
                             "costs": result["costs"],
                         }
                     )
-                    follow_up_specs = landscape_assessment.get("focused_task_specs", [])
+                    follow_up_specs = self._landscape_follow_up_specs(
+                        landscape_assessment,
+                    )
                     if (
                         landscape_assessment.get("next_action")
                         in {
@@ -366,11 +368,23 @@ class CollectionAgent:
         collection_task: EvidenceCollectionTask,
         verbose: bool,
     ) -> EvidenceCollectionResult:
+        deep = (
+            collection_task.get("search_stage") == "verification"
+            or bool(collection_task.get("target_urls"))
+        )
         return await self.evidence_collector.collect(
             collection_task=collection_task,
-            deep=False,
+            deep=deep,
             verbose=verbose,
         )
+
+    def _landscape_follow_up_specs(
+        self,
+        landscape_assessment: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if landscape_assessment.get("next_action") == "needs_dimension_split":
+            return list(landscape_assessment.get("split_task_specs", []))
+        return list(landscape_assessment.get("focused_task_specs", []))
 
     def _build_root_branches(
         self,
@@ -397,6 +411,7 @@ class CollectionAgent:
                         "dimension_id": dimension["id"],
                         "dimension_name": dimension["name"],
                         "dimension_type": dimension["type"],
+                        "parent_dimension_id": dimension.get("parent_dimension_id", ""),
                         "topic": dimension["name"],
                         "query": self._schema_aware_query(
                             query,
@@ -404,6 +419,7 @@ class CollectionAgent:
                             dimension,
                             active_schema,
                         ),
+                        "target_urls": [],
                         "search_stage": self._initial_search_stage_from_dimension(dimension),
                         "generated_from_gap": "",
                         "expected_source_types": dimension.get("expected_source_types", []),
@@ -450,8 +466,10 @@ class CollectionAgent:
                     "dimension_id": dimension_id,
                     "dimension_name": dimension.get("name", dimension_id.replace("_", " ")),
                     "dimension_type": "claim_verification",
+                    "parent_dimension_id": task_spec.get("parent_dimension_id", ""),
                     "topic": task_spec.get("objective", "Claim verification"),
                     "query": query,
+                    "target_urls": task_spec.get("target_urls", []),
                     "search_stage": "verification",
                     "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
                     "expected_source_types": task_spec.get(
@@ -530,6 +548,7 @@ class CollectionAgent:
             "search_stage": search_stage,
             "objective": brief.get("objective", branch.get("topic", "")),
             "query": branch.get("query", ""),
+            "target_urls": branch.get("target_urls", []),
             "expected_source_types": branch.get("expected_source_types", []),
             "generated_from_gap": generated_from_gap,
             "reason": reason,
@@ -558,7 +577,9 @@ class CollectionAgent:
             "dimension_id": branch.get("dimension_id", ""),
             "dimension_name": branch.get("dimension_name", ""),
             "dimension_type": branch.get("dimension_type", ""),
+            "parent_dimension_id": branch.get("parent_dimension_id", ""),
             "query": branch.get("query", ""),
+            "target_urls": branch.get("target_urls", []),
         }
 
     def _build_child_branches(
@@ -573,6 +594,9 @@ class CollectionAgent:
             if not query:
                 continue
             topic = follow_up_spec.get("objective") or f"{parent['topic']} follow-up {index}"
+            dimension_id = follow_up_spec.get("dimension_id", parent.get("dimension_id", ""))
+            dimension_name = follow_up_spec.get("dimension_name", parent.get("dimension_name", ""))
+            dimension_type = follow_up_spec.get("dimension_type", parent.get("dimension_type", ""))
             child_id = f"{parent['id']}_d{parent.get('depth', 0) + 1}_{index}"
             children.append(
                 {
@@ -582,11 +606,16 @@ class CollectionAgent:
                     "depth": parent.get("depth", 0) + 1,
                     "path": list(parent.get("path", [])) + [topic],
                     "competitor": parent.get("competitor", ""),
-                    "dimension_id": parent.get("dimension_id", ""),
-                    "dimension_name": parent.get("dimension_name", ""),
-                    "dimension_type": parent.get("dimension_type", ""),
+                    "dimension_id": dimension_id,
+                    "dimension_name": dimension_name,
+                    "dimension_type": dimension_type,
+                    "parent_dimension_id": follow_up_spec.get(
+                        "parent_dimension_id",
+                        parent.get("parent_dimension_id", ""),
+                    ),
                     "topic": topic,
                     "query": query,
+                    "target_urls": follow_up_spec.get("target_urls", []),
                     "search_stage": follow_up_spec.get("search_stage", "focused"),
                     "generated_from_gap": follow_up_spec.get(
                         "generated_from_gap",
