@@ -37,6 +37,7 @@ flowchart TB
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
     Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
     Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
+    Workflow --> ClaimSupport["ClaimSupportReviewer\nclaim citation support / verification queue"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
@@ -44,14 +45,18 @@ flowchart TB
     Collector --> MsgEvidence["AgentMessage(type=evidence)"]
     Knowledge --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
+    ClaimSupport --> MsgClaimSupport["AgentMessage(type=claim_support)"]
     MsgSelection --> MsgGuard
     MsgEvidence --> MsgGuard
     MsgSchema --> MsgGuard
     MsgAnalysis --> MsgGuard
+    MsgClaimSupport --> MsgGuard
 
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
     Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
     Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
+    ClaimSupport --> VerificationQueue["verification_task_queue\nclaim-driven follow-up"]
+    VerificationQueue --> Collector
     EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
@@ -60,6 +65,7 @@ flowchart TB
     Collector --> State
     Knowledge --> State
     Analyst --> State
+    ClaimSupport --> State
     Writer --> State
     Publisher --> State
 
@@ -68,6 +74,7 @@ flowchart TB
     State --> ActiveSchema["ActiveKnowledgeSchema"]
     State --> KnowledgeState["CompetitorKnowledge"]
     State --> Claims["AnalysisClaim"]
+    State --> ClaimReviews["ClaimSupportReview"]
     State --> Messages["AgentMessage[]"]
     State --> Artifacts["research_artifacts / agent_events"]
 ```
@@ -80,9 +87,11 @@ multi-agent DAG is:
 ```mermaid
 flowchart LR
     A["scope_planner\nPlanningAgent"] --> B["source_collection\nCollectionAgent"]
-    B --> D["dimension_analysis\nAnalysisAgent"]
-    D --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
-    C --> E["report_writer\nReportWriterAgent"]
+    B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
+    C --> D["dimension_analysis\nAnalysisAgent"]
+    D --> G["claim_support_review\nClaimSupportReviewer"]
+    G -->|supported_enough| E["report_writer\nReportWriterAgent"]
+    G -->|needs_verification| B
     E --> F["publisher\nPublisherAgent"]
 ```
 
@@ -98,11 +107,13 @@ concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and analysis
-dimension metadata, reviews each standard-search result, and hands accepted
-branch evidence directly to `AnalysisAgent` for branch/dimension-level claim
-generation. `KnowledgeStructuringAgent` then structures the same accepted
-evidence into `CompetitorKnowledge` before report writing, so the report keeps
-both quality-gated claims and structured competitor knowledge in state.
+dimension metadata, reviews each standard-search result, and stores accepted
+branch evidence for structuring and analysis. `KnowledgeStructuringAgent`
+structures the accepted evidence into `CompetitorKnowledge`; `AnalysisAgent`
+then generates claims from structured knowledge and accepted evidence.
+`ClaimSupportReviewer` checks claim-level citation support before writing and
+can create one bounded `verification_task_queue` pass back through
+`source_collection` for weak or unverifiable claims.
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
@@ -123,6 +134,7 @@ schema_selection -> SchemaSelectionMessagePayload
 evidence -> EvidenceMessagePayload
 schema   -> SchemaMessagePayload
 analysis -> AnalysisMessagePayload
+claim_support -> ClaimSupportMessagePayload
 report   -> ReportMessagePayload
 publish  -> PublishMessagePayload
 ```
@@ -144,6 +156,7 @@ ResearchEngine wiring out of agent business logic:
 CollectionAgent
   -> ResearchBranch frontier
   -> ResearchBrief / ResearchTask queue
+  -> landscape / focused / verification search_stage control
   -> ResearchEngineEvidenceCollector (standard evidence)
   -> ResearchEngine
   -> EvidenceItem[]
@@ -191,6 +204,9 @@ findings, score, and required action. `CoverageReviewer` consumes that result
 and remains responsible for branch-level coverage control: expected source
 types, missing guiding questions, next action, and gap-driven follow-up task
 specs. `CollectionAgent` owns depth and expansion budget enforcement directly.
-`AnalysisAgent` consumes accepted review records immediately after collection
-and records `branch_id`, `evidence_review_id`, and `evidence_ids` on each
-generated `AnalysisClaim`.
+`AnalysisAgent` runs after knowledge structuring and records `branch_id`,
+`evidence_review_id`, and `evidence_ids` on each generated `AnalysisClaim`.
+`ClaimSupportReviewer` marks claims as supported, weak, contradicted, or
+unverifiable; weak or unverifiable claims can trigger a single claim-driven
+verification collection pass, while unsupported claims are withheld from the
+writer context.

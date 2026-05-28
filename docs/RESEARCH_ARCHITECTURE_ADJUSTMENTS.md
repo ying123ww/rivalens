@@ -21,7 +21,18 @@
 
 最佳融合点不是在现有 workflow 外面再套一个完整 deep research agent，而是改造 `CollectionAgent` 内部的 research control，并调整 collection 之后的 agent 顺序。
 
-当前最应该改的是：
+## 当前实现状态
+
+当前代码已落地以下调整：
+
+- `source_collection -> knowledge_structuring -> dimension_analysis -> claim_support_review -> report_writer` 的主链路。
+- `ClaimSupportReviewer` 作为 claim-level support gate，输出 `ClaimSupportReview` 和一次性的 `verification_task_queue`。
+- `claim_support_review` 可通过 LangGraph conditional edge 回到 `source_collection` 执行 claim-driven `verification` 搜索阶段。
+- `CollectionAgent` 区分 initial/gap collection 与 verification pass，verification pass 只消费 `verification_task_queue`，不会重建 root branches。
+- landscape 的 `needs_refinement`、`needs_competitor_disambiguation`、`needs_dimension_split` 不再直接吞掉；可转为带血缘的后续 task。
+- `ResearchTask.parent_task_id` 已贯通 landscape/focused follow-up 任务，便于回放阶段衔接。
+
+原始问题是：
 
 ```text
 PlanningAgent
@@ -32,7 +43,7 @@ PlanningAgent
 -> PublisherAgent
 ```
 
-建议演进为：
+目标演进为：
 
 ```text
 PlanningAgent / Schema Architect

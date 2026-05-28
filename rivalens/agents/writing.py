@@ -3,7 +3,7 @@
 import json
 from typing import Any, Callable
 
-from rivalens.agents.messages import create_agent_message
+from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState
 from rivalens.research.config import Config
 from rivalens.research.prompts import get_prompt_family
@@ -65,6 +65,21 @@ class ReportWriterAgent:
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         claims = state.get("analysis_claims", [])
+        claim_support_message = latest_message_for(
+            state,
+            receiver="writer",
+            message_type="claim_support",
+            sender="claim_support",
+        )
+        claim_support_reviews = (
+            state.get("claim_support_reviews")
+            or (
+                claim_support_message.get("payload", {}).get("reviews", [])
+                if claim_support_message
+                else []
+            )
+        )
+        claims = self._supported_claims(claims, claim_support_reviews)
         evidence_items = self._report_evidence_items(state, claims)
         evidence_ids = self._ordered_evidence_ids(claims, evidence_items)
         analysis_dimensions = self._analysis_dimensions(state, evidence_items)
@@ -124,6 +139,7 @@ class ReportWriterAgent:
                     "input": {
                         "query": query,
                         "claim_count": len(claims),
+                        "claim_support_review_count": len(claim_support_reviews),
                         "evidence_count": len(evidence_items),
                         "analysis_dimension_count": len(analysis_dimensions),
                         "report_generator": generator.__class__.__name__,
@@ -247,8 +263,30 @@ class ReportWriterAgent:
                 self._compact_evidence_review(review, report_evidence_ids)
                 for review in state.get("evidence_reviews", [])
             ],
+            "claim_support_reviews": [
+                self._compact_claim_support_review(review)
+                for review in state.get("claim_support_reviews", [])
+            ],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def _supported_claims(
+        self,
+        claims: list[dict[str, Any]],
+        claim_support_reviews: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not claim_support_reviews:
+            return claims
+        supported_ids = {
+            review.get("claim_id", "")
+            for review in claim_support_reviews
+            if review.get("support_status") == "supported"
+        }
+        return [
+            claim
+            for claim in claims
+            if claim.get("id", "") in supported_ids
+        ]
 
     def _analysis_dimensions(
         self,
@@ -354,6 +392,18 @@ class ReportWriterAgent:
             ],
             "rejected_evidence_count": len(review.get("rejected_evidence_ids", [])),
             "required_action": review.get("required_action", ""),
+        }
+
+    def _compact_claim_support_review(self, review: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": review.get("id", ""),
+            "claim_id": review.get("claim_id", ""),
+            "support_status": review.get("support_status", ""),
+            "evidence_ids": review.get("evidence_ids", []),
+            "unsupported_phrases": review.get("unsupported_phrases", []),
+            "verification_task_count": len(review.get("required_follow_up_tasks", [])),
+            "reviewer_notes": review.get("reviewer_notes", ""),
+            "confidence": review.get("confidence", 0.5),
         }
 
     def _report_evidence_items(

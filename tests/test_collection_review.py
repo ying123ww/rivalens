@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from rivalens.agents.analysis import AnalysisAgent
+from rivalens.agents.claim_support import ClaimSupportReviewer
 from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
@@ -245,9 +246,116 @@ class CollectionReviewTest(unittest.TestCase):
             any(
                 task["search_stage"] == "focused"
                 and task["generated_from_gap"] == "landscape_candidate_source"
+                and task["parent_task_id"] == "task_collect_acme_competitive_moat"
                 for task in result["research_tasks"]
             )
         )
+
+    def test_claim_support_review_generates_verification_task_for_unverifiable_claim(self):
+        state = {
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "pricing_business_model",
+                    "branch_id": "collect_acme_pricing_business_model",
+                    "claim": "Acme publishes enterprise pricing with public packaging.",
+                    "competitors": ["Acme"],
+                    "evidence_ids": [],
+                    "confidence": 0.6,
+                }
+            ],
+            "evidence_items": [],
+            "messages": [],
+            "verification_rounds": 0,
+        }
+
+        result = ClaimSupportReviewer().review(state)
+
+        self.assertEqual(
+            result["claim_support_reviews"][0]["support_status"],
+            "unverifiable",
+        )
+        self.assertEqual(
+            result["verification_task_queue"][0]["search_stage"],
+            "verification",
+        )
+        self.assertEqual(
+            result["verification_task_queue"][0]["generated_from_gap"],
+            "verification:claim_1",
+        )
+
+    def test_collection_processes_verification_queue_without_rebuilding_roots(self):
+        seen_tasks = []
+
+        class FakeVerificationCollector:
+            async def collect(self, collection_task, deep=False, verbose=True):
+                seen_tasks.append(dict(collection_task))
+                return {
+                    "task": dict(collection_task),
+                    "mode": "standard_evidence",
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [
+                        {
+                            "competitor": "Acme",
+                            "dimension_id": "pricing_business_model",
+                            "title": "Acme enterprise pricing",
+                            "url": "https://acme.example/pricing",
+                            "source_type": "pricing_page",
+                            "excerpt": "Acme describes enterprise pricing and packaging.",
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme pricing",
+                "competitors": [{"name": "Acme"}],
+                "verbose": False,
+            },
+            "analysis_dimensions": [
+                {
+                    "id": "pricing_business_model",
+                    "name": "定价与商业模式",
+                    "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
+                    "expected_source_types": ["pricing_page"],
+                }
+            ],
+            "verification_task_queue": [
+                {
+                    "objective": "Verify claim: Acme enterprise pricing",
+                    "query": "Acme enterprise pricing packaging",
+                    "target_source_types": ["pricing_page"],
+                    "generated_from_gap": "verification:claim_1",
+                    "reason": "Claim support review requested verification.",
+                    "search_stage": "verification",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_business_model",
+                    "parent_branch_id": "collect_acme_pricing_business_model",
+                }
+            ],
+            "verification_rounds": 0,
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=FakeVerificationCollector(),
+                max_branch_depth=0,
+            ).run(state)
+        )
+
+        self.assertEqual(seen_tasks[0]["search_stage"], "verification")
+        self.assertEqual(result["research_tasks"][0]["search_stage"], "verification")
+        self.assertEqual(
+            result["research_tasks"][0]["generated_from_gap"],
+            "verification:claim_1",
+        )
+        self.assertEqual(result["verification_rounds"], 1)
+        self.assertEqual(result["verification_task_queue"], [])
+        self.assertEqual(len(result["research_branches"]), 1)
 
     def test_evidence_item_uses_query_relevant_chunk(self):
         irrelevant_intro = "General company overview. " * 80

@@ -65,15 +65,24 @@ class CollectionAgent:
         evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
-        root_branches = self._build_root_branches(
-            query,
-            competitors,
-            active_schema,
-            state.get("analysis_dimensions", []),
-        )
-        root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
-        if root_branch_limit_exceeded:
-            root_branches = root_branches[: self.max_root_branch_hard_limit]
+        verification_queue = list(state.get("verification_task_queue", []))
+        verification_pass = bool(verification_queue)
+        if verification_pass:
+            root_branches = self._build_verification_branches(
+                verification_queue,
+                state,
+            )
+            root_branch_limit_exceeded = False
+        else:
+            root_branches = self._build_root_branches(
+                query,
+                competitors,
+                active_schema,
+                state.get("analysis_dimensions", []),
+            )
+            root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
+            if root_branch_limit_exceeded:
+                root_branches = root_branches[: self.max_root_branch_hard_limit]
         frontier = root_branches
         research_branches.extend(root_branches)
         new_briefs = self._build_research_briefs(root_branches)
@@ -163,7 +172,13 @@ class CollectionAgent:
                     )
                     follow_up_specs = landscape_assessment.get("focused_task_specs", [])
                     if (
-                        landscape_assessment.get("next_action") == "needs_focused_collection"
+                        landscape_assessment.get("next_action")
+                        in {
+                            "needs_focused_collection",
+                            "needs_refinement",
+                            "needs_competitor_disambiguation",
+                            "needs_dimension_split",
+                        }
                         and follow_up_specs
                         and branch.get("depth", 0) < self.max_branch_depth
                     ):
@@ -172,9 +187,11 @@ class CollectionAgent:
                         if remaining_branch_slots <= 0:
                             branch["status"] = "stopped"
                             continue
-                        children = self._build_child_branches(branch, follow_up_specs)[
-                            :remaining_branch_slots
-                        ]
+                        children = self._build_child_branches(
+                            branch,
+                            follow_up_specs,
+                            parent_task_id=research_task["id"],
+                        )[:remaining_branch_slots]
                         expansion_branch_count += len(children)
                         next_frontier.extend(children)
                         research_branches.extend(children)
@@ -238,7 +255,11 @@ class CollectionAgent:
                     if remaining_branch_slots <= 0:
                         branch["status"] = "stopped"
                         continue
-                    children = self._build_child_branches(branch, follow_up_specs)[:remaining_branch_slots]
+                    children = self._build_child_branches(
+                        branch,
+                        follow_up_specs,
+                        parent_task_id=research_task["id"],
+                    )[:remaining_branch_slots]
                     expansion_branch_count += len(children)
                     next_frontier.extend(children)
                     research_branches.extend(children)
@@ -296,6 +317,9 @@ class CollectionAgent:
             "landscape_assessments": landscape_assessments,
             "coverage_assessments": coverage_assessments,
             "research_artifacts": research_artifacts,
+            "verification_task_queue": [],
+            "verification_rounds": int(state.get("verification_rounds", 0) or 0)
+            + (1 if verification_pass else 0),
             "messages": state.get("messages", []) + [message, analysis_message],
             "agent_events": state.get("agent_events", [])
             + [
@@ -307,6 +331,8 @@ class CollectionAgent:
                         "competitors": competitors,
                         "message_id": schema_message.get("id") if schema_message else None,
                         "active_schema_id": active_schema.get("id"),
+                        "collection_phase": "verification" if verification_pass else "initial_or_gap_collection",
+                        "verification_task_count": len(verification_queue),
                         "root_branch_count": len(root_branches),
                         "max_branch_depth": self.max_branch_depth,
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
@@ -395,6 +421,55 @@ class CollectionAgent:
 
         return branches
 
+    def _build_verification_branches(
+        self,
+        verification_tasks: list[dict[str, Any]],
+        state: CompetitorAnalysisState,
+    ) -> list[ResearchBranch]:
+        dimensions_by_id = {
+            dimension.get("id", ""): dimension
+            for dimension in state.get("analysis_dimensions", [])
+            if dimension.get("id")
+        }
+        branches: list[ResearchBranch] = []
+        for index, task_spec in enumerate(verification_tasks, start=1):
+            query = task_spec.get("query", "")
+            if not query:
+                continue
+            dimension_id = task_spec.get("dimension_id") or "source_evidence"
+            dimension = dimensions_by_id.get(dimension_id, {})
+            branch_id = f"verify_{self._slug(task_spec.get('generated_from_gap', str(index)))}_{index}"
+            branches.append(
+                {
+                    "id": branch_id,
+                    "research_brief_id": f"brief_{branch_id}",
+                    "parent_id": task_spec.get("parent_branch_id"),
+                    "depth": 0,
+                    "path": [dimension_id, task_spec.get("generated_from_gap", "verification")],
+                    "competitor": task_spec.get("competitor", ""),
+                    "dimension_id": dimension_id,
+                    "dimension_name": dimension.get("name", dimension_id.replace("_", " ")),
+                    "dimension_type": "claim_verification",
+                    "topic": task_spec.get("objective", "Claim verification"),
+                    "query": query,
+                    "search_stage": "verification",
+                    "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
+                    "expected_source_types": task_spec.get(
+                        "target_source_types",
+                        dimension.get("expected_source_types", []),
+                    ),
+                    "minimum_coverage": ["Direct public evidence for or against the target claim."],
+                    "guiding_questions": [task_spec.get("objective", "Verify the target claim.")],
+                    "evidence_ids": [],
+                    "status": "active",
+                    "expansion_reason": task_spec.get(
+                        "reason",
+                        "Claim support review requested verification collection.",
+                    ),
+                }
+            )
+        return branches
+
     def _build_research_briefs(
         self,
         branches: list[ResearchBranch],
@@ -447,7 +522,7 @@ class CollectionAgent:
         return {
             "id": f"task_{branch['id']}",
             "brief_id": branch.get("research_brief_id", brief.get("id", "")),
-            "parent_task_id": None,
+            "parent_task_id": branch.get("parent_task_id"),
             "branch_id": branch["id"],
             "competitor": branch.get("competitor", ""),
             "dimension_id": branch.get("dimension_id", ""),
@@ -490,6 +565,7 @@ class CollectionAgent:
         self,
         parent: ResearchBranch,
         follow_up_specs: list[dict[str, Any]],
+        parent_task_id: str | None = None,
     ) -> list[ResearchBranch]:
         children = []
         for index, follow_up_spec in enumerate(follow_up_specs, start=1):
@@ -523,6 +599,7 @@ class CollectionAgent:
                     "minimum_coverage": parent.get("minimum_coverage", []),
                     "guiding_questions": parent.get("guiding_questions", []),
                     "evidence_ids": [],
+                    "parent_task_id": parent_task_id,
                     "status": "active",
                     "expansion_reason": (
                         follow_up_spec.get("reason")

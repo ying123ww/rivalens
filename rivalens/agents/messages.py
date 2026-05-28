@@ -10,6 +10,7 @@ from rivalens.schema import (
     AgentMessagePayload,
     AgentMessageType,
     AnalysisMessagePayload,
+    ClaimSupportMessagePayload,
     CompetitorAnalysisState,
     EvidenceMessagePayload,
     PublishMessagePayload,
@@ -24,6 +25,7 @@ PAYLOAD_MODELS: dict[AgentMessageType, type[BaseModel]] = {
     "evidence": EvidenceMessagePayload,
     "schema": SchemaMessagePayload,
     "analysis": AnalysisMessagePayload,
+    "claim_support": ClaimSupportMessagePayload,
     "report": ReportMessagePayload,
     "publish": PublishMessagePayload,
 }

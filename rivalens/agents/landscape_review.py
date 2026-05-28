@@ -37,9 +37,14 @@ class LandscapeReviewer:
             branch,
             candidate_sources,
             missing_source_types,
+            research_task,
         )
         disambiguation = self._competitor_disambiguation(branch, candidate_sources)
-        next_action = self._next_action(candidate_sources, focused_task_specs, disambiguation)
+        next_action = self._next_action(
+            candidate_sources,
+            focused_task_specs,
+            disambiguation,
+        )
 
         return {
             "id": f"landscape_{research_task.get('id', branch.get('id', 'unknown'))}",
@@ -93,6 +98,7 @@ class LandscapeReviewer:
         branch: ResearchBranch,
         candidate_sources: list[dict[str, Any]],
         missing_source_types: list[str],
+        research_task: ResearchTask,
     ) -> list[dict[str, Any]]:
         specs = []
         for source in candidate_sources[:2]:
@@ -115,6 +121,17 @@ class LandscapeReviewer:
                     "generated_from_gap": f"landscape_missing_source_type:{source_type}",
                     "reason": f"Landscape scan did not discover a {source_type} source.",
                     "search_stage": "focused",
+                }
+            )
+        if not candidate_sources:
+            specs.append(
+                {
+                    "objective": f"Refine landscape scan for {branch.get('dimension_name', branch.get('dimension_id', 'research'))}",
+                    "query": self._refinement_query(branch, research_task),
+                    "target_source_types": branch.get("expected_source_types", []),
+                    "generated_from_gap": "landscape_refinement",
+                    "reason": "Landscape scan needs another pass before focused evidence collection.",
+                    "search_stage": "landscape",
                 }
             )
         return specs[:3]
@@ -189,10 +206,14 @@ class LandscapeReviewer:
         focused_task_specs: list[dict[str, Any]],
         disambiguation: dict[str, Any],
     ) -> str:
-        if disambiguation.get("status") == "ambiguous" and not focused_task_specs:
+        if disambiguation.get("status") == "ambiguous" and not candidate_sources:
             return "needs_competitor_disambiguation"
-        if focused_task_specs:
+        if focused_task_specs and any(
+            spec.get("search_stage") == "focused" for spec in focused_task_specs
+        ):
             return "needs_focused_collection"
+        if focused_task_specs:
+            return "needs_refinement"
         if not candidate_sources:
             return "needs_refinement"
         return "stop_with_limit"
@@ -223,6 +244,20 @@ class LandscapeReviewer:
 
     def _source_url(self, source: dict[str, Any]) -> str:
         return source.get("url") or source.get("href") or ""
+
+    def _refinement_query(
+        self,
+        branch: ResearchBranch,
+        research_task: ResearchTask,
+    ) -> str:
+        return "\n".join(
+            [
+                f"Refine landscape search for {branch.get('competitor', '')} {branch.get('dimension_name', branch.get('dimension_id', ''))}".strip(),
+                f"Research focus: {branch.get('dimension_name', branch.get('dimension_id', ''))}",
+                f"Original query: {research_task.get('query', '')}",
+                "Look for clearer source entrances, official domains, and disambiguating signals.",
+            ]
+        )
 
     def _infer_source_type(self, url: str, title: str) -> str:
         normalized = f"{url} {title}".lower()

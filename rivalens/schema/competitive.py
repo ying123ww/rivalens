@@ -111,6 +111,7 @@ class EvidenceReviewResult(TypedDict, total=False):
 
 
 BranchDriftRisk = Literal["low", "medium", "high"]
+ClaimSupportStatus = Literal["supported", "weak", "contradicted", "unverifiable"]
 
 
 class ResearchBranch(TypedDict, total=False):
@@ -329,6 +330,19 @@ class AnalysisClaim(TypedDict, total=False):
     confidence: float
 
 
+class ClaimSupportReview(TypedDict, total=False):
+    id: str
+    claim_id: str
+    branch_id: str
+    dimension: str
+    support_status: ClaimSupportStatus
+    evidence_ids: list[str]
+    unsupported_phrases: list[str]
+    required_follow_up_tasks: list[dict[str, Any]]
+    reviewer_notes: str
+    confidence: float
+
+
 class AnalysisDimension(TypedDict, total=False):
     id: str
     name: str
@@ -358,6 +372,7 @@ AgentMessageType = Literal[
     "evidence",
     "schema",
     "analysis",
+    "claim_support",
     "report",
     "publish",
 ]
@@ -494,6 +509,26 @@ class AnalysisMessagePayload(StrictPayloadModel):
     claims: list[AnalysisClaimPayload] = Field(default_factory=list)
 
 
+class ClaimSupportReviewPayload(StrictPayloadModel):
+    id: str
+    claim_id: str
+    branch_id: str = ""
+    dimension: str = ""
+    support_status: ClaimSupportStatus
+    evidence_ids: list[str] = Field(default_factory=list)
+    unsupported_phrases: list[str] = Field(default_factory=list)
+    required_follow_up_tasks: list[dict[str, Any]] = Field(default_factory=list)
+    reviewer_notes: str = ""
+    confidence: float = Field(default=0.5, ge=0, le=1)
+
+
+class ClaimSupportMessagePayload(StrictPayloadModel):
+    review_count: int = Field(ge=0)
+    supported_count: int = Field(ge=0)
+    weak_count: int = Field(ge=0)
+    reviews: list[ClaimSupportReviewPayload] = Field(default_factory=list)
+
+
 class ReportMessagePayload(StrictPayloadModel):
     report_length: int = Field(ge=0)
 
@@ -507,6 +542,7 @@ AgentMessagePayload = (
     | EvidenceMessagePayload
     | SchemaMessagePayload
     | AnalysisMessagePayload
+    | ClaimSupportMessagePayload
     | ReportMessagePayload
     | PublishMessagePayload
 )
@@ -558,6 +594,9 @@ class CompetitorAnalysisState(TypedDict, total=False):
     evidence_items: list[EvidenceItem]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
+    claim_support_reviews: list[ClaimSupportReview]
+    verification_task_queue: list[dict[str, Any]]
+    verification_rounds: int
     analysis_dimensions: list[AnalysisDimension]
     research_artifacts: list[ResearchArtifact]
     report: str

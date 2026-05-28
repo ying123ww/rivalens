@@ -143,7 +143,7 @@ class EvidenceQualityReviewer:
                     recommendation="Expand collection toward official pages or docs.",
                 )
             )
-        if dimension_id == "pricing_model" and "pricing_page" not in source_types:
+        if self._dimension_matches(dimension_id, {"pricing_model", "pricing_business_model"}) and "pricing_page" not in source_types:
             findings.append(
                 self._finding(
                     branch,
@@ -155,8 +155,10 @@ class EvidenceQualityReviewer:
                 )
             )
         if (
-            dimension_id
-            in {"security_compliance", "admin_governance", "integration_ecosystem"}
+            self._dimension_matches(
+                dimension_id,
+                {"security_compliance", "admin_governance", "integration_ecosystem", "compliance_risk", "technology_integrations"},
+            )
             and "docs" not in source_types
         ):
             findings.append(
@@ -169,7 +171,7 @@ class EvidenceQualityReviewer:
                     recommendation="Expand collection toward docs, trust, or security pages.",
                 )
             )
-        if dimension_id == "user_personas" and "review" not in source_types:
+        if self._dimension_matches(dimension_id, {"user_personas", "target_users"}) and "review" not in source_types:
             findings.append(
                 self._finding(
                     branch,
@@ -271,3 +273,7 @@ class EvidenceQualityReviewer:
 
     def _normalize(self, value: Any) -> str:
         return str(value or "").strip().lower()
+
+    def _dimension_matches(self, dimension_id: str, candidates: set[str]) -> bool:
+        normalized = self._normalize(dimension_id)
+        return normalized in {self._normalize(candidate) for candidate in candidates}
