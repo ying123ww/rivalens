@@ -168,8 +168,12 @@ EvidenceItem -> EvidenceReviewResult -> AnalysisClaim
 EvidenceItem -> CompetitorKnowledge -> Report
 ```
 
-`PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
-`ReportWriterAgent` do not run their own research/report modes by default. The
+`PlanningAgent`, `KnowledgeStructuringAgent`, and `AnalysisAgent` do not run
+their own research/report modes by default. `ReportWriterAgent` does not collect
+new evidence, but it now adapts Rivalens claims, `CompetitorKnowledge`, and
+accepted `EvidenceItem` records into the shared `ReportGenerator` writing path,
+then appends a deterministic evidence-traceability section with claim IDs,
+evidence IDs, and source URLs. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and

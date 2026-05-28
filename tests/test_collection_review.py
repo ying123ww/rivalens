@@ -5,6 +5,7 @@ from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.branch_review import BranchReviewAgent
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
+from rivalens.agents.writing import ReportWriterAgent
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
 
 
@@ -257,6 +258,115 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("quality-reviewed Pricing Model evidence", claim["claim"])
         self.assertIn("Acme publishes a starter pricing plan", claim["claim"])
         self.assertNotIn("Rejected scrape", claim["claim"])
+
+    def test_writer_uses_report_generator_with_traceable_evidence_context(self):
+        created_researchers = []
+
+        class FakeReportGenerator:
+            def __init__(self, researcher):
+                created_researchers.append(researcher)
+
+            async def write_report(self):
+                created_researchers[0].add_costs(0.25)
+                return "# Generated Report\n\nAcme has a public starter plan."
+
+        state = {
+            "task": {"query": "Compare Acme pricing"},
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "pricing_model",
+                    "claim": "Acme publishes a starter pricing plan.",
+                    "evidence_ids": ["ev_1", "ev_2"],
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "title": "Acme pricing",
+                    "url": "https://acme.example/pricing",
+                    "excerpt": "Acme publishes a starter pricing plan.",
+                    "source_type": "pricing_page",
+                    "confidence": 0.9,
+                },
+                {
+                    "id": "ev_2",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "title": "Rejected scrape",
+                    "url": "https://acme.example/rejected",
+                    "excerpt": "This rejected source should not support the report.",
+                    "source_type": "other",
+                    "confidence": 0.4,
+                },
+            ],
+            "evidence_reviews": [
+                {
+                    "accepted_evidence_ids": ["ev_1"],
+                    "rejected_evidence_ids": ["ev_2"],
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=FakeReportGenerator).run(state)
+        )
+
+        researcher = created_researchers[0]
+        self.assertIn("Acme publishes a starter pricing plan", researcher.context)
+        self.assertIn("https://acme.example/pricing", researcher.context)
+        self.assertNotIn("ev_2", researcher.context)
+        self.assertNotIn("https://acme.example/rejected", researcher.context)
+        self.assertIn("# Generated Report", result["report"])
+        self.assertIn("## Rivalens Evidence Traceability", result["report"])
+        self.assertIn("claim_1", result["report"])
+        self.assertIn("ev_1", result["report"])
+        self.assertNotIn("ev_2", result["report"])
+        self.assertIn("https://acme.example/pricing", result["report"])
+        self.assertNotIn("https://acme.example/rejected", result["report"])
+        self.assertEqual(result["messages"][-1]["evidence_ids"], ["ev_1"])
+        self.assertEqual(result["agent_events"][-1]["output"]["cost"], 0.25)
+
+    def test_writer_falls_back_to_traceable_markdown_when_generation_is_empty(self):
+        class EmptyReportGenerator:
+            def __init__(self, researcher):
+                self.researcher = researcher
+
+            async def write_report(self):
+                return ""
+
+        state = {
+            "task": {"query": "Compare Acme pricing"},
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "claim": "Acme publishes a starter pricing plan.",
+                    "evidence_ids": ["ev_1"],
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "title": "Acme pricing",
+                    "url": "https://acme.example/pricing",
+                    "excerpt": "Acme publishes a starter pricing plan.",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=EmptyReportGenerator).run(state)
+        )
+
+        self.assertIn("# Competitor Analysis Report", result["report"])
+        self.assertIn("Acme publishes a starter pricing plan", result["report"])
+        self.assertIn("## Rivalens Evidence Traceability", result["report"])
+        self.assertIn("https://acme.example/pricing", result["report"])
 
 
 if __name__ == "__main__":
