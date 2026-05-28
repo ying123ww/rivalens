@@ -58,7 +58,12 @@ class CollectionAgent:
         evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
-        root_branches = self._build_root_branches(query, competitors, active_schema)
+        root_branches = self._build_root_branches(
+            query,
+            competitors,
+            active_schema,
+            state.get("analysis_dimensions", []),
+        )
         root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
         if root_branch_limit_exceeded:
             root_branches = root_branches[: self.max_root_branch_hard_limit]
@@ -264,9 +269,10 @@ class CollectionAgent:
         query: str,
         competitors: list[Any],
         active_schema: dict[str, Any],
+        analysis_dimensions: list[dict[str, Any]] | None = None,
     ) -> list[ResearchBranch]:
         normalized_competitors = self._normalize_competitors(competitors)
-        dimensions = self._schema_dimensions(active_schema)
+        dimensions = self._collection_dimensions(active_schema, analysis_dimensions or [])
         branches = []
 
         for competitor in normalized_competitors:
@@ -291,7 +297,11 @@ class CollectionAgent:
                         ),
                         "evidence_ids": [],
                         "status": "active",
-                        "expansion_reason": "Root branch generated from active schema dimension.",
+                        "expansion_reason": (
+                            "Root branch generated from confirmed analysis dimension."
+                            if dimension["type"] == "analysis_dimension"
+                            else "Root branch generated from active schema dimension."
+                        ),
                         "review_decision": None,
                     }
                 )
@@ -364,6 +374,27 @@ class CollectionAgent:
             normalized.append(name)
         return [name for name in normalized if name] or [""]
 
+    def _collection_dimensions(
+        self,
+        active_schema: dict[str, Any],
+        analysis_dimensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if analysis_dimensions:
+            return [
+                {
+                    "id": dimension.get("id", ""),
+                    "name": dimension.get("name", dimension.get("id", "")),
+                    "type": "analysis_dimension",
+                    "description": dimension.get("description", ""),
+                    "guiding_questions": dimension.get("guiding_questions", []),
+                    "search_intent": dimension.get("search_intent", ""),
+                    "priority": dimension.get("priority", "P1"),
+                }
+                for dimension in analysis_dimensions
+                if dimension.get("id")
+            ]
+        return self._schema_dimensions(active_schema)
+
     def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, str]]:
         core_descriptions = {
             "feature_tree": (
@@ -423,7 +454,7 @@ class CollectionAgent:
         self,
         query: str,
         competitor: str,
-        dimension: dict[str, str],
+        dimension: dict[str, Any],
         active_schema: dict[str, Any],
     ) -> str:
         selected_industry = active_schema.get("selected_industry", {}).get(
@@ -442,11 +473,19 @@ class CollectionAgent:
                 f"Selected industry: {selected_industry}",
                 f"Research focus: {dimension['name']} ({dimension['type']})",
                 f"Focus definition: {dimension['description']}",
+                self._guiding_questions_line(dimension),
+                dimension.get("search_intent", ""),
                 "Collect public, source-backed evidence only. Prefer official "
                 "pages, pricing pages, docs, reviews, news, and marketplace "
                 "listings when relevant.",
             ]
         )
+
+    def _guiding_questions_line(self, dimension: dict[str, Any]) -> str:
+        guiding_questions = dimension.get("guiding_questions", [])
+        if not guiding_questions:
+            return ""
+        return "Guiding questions: " + " | ".join(str(question) for question in guiding_questions)
 
     def _with_file_rag(
         self,

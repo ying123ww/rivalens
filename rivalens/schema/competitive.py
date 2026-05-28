@@ -227,6 +227,16 @@ class AnalysisClaim(TypedDict, total=False):
     confidence: float
 
 
+class AnalysisDimension(TypedDict, total=False):
+    id: str
+    name: str
+    description: str
+    priority: str
+    guiding_questions: list[str]
+    search_intent: str
+    rank: int
+
+
 class AgentEvent(TypedDict, total=False):
     agent: str
     action: str
@@ -439,6 +449,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     evidence_items: list[EvidenceItem]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
+    analysis_dimensions: list[AnalysisDimension]
     research_artifacts: list[ResearchArtifact]
     report: str
     published_artifacts: dict[str, str]

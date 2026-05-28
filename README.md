@@ -88,12 +88,16 @@ flowchart LR
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
 inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
-then emits one `schema_selection` handoff to
-`source_collection`. `source_collection` expands that schema into competitor-by-
-dimension collection tasks and runs them concurrently through
+builds a fixed 10-dimension competitor-analysis plan for user review, then
+emits one `schema_selection` handoff to `source_collection`. The dimension plan
+is stored in `CompetitorAnalysisState.analysis_dimensions` and mirrored as a
+planning artifact named `dimension_confirmation`, so the search scope can be
+reviewed before evidence collection. `source_collection` expands the confirmed
+analysis dimensions into competitor-by-dimension collection tasks and runs them
+concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
-research sources into `EvidenceItem` records with collection task and schema
+research sources into `EvidenceItem` records with collection task and analysis
 dimension metadata, reviews each standard-search result, and hands accepted
 branch evidence directly to `AnalysisAgent` for branch/dimension-level claim
 generation. `KnowledgeStructuringAgent` then structures the same accepted
@@ -154,8 +158,8 @@ depth, and budget in `CompetitorAnalysisState.research_branches`,
 `CompetitorAnalysisState.evidence_reviews`, and
 `CompetitorAnalysisState.branch_review_decisions`.
 
-Root branches are required schema coverage: every competitor x active schema
-dimension is collected before any depth expansion is considered. The expansion
+Root branches are required analysis coverage: every competitor x confirmed
+analysis dimension is collected before any depth expansion is considered. The expansion
 budget applies only to child branches created by `BranchReviewAgent`, with
 `max_root_branch_hard_limit` acting as a defensive cap for unusually large
 schemas and `max_expansion_branches` controlling follow-up breadth.
@@ -172,8 +176,9 @@ EvidenceItem -> CompetitorKnowledge -> Report
 their own research/report modes by default. `ReportWriterAgent` does not collect
 new evidence, but it now adapts Rivalens claims, `CompetitorKnowledge`, and
 accepted `EvidenceItem` records into the shared `ReportGenerator` writing path,
-then appends a deterministic evidence-traceability section with claim IDs,
-evidence IDs, and source URLs. The
+using a fixed report contract: analysis purpose, competitor selection,
+10-section competitor analysis, summary, and an automatically appended
+information-index appendix with evidence IDs and source URLs. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and

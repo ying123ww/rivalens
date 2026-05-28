@@ -3,8 +3,10 @@ import unittest
 
 from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.branch_review import BranchReviewAgent
+from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
+from rivalens.agents.planning import PlanningAgent
 from rivalens.agents.writing import ReportWriterAgent
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
 
@@ -21,6 +23,48 @@ def pricing_branch():
 
 
 class CollectionReviewTest(unittest.TestCase):
+    def test_planning_creates_ten_confirmable_analysis_dimensions(self):
+        state = {
+            "task": {
+                "query": "Compare Acme and Beta productivity tools",
+                "competitors": ["Acme", "Beta"],
+            },
+            "messages": [],
+        }
+
+        result = asyncio.run(PlanningAgent().run(state))
+
+        dimensions = result["analysis_dimensions"]
+        self.assertEqual(len(dimensions), 10)
+        self.assertEqual(dimensions[0]["name"], "战略定位")
+        dimension_artifact = result["research_artifacts"][-1]
+        self.assertEqual(dimension_artifact["mode"], "dimension_confirmation")
+        self.assertIn("维度确认", dimension_artifact["report"])
+        self.assertIn("3.1 战略定位", dimension_artifact["report"])
+
+    def test_collection_root_branches_use_confirmed_analysis_dimensions(self):
+        branches = CollectionAgent()._build_root_branches(
+            query="Compare Acme and Beta",
+            competitors=[{"name": "Acme"}],
+            active_schema={"selected_industry": {"name": "Productivity SaaS"}},
+            analysis_dimensions=[
+                {
+                    "id": "strategic_positioning",
+                    "name": "战略定位",
+                    "description": "品牌定位和市场细分。",
+                    "guiding_questions": ["各竞品官方的产品定位是什么？"],
+                    "search_intent": "搜索战略定位公开证据。",
+                    "priority": "P0",
+                }
+            ],
+        )
+
+        self.assertEqual(len(branches), 1)
+        self.assertEqual(branches[0]["dimension_id"], "strategic_positioning")
+        self.assertEqual(branches[0]["dimension_name"], "战略定位")
+        self.assertIn("各竞品官方的产品定位是什么？", branches[0]["query"])
+        self.assertIn("搜索战略定位公开证据", branches[0]["query"])
+
     def test_evidence_item_uses_query_relevant_chunk(self):
         irrelevant_intro = "General company overview. " * 80
         pricing_signal = (
@@ -266,7 +310,7 @@ class CollectionReviewTest(unittest.TestCase):
             def __init__(self, researcher):
                 created_researchers.append(researcher)
 
-            async def write_report(self):
+            async def write_report(self, **kwargs):
                 created_researchers[0].add_costs(0.25)
                 return "# Generated Report\n\nAcme has a public starter plan."
 
@@ -317,12 +361,14 @@ class CollectionReviewTest(unittest.TestCase):
         )
 
         researcher = created_researchers[0]
+        self.assertIn("第一章：分析目的", researcher.custom_prompt)
+        self.assertIn("第三章：竞品分析", researcher.custom_prompt)
         self.assertIn("Acme publishes a starter pricing plan", researcher.context)
         self.assertIn("https://acme.example/pricing", researcher.context)
         self.assertNotIn("ev_2", researcher.context)
         self.assertNotIn("https://acme.example/rejected", researcher.context)
         self.assertIn("# Generated Report", result["report"])
-        self.assertIn("## Rivalens Evidence Traceability", result["report"])
+        self.assertIn("## 附录：信息索引表格", result["report"])
         self.assertIn("claim_1", result["report"])
         self.assertIn("ev_1", result["report"])
         self.assertNotIn("ev_2", result["report"])
@@ -336,7 +382,7 @@ class CollectionReviewTest(unittest.TestCase):
             def __init__(self, researcher):
                 self.researcher = researcher
 
-            async def write_report(self):
+            async def write_report(self, **kwargs):
                 return ""
 
         state = {
@@ -363,9 +409,13 @@ class CollectionReviewTest(unittest.TestCase):
             ReportWriterAgent(report_generator_factory=EmptyReportGenerator).run(state)
         )
 
-        self.assertIn("# Competitor Analysis Report", result["report"])
+        self.assertIn("# 竞品分析报告", result["report"])
+        self.assertIn("## 第一章：分析目的", result["report"])
+        self.assertIn("## 第二章：确定竞品", result["report"])
+        self.assertIn("## 第三章：竞品分析", result["report"])
+        self.assertIn("## 第四章：总结", result["report"])
         self.assertIn("Acme publishes a starter pricing plan", result["report"])
-        self.assertIn("## Rivalens Evidence Traceability", result["report"])
+        self.assertIn("## 附录：信息索引表格", result["report"])
         self.assertIn("https://acme.example/pricing", result["report"])
 
 
