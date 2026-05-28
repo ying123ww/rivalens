@@ -88,6 +88,7 @@ class ResearchEngineEvidenceCollector:
                     "branch_id": collection_task.get("branch_id", collection_task.get("id", "")),
                     "parent_branch_id": collection_task.get("parent_branch_id"),
                     "collection_task_id": collection_task.get("id", ""),
+                    "research_task_id": collection_task.get("research_task_id", ""),
                     "dimension_id": collection_task.get("dimension_id", ""),
                     "dimension_name": collection_task.get("dimension_name", ""),
                     "title": title,

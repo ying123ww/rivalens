@@ -277,10 +277,84 @@ class PlanningAgent:
                         f"“{template['name']}”维度的公开证据。行业背景：{selected_industry}。"
                         f"重点回答：{'；'.join(questions)}"
                     ),
+                    **self._dimension_source_policy(str(template["id"])),
                     "rank": index,
                 }
             )
         return dimensions
+
+    def _dimension_source_policy(self, dimension_id: str) -> dict[str, Any]:
+        policies: dict[str, dict[str, Any]] = {
+            "strategic_positioning": {
+                "expected_source_types": ["official_site", "blog", "news"],
+                "minimum_coverage": ["At least one official positioning or product page when available."],
+                "risk_level": "medium",
+                "expected_claim_types": ["positioning", "differentiation", "market_segment"],
+            },
+            "target_users": {
+                "expected_source_types": ["official_site", "review", "marketplace"],
+                "minimum_coverage": ["At least one user, customer, review, or marketplace signal."],
+                "risk_level": "medium",
+                "expected_claim_types": ["user_segment", "use_case", "adoption_signal"],
+            },
+            "product_capabilities": {
+                "expected_source_types": ["official_site", "docs", "marketplace"],
+                "minimum_coverage": ["At least one official product or documentation source."],
+                "risk_level": "medium",
+                "expected_claim_types": ["feature", "capability", "maturity_signal"],
+            },
+            "pricing_business_model": {
+                "expected_source_types": ["pricing_page", "official_site", "docs"],
+                "minimum_coverage": ["Official pricing, packaging, or billing source required when available."],
+                "risk_level": "high",
+                "expected_claim_types": ["pricing", "packaging", "billing_unit", "business_model"],
+            },
+            "market_growth": {
+                "expected_source_types": ["news", "blog", "official_site"],
+                "minimum_coverage": ["At least one dated growth, customer, funding, or market signal."],
+                "risk_level": "high",
+                "expected_claim_types": ["growth_signal", "market_presence", "regional_signal"],
+            },
+            "distribution_channels": {
+                "expected_source_types": ["official_site", "marketplace", "docs"],
+                "minimum_coverage": ["At least one public distribution, marketplace, or partner-channel source."],
+                "risk_level": "medium",
+                "expected_claim_types": ["channel", "distribution", "ecosystem"],
+            },
+            "customer_proof": {
+                "expected_source_types": ["review", "official_site", "news"],
+                "minimum_coverage": ["At least one customer, review, case-study, or reputation source."],
+                "risk_level": "medium",
+                "expected_claim_types": ["customer_proof", "review_signal", "case_study"],
+            },
+            "technology_integrations": {
+                "expected_source_types": ["docs", "marketplace", "official_site"],
+                "minimum_coverage": ["Documentation, API, integration, or marketplace source required when available."],
+                "risk_level": "high",
+                "expected_claim_types": ["api", "integration", "platform_capability"],
+            },
+            "compliance_risk": {
+                "expected_source_types": ["docs", "official_site", "news"],
+                "minimum_coverage": ["Trust, security, privacy, compliance, or reliability source required when available."],
+                "risk_level": "high",
+                "expected_claim_types": ["security", "privacy", "compliance", "risk"],
+            },
+            "competitive_moat": {
+                "expected_source_types": ["official_site", "review", "news"],
+                "minimum_coverage": ["Multiple source types preferred because moat claims are interpretive."],
+                "risk_level": "high",
+                "expected_claim_types": ["moat", "switching_cost", "differentiation", "substitution_risk"],
+            },
+        }
+        return policies.get(
+            dimension_id,
+            {
+                "expected_source_types": ["official_site", "news", "other"],
+                "minimum_coverage": ["At least two source-backed public evidence items."],
+                "risk_level": "medium",
+                "expected_claim_types": ["evidence_backed_signal"],
+            },
+        )
 
     def _dimension_confirmation_report(
         self,

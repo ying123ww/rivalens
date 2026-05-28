@@ -3,17 +3,18 @@
 import asyncio
 from typing import Any
 
-from rivalens.agents.branch_review import BranchReviewAgent
+from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector
 from rivalens.schema import (
-    BranchReviewDecision,
     CompetitorAnalysisState,
     EvidenceCollectionResult,
     EvidenceCollectionTask,
+    ResearchBrief,
     ResearchBranch,
+    ResearchTask,
 )
 
 
@@ -21,15 +22,15 @@ class CollectionAgent:
     def __init__(
         self,
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
-        branch_reviewer: BranchReviewAgent | None = None,
         evidence_reviewer: EvidenceQualityReviewer | None = None,
+        coverage_reviewer: CoverageReviewer | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 24,
         max_root_branch_hard_limit: int = 80,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
-        self.branch_reviewer = branch_reviewer or BranchReviewAgent(max_depth=max_branch_depth)
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
+        self.coverage_reviewer = coverage_reviewer or CoverageReviewer()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
@@ -54,7 +55,9 @@ class CollectionAgent:
         evidence_items = list(state.get("evidence_items", []))
         research_artifacts = list(state.get("research_artifacts", []))
         research_branches = list(state.get("research_branches", []))
-        branch_review_decisions = list(state.get("branch_review_decisions", []))
+        research_briefs = list(state.get("research_briefs", []))
+        research_tasks = list(state.get("research_tasks", []))
+        coverage_assessments = list(state.get("coverage_assessments", []))
         evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
@@ -69,6 +72,9 @@ class CollectionAgent:
             root_branches = root_branches[: self.max_root_branch_hard_limit]
         frontier = root_branches
         research_branches.extend(root_branches)
+        new_briefs = self._build_research_briefs(root_branches)
+        research_briefs.extend(new_briefs)
+        brief_by_branch = {brief["branch_id"]: brief for brief in new_briefs}
         processed_branch_count = 0
         expansion_branch_count = 0
         file_context = state.get("file_context", {})
@@ -76,9 +82,14 @@ class CollectionAgent:
         while frontier:
             active_frontier = frontier
             processed_branch_count += len(active_frontier)
-            collection_tasks = [
-                self._branch_to_collection_task(branch)
+            planned_tasks = [
+                self._branch_to_research_task(branch, brief_by_branch)
                 for branch in active_frontier
+            ]
+            research_tasks.extend(planned_tasks)
+            collection_tasks = [
+                self._branch_to_collection_task(branch, research_task)
+                for branch, research_task in zip(active_frontier, planned_tasks, strict=True)
             ]
             for collection_task in collection_tasks:
                 collection_task["query"] = self._with_file_rag(
@@ -95,8 +106,9 @@ class CollectionAgent:
             )
 
             next_frontier: list[ResearchBranch] = []
-            for branch, collection_task, result in zip(
+            for branch, research_task, collection_task, result in zip(
                 active_frontier,
+                planned_tasks,
                 collection_tasks,
                 results,
                 strict=True,
@@ -119,10 +131,23 @@ class CollectionAgent:
                     len(evidence_items),
                     collection_task,
                 )
-                branch["evidence_ids"] = [source.get("id", "") for source in sources]
+                branch["evidence_ids"] = list(
+                    dict.fromkeys(
+                        branch.get("evidence_ids", [])
+                        + [source.get("id", "") for source in sources]
+                    )
+                )
                 evidence_items.extend(sources)
                 evidence_review = self.evidence_reviewer.review(branch, sources)
+                coverage_assessment = self.coverage_reviewer.review(
+                    branch=branch,
+                    evidence_items=sources,
+                    evidence_review=evidence_review,
+                    research_task_ids=[research_task["id"]],
+                )
+                evidence_review["coverage_assessment_id"] = coverage_assessment["id"]
                 evidence_reviews.append(evidence_review)
+                coverage_assessments.append(coverage_assessment)
                 contexts.append(result)
                 research_artifacts.append(
                     {
@@ -132,6 +157,10 @@ class CollectionAgent:
                         "query": result["query"],
                         "competitor": collection_task["competitor"],
                         "branch_id": branch["id"],
+                        "research_brief_id": collection_task.get("research_brief_id", ""),
+                        "research_task_id": collection_task.get("research_task_id", ""),
+                        "search_stage": collection_task.get("search_stage", ""),
+                        "generated_from_gap": collection_task.get("generated_from_gap", ""),
                         "dimension_id": collection_task["dimension_id"],
                         "dimension_name": collection_task["dimension_name"],
                         "collection_task_id": collection_task["id"],
@@ -141,29 +170,19 @@ class CollectionAgent:
                     }
                 )
 
-                decision = self.branch_reviewer.review(
-                    branch=branch,
-                    evidence_items=sources,
-                    active_schema=active_schema,
-                    root_query=query,
-                    evidence_review=evidence_review,
-                )
-                branch_review_decisions.append(decision)
-                branch["review_decision"] = decision["decision"]
-                if decision["decision"] in {"expand", "retry"}:
+                follow_up_specs = coverage_assessment.get("follow_up_task_specs", [])
+                if (
+                    coverage_assessment.get("next_action")
+                    in {"collect_more", "refine_query"}
+                    and follow_up_specs
+                    and branch.get("depth", 0) < self.max_branch_depth
+                ):
                     branch["status"] = "expanded"
                     remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
                     if remaining_branch_slots <= 0:
                         branch["status"] = "stopped"
-                        branch["review_decision"] = "stop"
-                        decision["decision"] = "stop"
-                        decision["reasons"] = decision.get("reasons", []) + [
-                            "Expansion branch budget exhausted."
-                        ]
                         continue
-                    children = self._build_child_branches(branch, decision)[
-                        :remaining_branch_slots
-                    ]
+                    children = self._build_child_branches(branch, follow_up_specs)[:remaining_branch_slots]
                     expansion_branch_count += len(children)
                     next_frontier.extend(children)
                     research_branches.extend(children)
@@ -216,7 +235,9 @@ class CollectionAgent:
             "evidence_items": evidence_items,
             "evidence_reviews": evidence_reviews,
             "research_branches": research_branches,
-            "branch_review_decisions": branch_review_decisions,
+            "research_briefs": research_briefs,
+            "research_tasks": research_tasks,
+            "coverage_assessments": coverage_assessments,
             "research_artifacts": research_artifacts,
             "messages": state.get("messages", []) + [message, analysis_message],
             "agent_events": state.get("agent_events", [])
@@ -243,8 +264,11 @@ class CollectionAgent:
                         "research_runs": len(contexts),
                         "failed_task_count": len(failed_tasks),
                         "branch_count": len(research_branches),
+                        "research_brief_count": len(research_briefs),
+                        "research_task_count": len(research_tasks),
                         "expanded_branch_count": expansion_branch_count,
                         "evidence_review_count": len(evidence_reviews),
+                        "coverage_assessment_count": len(coverage_assessments),
                         "accepted_evidence_count": len(accepted_evidence_ids),
                         "rejected_evidence_count": len(rejected_evidence_ids),
                         "coverage": collection_coverage,
@@ -281,6 +305,7 @@ class CollectionAgent:
                 branches.append(
                     {
                         "id": branch_id,
+                        "research_brief_id": f"brief_{branch_id}",
                         "parent_id": None,
                         "depth": 0,
                         "path": [dimension["id"]],
@@ -295,6 +320,11 @@ class CollectionAgent:
                             dimension,
                             active_schema,
                         ),
+                        "search_stage": self._initial_search_stage_from_dimension(dimension),
+                        "generated_from_gap": "",
+                        "expected_source_types": dimension.get("expected_source_types", []),
+                        "minimum_coverage": dimension.get("minimum_coverage", []),
+                        "guiding_questions": dimension.get("guiding_questions", []),
                         "evidence_ids": [],
                         "status": "active",
                         "expansion_reason": (
@@ -302,18 +332,93 @@ class CollectionAgent:
                             if dimension["type"] == "analysis_dimension"
                             else "Root branch generated from active schema dimension."
                         ),
-                        "review_decision": None,
                     }
                 )
 
         return branches
 
-    def _branch_to_collection_task(self, branch: ResearchBranch) -> EvidenceCollectionTask:
+    def _build_research_briefs(
+        self,
+        branches: list[ResearchBranch],
+    ) -> list[ResearchBrief]:
+        briefs = []
+        for branch in branches:
+            dimension_name = branch.get("dimension_name", branch.get("dimension_id", ""))
+            competitor = branch.get("competitor", "")
+            briefs.append(
+                {
+                    "id": branch.get("research_brief_id", f"brief_{branch['id']}"),
+                    "branch_id": branch["id"],
+                    "competitor": competitor,
+                    "dimension_id": branch.get("dimension_id", ""),
+                    "dimension_name": dimension_name,
+                    "objective": (
+                        f"Collect source-backed public evidence about {competitor} "
+                        f"for the {dimension_name} dimension."
+                    ),
+                    "guiding_questions": branch.get("guiding_questions", []),
+                    "expected_source_types": branch.get("expected_source_types", []),
+                    "minimum_coverage": branch.get("minimum_coverage", []),
+                    "effort_level": self._effort_level(branch),
+                    "source_policy": (
+                        "Prefer public sources with stable URLs. Match the confirmed "
+                        "competitor and analysis dimension before accepting evidence."
+                    ),
+                    "stop_condition": (
+                        "Stop when expected source types and guiding questions have "
+                        "enough accepted evidence, or when branch budget is exhausted."
+                    ),
+                    "rationale": "Generated from a confirmed competitor x analysis dimension.",
+                }
+            )
+        return briefs
+
+    def _branch_to_research_task(
+        self,
+        branch: ResearchBranch,
+        brief_by_branch: dict[str, ResearchBrief],
+    ) -> ResearchTask:
+        brief = brief_by_branch.get(branch["id"], {})
+        search_stage = branch.get("search_stage") or self._initial_search_stage(branch)
+        generated_from_gap = branch.get("generated_from_gap", "")
+        reason = (
+            f"Follow-up collection for gap: {generated_from_gap}."
+            if generated_from_gap
+            else f"Initial {search_stage} collection for confirmed {branch.get('dimension_name', branch.get('dimension_id', 'research'))} dimension."
+        )
+        return {
+            "id": f"task_{branch['id']}",
+            "brief_id": branch.get("research_brief_id", brief.get("id", "")),
+            "parent_task_id": None,
+            "branch_id": branch["id"],
+            "competitor": branch.get("competitor", ""),
+            "dimension_id": branch.get("dimension_id", ""),
+            "dimension_name": branch.get("dimension_name", ""),
+            "search_stage": search_stage,
+            "objective": brief.get("objective", branch.get("topic", "")),
+            "query": branch.get("query", ""),
+            "expected_source_types": branch.get("expected_source_types", []),
+            "generated_from_gap": generated_from_gap,
+            "reason": reason,
+            "drift_risk": "low" if not generated_from_gap else "medium",
+        }
+
+    def _branch_to_collection_task(
+        self,
+        branch: ResearchBranch,
+        research_task: ResearchTask | None = None,
+    ) -> EvidenceCollectionTask:
+        research_task = research_task or self._branch_to_research_task(branch, {})
         return {
             "id": branch["id"],
+            "research_task_id": research_task.get("id", ""),
+            "research_brief_id": research_task.get("brief_id", branch.get("research_brief_id", "")),
             "branch_id": branch["id"],
             "parent_branch_id": branch.get("parent_id"),
             "depth": branch.get("depth", 0),
+            "search_stage": research_task.get("search_stage", branch.get("search_stage", "")),
+            "generated_from_gap": research_task.get("generated_from_gap", branch.get("generated_from_gap", "")),
+            "expected_source_types": research_task.get("expected_source_types", branch.get("expected_source_types", [])),
             "topic": branch.get("topic", ""),
             "expansion_reason": branch.get("expansion_reason", ""),
             "competitor": branch.get("competitor", ""),
@@ -326,20 +431,19 @@ class CollectionAgent:
     def _build_child_branches(
         self,
         parent: ResearchBranch,
-        decision: BranchReviewDecision,
+        follow_up_specs: list[dict[str, Any]],
     ) -> list[ResearchBranch]:
         children = []
-        next_topics = decision.get("next_topics", [])
-        for index, query in enumerate(decision.get("next_queries", []), start=1):
-            topic = (
-                next_topics[index - 1]
-                if index <= len(next_topics)
-                else f"{parent['topic']} follow-up {index}"
-            )
+        for index, follow_up_spec in enumerate(follow_up_specs, start=1):
+            query = follow_up_spec.get("query", "")
+            if not query:
+                continue
+            topic = follow_up_spec.get("objective") or f"{parent['topic']} follow-up {index}"
             child_id = f"{parent['id']}_d{parent.get('depth', 0) + 1}_{index}"
             children.append(
                 {
                     "id": child_id,
+                    "research_brief_id": parent.get("research_brief_id", f"brief_{parent['id']}"),
                     "parent_id": parent["id"],
                     "depth": parent.get("depth", 0) + 1,
                     "path": list(parent.get("path", [])) + [topic],
@@ -349,13 +453,23 @@ class CollectionAgent:
                     "dimension_type": parent.get("dimension_type", ""),
                     "topic": topic,
                     "query": query,
+                    "search_stage": follow_up_spec.get("search_stage", "focused"),
+                    "generated_from_gap": follow_up_spec.get(
+                        "generated_from_gap",
+                        "",
+                    ),
+                    "expected_source_types": follow_up_spec.get(
+                        "target_source_types",
+                        parent.get("expected_source_types", []),
+                    ),
+                    "minimum_coverage": parent.get("minimum_coverage", []),
+                    "guiding_questions": parent.get("guiding_questions", []),
                     "evidence_ids": [],
                     "status": "active",
                     "expansion_reason": (
-                        "; ".join(decision.get("evidence_gaps", []))
-                        or "Branch reviewer requested expansion."
+                        follow_up_spec.get("reason")
+                        or "Coverage reviewer requested follow-up collection."
                     ),
-                    "review_decision": None,
                 }
             )
         return children
@@ -388,6 +502,10 @@ class CollectionAgent:
                     "description": dimension.get("description", ""),
                     "guiding_questions": dimension.get("guiding_questions", []),
                     "search_intent": dimension.get("search_intent", ""),
+                    "expected_source_types": dimension.get("expected_source_types", []),
+                    "minimum_coverage": dimension.get("minimum_coverage", []),
+                    "risk_level": dimension.get("risk_level", "medium"),
+                    "expected_claim_types": dimension.get("expected_claim_types", []),
                     "priority": dimension.get("priority", "P1"),
                 }
                 for dimension in analysis_dimensions
@@ -423,6 +541,10 @@ class CollectionAgent:
                     "name": field.replace("_", " ").title(),
                     "type": "core",
                     "description": core_descriptions.get(field, field.replace("_", " ")),
+                    "expected_source_types": self._fallback_expected_source_types(field),
+                    "minimum_coverage": ["At least two source-backed public evidence items."],
+                    "risk_level": "medium",
+                    "expected_claim_types": ["evidence_backed_signal"],
                 }
             )
 
@@ -442,6 +564,10 @@ class CollectionAgent:
                         "description",
                         extension_id.replace("_", " "),
                     ),
+                    "expected_source_types": ["official_site", "news", "other"],
+                    "minimum_coverage": ["At least two source-backed public evidence items."],
+                    "risk_level": "medium",
+                    "expected_claim_types": ["industry_specific_signal"],
                 }
             )
 
@@ -475,6 +601,7 @@ class CollectionAgent:
                 f"Focus definition: {dimension['description']}",
                 self._guiding_questions_line(dimension),
                 dimension.get("search_intent", ""),
+                self._expected_sources_line(dimension),
                 "Collect public, source-backed evidence only. Prefer official "
                 "pages, pricing pages, docs, reviews, news, and marketplace "
                 "listings when relevant.",
@@ -486,6 +613,47 @@ class CollectionAgent:
         if not guiding_questions:
             return ""
         return "Guiding questions: " + " | ".join(str(question) for question in guiding_questions)
+
+    def _expected_sources_line(self, dimension: dict[str, Any]) -> str:
+        expected_source_types = dimension.get("expected_source_types", [])
+        if not expected_source_types:
+            return ""
+        return "Expected source types: " + ", ".join(str(source) for source in expected_source_types)
+
+    def _initial_search_stage_from_dimension(self, dimension: dict[str, Any]) -> str:
+        expected_source_types = set(dimension.get("expected_source_types", []))
+        if {"pricing_page", "docs", "review", "marketplace"} & expected_source_types:
+            return "focused"
+        if dimension.get("risk_level") == "high":
+            return "landscape"
+        return "focused"
+
+    def _initial_search_stage(self, branch: ResearchBranch) -> str:
+        expected_source_types = set(branch.get("expected_source_types", []))
+        if {"pricing_page", "docs", "review", "marketplace"} & expected_source_types:
+            return "focused"
+        if branch.get("dimension_id") in {"market_growth", "competitive_moat"}:
+            return "landscape"
+        return "focused"
+
+    def _effort_level(self, branch: ResearchBranch) -> str:
+        if branch.get("dimension_id") in {
+            "pricing_business_model",
+            "technology_integrations",
+            "compliance_risk",
+            "competitive_moat",
+        }:
+            return "high"
+        if branch.get("dimension_id") in {"market_growth", "customer_proof"}:
+            return "medium"
+        return "low"
+
+    def _fallback_expected_source_types(self, field: str) -> list[str]:
+        if field == "pricing_model":
+            return ["pricing_page", "official_site", "docs"]
+        if field == "user_personas":
+            return ["review", "official_site", "marketplace"]
+        return ["official_site", "docs", "other"]
 
     def _with_file_rag(
         self,
@@ -530,6 +698,10 @@ class CollectionAgent:
                 collection_task.get("parent_branch_id"),
             )
             item["collection_task_id"] = collection_task["id"]
+            item["research_task_id"] = item.get(
+                "research_task_id",
+                collection_task.get("research_task_id", ""),
+            )
             item["dimension_id"] = collection_task["dimension_id"]
             item["dimension_name"] = collection_task["dimension_name"]
             assigned.append(item)

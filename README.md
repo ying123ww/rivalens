@@ -51,7 +51,7 @@ flowchart TB
 
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
     Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
-    Collector --> BranchReview["BranchReviewAgent\nexpand/retry/stop"]
+    Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
     EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
@@ -143,24 +143,28 @@ ResearchEngine wiring out of agent business logic:
 ```text
 CollectionAgent
   -> ResearchBranch frontier
-  -> EvidenceCollectionTask
+  -> ResearchBrief / ResearchTask queue
   -> ResearchEngineEvidenceCollector (standard evidence)
   -> ResearchEngine
   -> EvidenceItem[]
-  -> EvidenceQualityReviewer (accept/retry/expand recommendation)
-  -> BranchReviewAgent (expand/retry/stop branch decision)
+  -> EvidenceQualityReviewer (source-level accepted/rejected evidence)
+  -> CoverageReviewer (coverage gaps and follow-up task specs)
 ```
 
 The collection path uses standard evidence collection for each branch. Deep
 research recursion is not used as a black box inside `ResearchEngine`; instead,
-Rivalens keeps branch lineage, evidence reviews, branch review decisions,
-depth, and budget in `CompetitorAnalysisState.research_branches`,
+Rivalens keeps branch lineage, research briefs, research tasks, evidence
+reviews, coverage assessments, depth, and budget in
+`CompetitorAnalysisState.research_branches`,
+`CompetitorAnalysisState.research_briefs`,
+`CompetitorAnalysisState.research_tasks`,
 `CompetitorAnalysisState.evidence_reviews`, and
-`CompetitorAnalysisState.branch_review_decisions`.
+`CompetitorAnalysisState.coverage_assessments`.
 
 Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion
-budget applies only to child branches created by `BranchReviewAgent`, with
+budget applies only to child branches created from `CoverageReviewer`
+follow-up task specs, with
 `max_root_branch_hard_limit` acting as a defensive cap for unusually large
 schemas and `max_expansion_branches` controlling follow-up breadth.
 
@@ -183,9 +187,10 @@ previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and
 produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
-findings, score, and required action. `BranchReviewAgent` consumes that result
-and remains responsible for branch-level search control: depth, budget, drift
-risk, child query generation, and the final expand/retry/stop decision.
+findings, score, and required action. `CoverageReviewer` consumes that result
+and remains responsible for branch-level coverage control: expected source
+types, missing guiding questions, next action, and gap-driven follow-up task
+specs. `CollectionAgent` owns depth and expansion budget enforcement directly.
 `AnalysisAgent` consumes accepted review records immediately after collection
 and records `branch_id`, `evidence_review_id`, and `evidence_ids` on each
 generated `AnalysisClaim`.

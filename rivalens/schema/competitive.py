@@ -33,6 +33,7 @@ class EvidenceItem(TypedDict, total=False):
     branch_id: str
     parent_branch_id: str | None
     collection_task_id: str
+    research_task_id: str
     dimension_id: str
     dimension_name: str
     title: str
@@ -46,9 +47,14 @@ class EvidenceItem(TypedDict, total=False):
 
 class EvidenceCollectionTask(TypedDict, total=False):
     id: str
+    research_task_id: str
+    research_brief_id: str
     branch_id: str
     parent_branch_id: str | None
     depth: int
+    search_stage: str
+    generated_from_gap: str
+    expected_source_types: list[str]
     topic: str
     expansion_reason: str
     competitor: str
@@ -95,6 +101,7 @@ class EvidenceReviewResult(TypedDict, total=False):
     id: str
     branch_id: str
     collection_task_id: str
+    coverage_assessment_id: str
     accepted: bool
     score: float
     findings: list[EvidenceReviewFinding]
@@ -103,12 +110,12 @@ class EvidenceReviewResult(TypedDict, total=False):
     required_action: EvidenceReviewAction
 
 
-BranchDecisionType = Literal["expand", "stop", "retry", "merge", "redirect"]
 BranchDriftRisk = Literal["low", "medium", "high"]
 
 
 class ResearchBranch(TypedDict, total=False):
     id: str
+    research_brief_id: str
     parent_id: str | None
     depth: int
     path: list[str]
@@ -118,22 +125,83 @@ class ResearchBranch(TypedDict, total=False):
     dimension_type: str
     topic: str
     query: str
+    search_stage: str
+    generated_from_gap: str
+    expected_source_types: list[str]
+    minimum_coverage: list[str]
+    guiding_questions: list[str]
     evidence_ids: list[str]
     status: Literal["active", "expanded", "stopped"]
     expansion_reason: str
-    review_decision: BranchDecisionType | None
 
 
-class BranchReviewDecision(TypedDict, total=False):
+SearchStage = Literal["landscape", "focused", "verification"]
+CoverageNextAction = Literal[
+    "ready_for_analysis",
+    "collect_more",
+    "refine_query",
+    "split_dimension",
+    "stop_with_limit",
+]
+
+
+class ResearchBrief(TypedDict, total=False):
+    id: str
     branch_id: str
-    evidence_review_id: str
-    decision: BranchDecisionType
-    score: float
-    reasons: list[str]
-    evidence_gaps: list[str]
-    next_topics: list[str]
-    next_queries: list[str]
+    competitor: str
+    dimension_id: str
+    dimension_name: str
+    objective: str
+    guiding_questions: list[str]
+    expected_source_types: list[str]
+    minimum_coverage: list[str]
+    effort_level: Literal["low", "medium", "high"]
+    source_policy: str
+    stop_condition: str
+    rationale: str
+
+
+class ResearchTask(TypedDict, total=False):
+    id: str
+    brief_id: str
+    parent_task_id: str | None
+    branch_id: str
+    competitor: str
+    dimension_id: str
+    dimension_name: str
+    search_stage: SearchStage
+    objective: str
+    query: str
+    expected_source_types: list[str]
+    generated_from_gap: str
+    reason: str
     drift_risk: BranchDriftRisk
+
+
+class FollowUpTaskSpec(TypedDict, total=False):
+    objective: str
+    query: str
+    target_source_types: list[str]
+    generated_from_gap: str
+    reason: str
+    search_stage: SearchStage
+
+
+class CoverageAssessment(TypedDict, total=False):
+    id: str
+    branch_id: str
+    brief_id: str
+    research_task_ids: list[str]
+    accepted_evidence_ids: list[str]
+    rejected_evidence_ids: list[str]
+    found_source_types: list[str]
+    missing_source_types: list[str]
+    covered_questions: list[str]
+    missing_questions: list[str]
+    contradictions: list[str]
+    next_action: CoverageNextAction
+    follow_up_task_specs: list[FollowUpTaskSpec]
+    confidence: float
 
 
 class IndustryCandidate(TypedDict, total=False):
@@ -234,6 +302,10 @@ class AnalysisDimension(TypedDict, total=False):
     priority: str
     guiding_questions: list[str]
     search_intent: str
+    expected_source_types: list[str]
+    minimum_coverage: list[str]
+    risk_level: str
+    expected_claim_types: list[str]
     rank: int
 
 
@@ -443,7 +515,9 @@ class CompetitorAnalysisState(TypedDict, total=False):
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
     research_branches: list[ResearchBranch]
-    branch_review_decisions: list[BranchReviewDecision]
+    research_briefs: list[ResearchBrief]
+    research_tasks: list[ResearchTask]
+    coverage_assessments: list[CoverageAssessment]
     evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext
     evidence_items: list[EvidenceItem]

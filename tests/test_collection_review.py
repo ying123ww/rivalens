@@ -2,8 +2,8 @@ import asyncio
 import unittest
 
 from rivalens.agents.analysis import AnalysisAgent
-from rivalens.agents.branch_review import BranchReviewAgent
 from rivalens.agents.collection import CollectionAgent
+from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.planning import PlanningAgent
@@ -41,6 +41,13 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(dimension_artifact["mode"], "dimension_confirmation")
         self.assertIn("维度确认", dimension_artifact["report"])
         self.assertIn("3.1 战略定位", dimension_artifact["report"])
+        pricing_dimension = [
+            dimension
+            for dimension in dimensions
+            if dimension["id"] == "pricing_business_model"
+        ][0]
+        self.assertIn("pricing_page", pricing_dimension["expected_source_types"])
+        self.assertTrue(pricing_dimension["minimum_coverage"])
 
     def test_collection_root_branches_use_confirmed_analysis_dimensions(self):
         branches = CollectionAgent()._build_root_branches(
@@ -64,6 +71,110 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(branches[0]["dimension_name"], "战略定位")
         self.assertIn("各竞品官方的产品定位是什么？", branches[0]["query"])
         self.assertIn("搜索战略定位公开证据", branches[0]["query"])
+        self.assertEqual(branches[0]["search_stage"], "focused")
+
+    def test_collection_generates_gap_driven_follow_up_tasks(self):
+        class FakeEvidenceCollector:
+            async def collect(self, collection_task, deep=False, verbose=True):
+                gap = collection_task.get("generated_from_gap", "")
+                if "pricing_page" in gap:
+                    source = {
+                        "competitor": "Acme",
+                        "dimension_id": "pricing_business_model",
+                        "title": "Acme Pricing",
+                        "url": "https://acme.example/pricing",
+                        "source_type": "pricing_page",
+                        "excerpt": "Acme publishes official pricing plans and enterprise packaging.",
+                        "confidence": 0.9,
+                    }
+                elif "official_site" in gap:
+                    source = {
+                        "competitor": "Acme",
+                        "dimension_id": "pricing_business_model",
+                        "title": "Acme Plans",
+                        "url": "https://acme.example/plans",
+                        "source_type": "other",
+                        "excerpt": "Acme describes plan packaging on its official site.",
+                        "confidence": 0.8,
+                    }
+                else:
+                    source = {
+                        "competitor": "Acme",
+                        "dimension_id": "pricing_business_model",
+                        "title": "Acme market note",
+                        "url": "https://news.example/acme-pricing",
+                        "source_type": "news",
+                        "excerpt": "A news item mentions Acme monetization but no official pricing page.",
+                        "confidence": 0.6,
+                    }
+
+                return {
+                    "task": dict(collection_task),
+                    "mode": "standard_evidence",
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [source],
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme pricing",
+                "competitors": [{"name": "Acme"}],
+                "verbose": False,
+            },
+            "active_knowledge_schema": {
+                "id": "schema_productivity",
+                "selected_industry": {"name": "Productivity SaaS"},
+            },
+            "analysis_dimensions": [
+                {
+                    "id": "pricing_business_model",
+                    "name": "定价与商业模式",
+                    "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
+                    "priority": "P0",
+                    "guiding_questions": ["公开定价和套餐结构是什么？"],
+                    "search_intent": "搜索官方定价证据。",
+                    "expected_source_types": ["pricing_page", "official_site"],
+                    "minimum_coverage": ["Official pricing source required."],
+                    "risk_level": "high",
+                    "expected_claim_types": ["pricing"],
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=FakeEvidenceCollector(),
+                max_branch_depth=1,
+                max_expansion_branches=4,
+            ).run(state)
+        )
+
+        generated_gaps = [
+            task.get("generated_from_gap", "")
+            for task in result["research_tasks"]
+        ]
+        self.assertIn("missing_source_type:pricing_page", generated_gaps)
+        self.assertIn("missing_source_type:official_site", generated_gaps)
+        self.assertGreaterEqual(len(result["coverage_assessments"]), 2)
+        self.assertEqual(
+            result["coverage_assessments"][0]["next_action"],
+            "collect_more",
+        )
+        self.assertTrue(
+            any(
+                assessment["next_action"] == "ready_for_analysis"
+                for assessment in result["coverage_assessments"][1:]
+            )
+        )
+        self.assertTrue(
+            any(
+                evidence["source_type"] == "pricing_page"
+                for evidence in result["evidence_items"]
+            )
+        )
 
     def test_evidence_item_uses_query_relevant_chunk(self):
         irrelevant_intro = "General company overview. " * 80
@@ -143,7 +254,7 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(review["accepted_evidence_ids"], [])
         self.assertEqual(review["rejected_evidence_ids"], ["ev_1"])
 
-    def test_branch_review_uses_evidence_review_for_retry_decision(self):
+    def test_coverage_review_refines_query_after_source_retry(self):
         branch = pricing_branch()
         evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
             branch,
@@ -158,7 +269,7 @@ class CollectionReviewTest(unittest.TestCase):
             ],
         )
 
-        decision = BranchReviewAgent(min_sources_per_branch=1).review(
+        assessment = CoverageReviewer().review(
             branch=branch,
             evidence_items=[
                 {
@@ -170,17 +281,18 @@ class CollectionReviewTest(unittest.TestCase):
                     "source_type": "pricing_page",
                 }
             ],
-            active_schema={},
-            root_query="Compare Acme pricing",
             evidence_review=evidence_review,
         )
 
-        self.assertEqual(decision["decision"], "retry")
-        self.assertEqual(decision["evidence_review_id"], evidence_review["id"])
-        self.assertIn("missing_source_url", decision["evidence_gaps"])
-        self.assertTrue(decision["next_queries"])
+        self.assertEqual(assessment["next_action"], "refine_query")
+        self.assertEqual(assessment["accepted_evidence_ids"], [])
+        self.assertTrue(assessment["follow_up_task_specs"])
+        self.assertEqual(
+            assessment["follow_up_task_specs"][0]["generated_from_gap"],
+            "retry_source_quality",
+        )
 
-    def test_competitor_mismatch_retries_instead_of_failing_branch(self):
+    def test_coverage_review_generates_follow_up_after_competitor_mismatch(self):
         branch = pricing_branch()
         evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
             branch,
@@ -196,7 +308,7 @@ class CollectionReviewTest(unittest.TestCase):
             ],
         )
 
-        decision = BranchReviewAgent(min_sources_per_branch=1).review(
+        assessment = CoverageReviewer().review(
             branch=branch,
             evidence_items=[
                 {
@@ -208,15 +320,12 @@ class CollectionReviewTest(unittest.TestCase):
                     "source_type": "pricing_page",
                 }
             ],
-            active_schema={},
-            root_query="Compare Acme pricing",
             evidence_review=evidence_review,
         )
 
         self.assertEqual(evidence_review["required_action"], "retry")
-        self.assertEqual(decision["decision"], "retry")
-        self.assertIn("competitor_mismatch", decision["evidence_gaps"])
-        self.assertTrue(decision["next_queries"])
+        self.assertEqual(assessment["next_action"], "refine_query")
+        self.assertTrue(assessment["follow_up_task_specs"])
 
     def test_knowledge_structuring_uses_only_accepted_evidence(self):
         state = {
