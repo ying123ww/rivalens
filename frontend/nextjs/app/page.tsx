@@ -1,11 +1,19 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useResearchHistoryContext } from '@/hooks/ResearchHistoryContext';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { Data, ChatBoxSettings, QuestionData, ChatMessage, ChatData } from '../types/data';
+import {
+  AnalysisDirection,
+  Data,
+  ChatBoxSettings,
+  IndustryDirectionPlan,
+  QuestionData,
+  ChatMessage,
+  ChatData
+} from '../types/data';
 import { preprocessOrderedData } from '../utils/dataProcessing';
 import { toast } from "react-hot-toast";
 
@@ -42,6 +50,7 @@ export default function Home() {
       mcp_enabled: false,
       mcp_configs: [],
       mcp_strategy: "fast",
+      industry_direction_plan: undefined,
     };
 
     // Try to load all settings from localStorage
@@ -74,6 +83,11 @@ export default function Home() {
   const [currentResearchId, setCurrentResearchId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [isProcessingChat, setIsProcessingChat] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [industryDirectionPlan, setIndustryDirectionPlan] = useState<IndustryDirectionPlan | null>(null);
+  const [customDirectionText, setCustomDirectionText] = useState("");
+  const [showCustomDirections, setShowCustomDirections] = useState(false);
+  const [isPreparingPlan, setIsPreparingPlan] = useState(false);
 
   // Use our custom scroll handler
   const { showScrollButton, scrollToBottom } = useScrollHandler(mainContentRef);
@@ -320,7 +334,42 @@ export default function Home() {
     }
   };
 
-  const handleDisplayResult = async (newQuestion: string) => {
+  const previewIndustryDirections = async (
+    newQuestion: string,
+    customDirections: string[] = [],
+    selectedDirectionIds?: string[],
+    confirmed = false
+  ) => {
+    const response = await fetch('/api/industry-directions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: newQuestion,
+        custom_directions: customDirections,
+        selected_direction_ids: selectedDirectionIds,
+        confirmed
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to prepare analysis directions: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.plan as IndustryDirectionPlan;
+  };
+
+  const parseCustomDirections = (value: string) => {
+    return value
+      .split(/\n|,|，|;|；|以及|还有|和|与|、/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const startResearchWithPlan = (
+    newQuestion: string,
+    plan?: IndustryDirectionPlan
+  ) => {
     // Exit chat mode when starting a new research
     setIsInChatMode(false);
     setShowResult(true);
@@ -335,9 +384,61 @@ export default function Home() {
       ...chatBoxSettings,
       report_type: 'rivalens',
       defaultReportType: 'rivalens',
+      industry_direction_plan: plan,
     };
     setChatBoxSettings(rivalensSettings);
     initializeWebSocket(newQuestion, rivalensSettings);
+  };
+
+  const handleDisplayResult = async (newQuestion: string) => {
+    if (!newQuestion.trim()) return;
+
+    setIsPreparingPlan(true);
+    try {
+      const plan = await previewIndustryDirections(newQuestion);
+      setPendingQuestion(newQuestion);
+      setIndustryDirectionPlan(plan);
+      setCustomDirectionText("");
+      setShowCustomDirections(false);
+    } catch (error) {
+      console.error('Error preparing industry directions:', error);
+      toast.error('Could not prepare analysis directions. Starting with the default planner.');
+      startResearchWithPlan(newQuestion);
+    } finally {
+      setIsPreparingPlan(false);
+    }
+  };
+
+  const handleConfirmIndustryDirections = async (selectedDirectionIds?: string[]) => {
+    if (!pendingQuestion) return;
+
+    setIsPreparingPlan(true);
+    try {
+      const customDirections = parseCustomDirections(customDirectionText);
+      const finalPlan = await previewIndustryDirections(
+        pendingQuestion,
+        customDirections,
+        selectedDirectionIds,
+        true
+      );
+      setIndustryDirectionPlan(null);
+      setPendingQuestion(null);
+      setShowCustomDirections(false);
+      setCustomDirectionText("");
+      startResearchWithPlan(pendingQuestion, finalPlan);
+    } catch (error) {
+      console.error('Error confirming industry directions:', error);
+      toast.error('Could not confirm analysis directions. Please try again.');
+    } finally {
+      setIsPreparingPlan(false);
+    }
+  };
+
+  const handleCancelIndustryDirections = () => {
+    setIndustryDirectionPlan(null);
+    setPendingQuestion(null);
+    setShowCustomDirections(false);
+    setCustomDirectionText("");
   };
 
   // Mobile-specific implementation for research
@@ -802,6 +903,204 @@ export default function Home() {
           )
         })
       )}
+      {industryDirectionPlan && pendingQuestion && (
+        <IndustryDirectionDialog
+          plan={industryDirectionPlan}
+          customDirectionText={customDirectionText}
+          setCustomDirectionText={setCustomDirectionText}
+          showCustomDirections={showCustomDirections}
+          setShowCustomDirections={setShowCustomDirections}
+          isPreparingPlan={isPreparingPlan}
+          onConfirm={handleConfirmIndustryDirections}
+          onCancel={handleCancelIndustryDirections}
+        />
+      )}
     </>
   );
+}
+
+type IndustryDirectionDialogProps = {
+  plan: IndustryDirectionPlan;
+  customDirectionText: string;
+  setCustomDirectionText: React.Dispatch<React.SetStateAction<string>>;
+  showCustomDirections: boolean;
+  setShowCustomDirections: React.Dispatch<React.SetStateAction<boolean>>;
+  isPreparingPlan: boolean;
+  onConfirm: (selectedDirectionIds?: string[]) => void;
+  onCancel: () => void;
+};
+
+function IndustryDirectionDialog({
+  plan,
+  customDirectionText,
+  setCustomDirectionText,
+  showCustomDirections,
+  setShowCustomDirections,
+  isPreparingPlan,
+  onConfirm,
+  onCancel,
+}: IndustryDirectionDialogProps) {
+  const directions = plan.suggested_directions?.length
+    ? plan.suggested_directions
+    : plan.default_directions;
+  const [isEditingDirections, setIsEditingDirections] = useState(false);
+  const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>(
+    directions.map((direction) => direction.direction_id)
+  );
+  const finalDirectionIds = [
+    ...selectedDirectionIds,
+    ...customDirectionText
+      .replace(/^我还想重点看|^还想重点看|^重点看|^我还想看/, "")
+      .split(/\n|,|，|;|；|以及|还有|和|与|、/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item, index) => customDirectionPreviewId(item, index)),
+  ];
+
+  const toggleDirection = (directionId: string) => {
+    const direction = directions.find(
+      (item) => item.direction_id === directionId
+    );
+    if (direction?.required) return;
+
+    setSelectedDirectionIds((current) =>
+      current.includes(directionId)
+        ? current.filter((item) => item !== directionId)
+        : [...current, directionId]
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/80 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-3xl rounded-lg border border-gray-700 bg-gray-900 shadow-2xl shadow-black/40">
+        <div className="border-b border-gray-800 px-5 py-4 sm:px-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-teal-300">
+                PlanningAgent / IndustryDirectionSkill
+              </p>
+              <h2 className="mt-2 text-xl font-semibold text-gray-100">
+                确认行业与搜索方向
+              </h2>
+            </div>
+            <div className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-sm text-teal-100">
+              {plan.detected_industry || plan.industry.name}
+              <span className="ml-2 text-teal-300">
+                {Math.round((plan.industry.confidence || 0) * 100)}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-h-[64vh] overflow-y-auto px-5 py-4 sm:px-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {directions.map((direction: AnalysisDirection) => (
+              <div
+                key={direction.direction_id}
+                className="rounded-md border border-gray-800 bg-gray-950/40 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <label className="flex min-w-0 items-start gap-2">
+                    {isEditingDirections && (
+                      <input
+                        type="checkbox"
+                        checked={selectedDirectionIds.includes(
+                          direction.direction_id
+                        )}
+                        disabled={direction.required}
+                        onChange={() =>
+                          toggleDirection(direction.direction_id)
+                        }
+                        className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-950 text-teal-500 disabled:opacity-50"
+                      />
+                    )}
+                    <span className="text-sm font-semibold text-gray-100">
+                      {direction.name}
+                    </span>
+                  </label>
+                  <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
+                    {direction.direction_id}
+                  </span>
+                  <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
+                    {direction.required ? "必选" : "可选"}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-gray-300">
+                  {direction.reason || direction.description}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {showCustomDirections && (
+            <label className="mt-4 block">
+              <span className="text-sm font-medium text-gray-200">
+                你还想重点分析哪些方向？
+              </span>
+              <textarea
+                value={customDirectionText}
+                onChange={(event) => setCustomDirectionText(event.target.value)}
+                placeholder="例如：我还想重点看 AI 写作能力和私有化部署能力。"
+                className="mt-2 min-h-[108px] w-full resize-y rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none transition focus:border-teal-400"
+              />
+            </label>
+          )}
+
+          <div className="mt-4 rounded-md border border-gray-800 bg-gray-950/50 p-3">
+            <p className="text-xs uppercase tracking-[0.16em] text-gray-500">
+              final_directions
+            </p>
+            <p className="mt-2 break-words font-mono text-xs text-gray-300">
+              [{finalDirectionIds.map((id) => `"${id}"`).join(", ")}]
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-gray-800 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+          <button
+            type="button"
+            onClick={() => setIsEditingDirections(true)}
+            className="rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition hover:border-gray-500 hover:text-gray-100"
+            disabled={isPreparingPlan}
+          >
+            修改分析方向
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCustomDirections(true)}
+            className="rounded-md border border-teal-500/40 px-4 py-2 text-sm font-medium text-teal-200 transition hover:border-teal-300 hover:text-teal-100"
+            disabled={isPreparingPlan}
+          >
+            补充自定义方向
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(selectedDirectionIds)}
+            className="rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-500 disabled:opacity-60"
+            disabled={isPreparingPlan}
+          >
+            {isPreparingPlan ? "处理中..." : "确认并开始分析"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function customDirectionPreviewId(value: string, index: number) {
+  const text = value.trim().replace(/[。.]/g, "");
+  const lowered = text.toLowerCase();
+  if (lowered.includes("ai") || text.includes("人工智能")) {
+    return "ai_capability";
+  }
+  if (text.includes("私有化") || text.includes("私有部署")) {
+    return "private_deployment";
+  }
+  const slug = text
+    .split("")
+    .map((character) => (/^[a-z0-9]$/i.test(character) ? character.toLowerCase() : "_"))
+    .join("")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+  return slug || `user_direction_${index + 1}`;
 }

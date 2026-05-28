@@ -32,6 +32,7 @@ from server.websocket_manager import run_agent
 from utils import write_md_to_word, write_md_to_pdf
 from rivalens.research.utils.enum import Tone
 from chat.chat import ChatAgentWithMemory
+from rivalens.agents.industry_direction import IndustryDirectionSkill
 
 from server.report_store import ReportStore
 from server.persistence import get_persistence_config, redact_url
@@ -66,6 +67,16 @@ class ChatRequest(BaseModel):
     
     report: str
     messages: List[Dict[str, Any]]
+
+
+class IndustryDirectionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    task: str
+    competitors: List[Dict[str, Any]] = []
+    custom_directions: List[str] = []
+    selected_direction_ids: List[str] | None = None
+    confirmed: bool = False
 
 
 @asynccontextmanager
@@ -338,6 +349,18 @@ async def list_files():
 @app.post("/api/rivalens")
 async def run_rivalens():
     return await execute_rivalens_workflow(manager)
+
+
+@app.post("/api/industry-directions")
+async def preview_industry_directions(request: IndustryDirectionRequest):
+    plan = IndustryDirectionSkill().build_plan(
+        query=request.task,
+        competitors=request.competitors,
+        user_directions=request.custom_directions,
+        selected_direction_ids=request.selected_direction_ids,
+        user_confirmed=request.confirmed,
+    )
+    return {"plan": plan}
 
 
 @app.post("/upload/")

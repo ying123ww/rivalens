@@ -144,6 +144,46 @@ class IndustryCandidate(TypedDict, total=False):
     signals: list[str]
 
 
+class IndustryProfileDirection(TypedDict, total=False):
+    direction_id: str
+    name: str
+    reason: str
+    required: bool
+
+
+class IndustryProfile(TypedDict, total=False):
+    industry: str
+    display_name: str
+    aliases: list[str]
+    known_competitors: list[str]
+    default_directions: list[IndustryProfileDirection]
+
+
+class AnalysisDirection(TypedDict, total=False):
+    direction_id: str
+    name: str
+    reason: str
+    description: str
+    search_focus: str
+    source_hints: list[str]
+    required: bool
+    origin: Literal["industry_template", "user_requested"]
+
+
+class IndustryDirectionPlan(TypedDict, total=False):
+    id: str
+    detected_industry: str
+    industry: IndustryCandidate
+    candidate_industries: list[IndustryCandidate]
+    suggested_directions: list[AnalysisDirection]
+    default_directions: list[AnalysisDirection]
+    user_added_directions: list[AnalysisDirection]
+    final_directions: list[AnalysisDirection]
+    final_analysis_plan: dict[str, Any]
+    user_confirmed: bool
+    created_at: str
+
+
 class SchemaExtension(TypedDict, total=False):
     id: str
     name: str
@@ -267,6 +307,48 @@ class IndustryCandidatePayload(StrictPayloadModel):
     signals: list[str] = Field(default_factory=list)
 
 
+class IndustryProfileDirectionPayload(StrictPayloadModel):
+    direction_id: str
+    name: str
+    reason: str = ""
+    required: bool = True
+
+
+class IndustryProfilePayload(StrictPayloadModel):
+    industry: str
+    display_name: str
+    aliases: list[str] = Field(default_factory=list)
+    known_competitors: list[str] = Field(default_factory=list)
+    default_directions: list[IndustryProfileDirectionPayload] = Field(
+        default_factory=list,
+    )
+
+
+class AnalysisDirectionPayload(StrictPayloadModel):
+    direction_id: str
+    name: str
+    reason: str = ""
+    description: str = ""
+    search_focus: str = ""
+    source_hints: list[str] = Field(default_factory=list)
+    required: bool = True
+    origin: Literal["industry_template", "user_requested"]
+
+
+class IndustryDirectionPlanPayload(StrictPayloadModel):
+    id: str
+    detected_industry: str = ""
+    industry: IndustryCandidatePayload
+    candidate_industries: list[IndustryCandidatePayload] = Field(default_factory=list)
+    suggested_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    default_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    user_added_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    final_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    final_analysis_plan: dict[str, Any] = Field(default_factory=dict)
+    user_confirmed: bool = False
+    created_at: str
+
+
 class SchemaExtensionPayload(StrictPayloadModel):
     id: str
     name: str
@@ -363,6 +445,7 @@ class EvidenceMessagePayload(StrictPayloadModel):
 class SchemaSelectionMessagePayload(StrictPayloadModel):
     active_schema: ActiveKnowledgeSchemaPayloadModel
     candidate_count: int = Field(ge=0)
+    industry_direction_plan: IndustryDirectionPlanPayload | None = None
 
 
 class SchemaMessagePayload(StrictPayloadModel):
@@ -429,6 +512,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     messages: list[AgentMessage]
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
+    industry_direction_plan: IndustryDirectionPlan
     research_branches: list[ResearchBranch]
     branch_review_decisions: list[BranchReviewDecision]
     evidence_reviews: list[EvidenceReviewResult]
