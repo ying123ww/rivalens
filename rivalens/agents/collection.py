@@ -260,10 +260,10 @@ class CollectionAgent:
                     }
                 )
 
-                follow_up_specs = coverage_assessment.get("follow_up_task_specs", [])
+                follow_up_specs = coverage_assessment.get("selected_follow_up_specs", [])
+                focused_decision = coverage_assessment.get("decision", {})
                 if (
-                    coverage_assessment.get("next_action")
-                    in {"collect_more", "refine_query"}
+                    focused_decision.get("action") != "stop"
                     and follow_up_specs
                     and branch.get("depth", 0) < self.max_branch_depth
                 ):
@@ -408,7 +408,10 @@ class CollectionAgent:
             and decision.get("subtype") == "dimension_decomposition"
         ):
             return list(landscape_assessment.get("split_task_specs", []))
-        return list(landscape_assessment.get("focused_task_specs", []))
+        return list(
+            landscape_assessment.get("follow_up_task_specs")
+            or landscape_assessment.get("focused_task_specs", [])
+        )
 
     def _landscape_should_expand(self, landscape_assessment: dict[str, Any]) -> bool:
         decision = landscape_assessment.get("decision", {})
@@ -436,6 +439,7 @@ class CollectionAgent:
         candidate_sources = landscape_assessment.get("candidate_sources", [])
         selected_follow_up_specs = landscape_assessment.get("selected_follow_up_specs", [])
         return {
+            "stage_contract": landscape_assessment.get("stage_contract", {}),
             "observation": {
                 "landscape_assessment_id": landscape_assessment.get("id", ""),
                 "candidate_source_count": len(candidate_sources),
@@ -467,8 +471,24 @@ class CollectionAgent:
             },
             "routing": {
                 "decision": decision,
+                "decision_candidates": landscape_assessment.get(
+                    "decision_candidates",
+                    [],
+                ),
+                "arbitration": landscape_assessment.get("arbitration", {}),
+                "follow_up_task_count": len(
+                    landscape_assessment.get("follow_up_task_specs")
+                    or landscape_assessment.get("focused_task_specs", []),
+                ),
                 "focused_task_count": len(
-                    landscape_assessment.get("focused_task_specs", []),
+                    [
+                        spec
+                        for spec in (
+                            landscape_assessment.get("follow_up_task_specs")
+                            or landscape_assessment.get("focused_task_specs", [])
+                        )
+                        if spec.get("search_stage") == "focused"
+                    ],
                 ),
                 "split_task_count": len(
                     landscape_assessment.get("split_task_specs", []),

@@ -33,28 +33,40 @@ class LandscapeReviewer:
             for source_type in expected_source_types
             if source_type not in discovered_source_types
         ]
-        focused_task_specs = self._focused_task_specs(
+        candidate_follow_up_specs = self._candidate_follow_up_task_specs(
             branch,
             candidate_sources,
             missing_source_types,
             research_task,
         )
         disambiguation = self._competitor_disambiguation(branch, candidate_sources)
-        split_suggestions = self._dimension_split_suggestions(branch)
-        split_task_specs = self._split_task_specs(branch, split_suggestions)
+        disambiguation_task_specs = []
         if disambiguation.get("status") == "ambiguous":
-            focused_task_specs = self._disambiguation_task_specs(
+            disambiguation_task_specs = self._disambiguation_task_specs(
                 branch,
                 disambiguation,
             )
-        decision = self._decision(
-            focused_task_specs,
-            disambiguation,
-            split_task_specs,
+        split_suggestions = self._dimension_split_suggestions(branch)
+        split_task_specs = self._split_task_specs(branch, split_suggestions)
+        source_universe_confidence = self._confidence(
+            candidate_sources,
+            missing_source_types,
         )
+        routing = self._routing_from_observation(
+            branch=branch,
+            candidate_sources=candidate_sources,
+            missing_source_types=missing_source_types,
+            follow_up_task_specs=candidate_follow_up_specs,
+            disambiguation=disambiguation,
+            disambiguation_task_specs=disambiguation_task_specs,
+            split_task_specs=split_task_specs,
+            source_universe_confidence=source_universe_confidence,
+        )
+        routed_follow_up_specs = routing["follow_up_task_specs"]
 
         return {
             "id": f"landscape_{research_task.get('id', branch.get('id', 'unknown'))}",
+            "stage_contract": self._stage_contract(),
             "branch_id": branch.get("id", ""),
             "research_task_id": research_task.get("id", ""),
             "competitor": branch.get("competitor", ""),
@@ -62,19 +74,34 @@ class LandscapeReviewer:
             "discovered_source_types": discovered_source_types,
             "missing_source_types": missing_source_types,
             "candidate_sources": candidate_sources,
-            "source_universe_confidence": self._confidence(candidate_sources, missing_source_types),
+            "source_universe_confidence": source_universe_confidence,
             "competitor_disambiguation": disambiguation,
             "dimension_split_suggestions": split_suggestions,
-            "query_refinements": [spec.get("query", "") for spec in focused_task_specs],
-            "focused_task_specs": focused_task_specs,
+            "query_refinements": [spec.get("query", "") for spec in routed_follow_up_specs],
+            "follow_up_task_specs": routed_follow_up_specs,
+            "focused_task_specs": routed_follow_up_specs,
             "split_task_specs": split_task_specs,
-            "decision": decision,
+            "decision_candidates": routing["decision_candidates"],
+            "arbitration": routing["arbitration"],
+            "decision": routing["decision"],
             "user_visible_summary": self._summary(
                 discovered_source_types,
                 missing_source_types,
-                focused_task_specs,
+                routed_follow_up_specs,
                 disambiguation,
             ),
+        }
+
+    def _stage_contract(self) -> dict[str, Any]:
+        return {
+            "search_stage": "landscape",
+            "stage_role": "source_universe_discovery",
+            "research_mode": "source_discovery",
+            "reviewer": "LandscapeReviewer",
+            "output_kind": "candidate_sources",
+            "produces_evidence": False,
+            "state_sink": "landscape_assessments",
+            "evidence_sink": "",
         }
 
     def _candidate_source(
@@ -102,7 +129,7 @@ class LandscapeReviewer:
             "should_collect_deeply": True,
         }
 
-    def _focused_task_specs(
+    def _candidate_follow_up_task_specs(
         self,
         branch: ResearchBranch,
         candidate_sources: list[dict[str, Any]],
@@ -337,66 +364,308 @@ class LandscapeReviewer:
             )
         return specs
 
-    def _decision(
+    def _routing_from_observation(
         self,
-        focused_task_specs: list[dict[str, Any]],
+        branch: ResearchBranch,
+        candidate_sources: list[dict[str, Any]],
+        missing_source_types: list[str],
+        follow_up_task_specs: list[dict[str, Any]],
         disambiguation: dict[str, Any],
+        disambiguation_task_specs: list[dict[str, Any]],
         split_task_specs: list[dict[str, Any]],
-    ) -> dict[str, str]:
-        if disambiguation.get("status") == "ambiguous" and focused_task_specs:
-            return {
-                "action": "entity_resolution",
-                "subtype": "competitor_disambiguation",
-                "rationale": "Candidate sources could not be safely bound to the intended competitor.",
-            }
-        if split_task_specs:
-            return {
-                "action": "scope_refinement",
-                "subtype": "dimension_decomposition",
-                "rationale": "The landscape dimension is broad enough to require narrower child dimensions.",
-            }
-        if focused_task_specs:
-            if any(spec.get("search_stage") == "landscape" for spec in focused_task_specs):
-                return {
-                    "action": "scope_refinement",
-                    "subtype": "query_refinement",
-                    "rationale": "The landscape scan did not find a viable source universe entrance.",
-                }
-            if any(spec.get("target_urls") for spec in focused_task_specs):
-                return {
-                    "action": "evidence_extraction",
-                    "subtype": "targeted_url_extract",
-                    "rationale": "Landscape found concrete candidate URLs ready for focused extraction.",
-                }
-            return {
-                "action": "source_discovery",
-                "subtype": "source_type_search",
-                "rationale": "Landscape identified missing source types that need focused source search.",
-            }
-        if disambiguation.get("status") == "clear":
-            return {
-                "action": "stop",
-                "subtype": "sufficient_stop",
-                "rationale": "The source universe is sufficiently clear and no follow-up task was required.",
-            }
-        return {
-            "action": "stop",
-            "subtype": "no_viable_followup",
-            "rationale": "No viable landscape follow-up task was generated.",
+        source_universe_confidence: float,
+    ) -> dict[str, Any]:
+        candidates = self._decision_candidates(
+            branch=branch,
+            candidate_sources=candidate_sources,
+            missing_source_types=missing_source_types,
+            follow_up_task_specs=follow_up_task_specs,
+            disambiguation=disambiguation,
+            disambiguation_task_specs=disambiguation_task_specs,
+            split_task_specs=split_task_specs,
+            source_universe_confidence=source_universe_confidence,
+        )
+        if not candidates:
+            candidates = [
+                self._candidate(
+                    "stop",
+                    "no_viable_followup",
+                    0.4,
+                    ["No viable landscape follow-up task was generated."],
+                    [],
+                )
+            ]
+        ranked_candidates = sorted(
+            candidates,
+            key=lambda candidate: (
+                -float(candidate.get("score", 0.0)),
+                self._decision_tie_breaker(candidate),
+            ),
+        )
+        winner = ranked_candidates[0]
+        decision = {
+            "action": winner["action"],
+            "subtype": winner["subtype"],
+            "rationale": "; ".join(winner.get("reasons", [])),
         }
+        return {
+            "decision": decision,
+            "decision_candidates": ranked_candidates,
+            "arbitration": {
+                "method": "rules_scorecard",
+                "winning_score": winner.get("score", 0.0),
+                "candidate_count": len(ranked_candidates),
+            },
+            "follow_up_task_specs": self._follow_up_specs_for_decision(
+                decision,
+                follow_up_task_specs,
+                disambiguation_task_specs,
+            ),
+        }
+
+    def _decision_candidates(
+        self,
+        branch: ResearchBranch,
+        candidate_sources: list[dict[str, Any]],
+        missing_source_types: list[str],
+        follow_up_task_specs: list[dict[str, Any]],
+        disambiguation: dict[str, Any],
+        disambiguation_task_specs: list[dict[str, Any]],
+        split_task_specs: list[dict[str, Any]],
+        source_universe_confidence: float,
+    ) -> list[dict[str, Any]]:
+        candidates = [
+            self._query_refinement_candidate(follow_up_task_specs, candidate_sources),
+            self._entity_resolution_candidate(disambiguation, disambiguation_task_specs),
+            self._dimension_decomposition_candidate(split_task_specs),
+            self._source_discovery_candidate(
+                branch,
+                missing_source_types,
+                follow_up_task_specs,
+            ),
+            self._evidence_extraction_candidate(
+                candidate_sources,
+                missing_source_types,
+                follow_up_task_specs,
+            ),
+            self._stop_candidate(
+                candidate_sources,
+                follow_up_task_specs,
+                split_task_specs,
+                disambiguation_task_specs,
+                disambiguation,
+                source_universe_confidence,
+            ),
+        ]
+        return [candidate for candidate in candidates if candidate.get("score", 0.0) > 0.0]
+
+    def _query_refinement_candidate(
+        self,
+        follow_up_task_specs: list[dict[str, Any]],
+        candidate_sources: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if candidate_sources:
+            return self._candidate("scope_refinement", "query_refinement", 0.0, [], [])
+        refinement_specs = [
+            spec for spec in follow_up_task_specs if spec.get("search_stage") == "landscape"
+        ]
+        score = 0.95 if refinement_specs else 0.0
+        return self._candidate(
+            "scope_refinement",
+            "query_refinement",
+            score,
+            ["No candidate source entrances were found, so the landscape query needs refinement."],
+            refinement_specs,
+        )
+
+    def _entity_resolution_candidate(
+        self,
+        disambiguation: dict[str, Any],
+        disambiguation_task_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        score = 0.0
+        reasons = []
+        if disambiguation.get("status") == "ambiguous" and disambiguation_task_specs:
+            score = 0.86
+            reasons.append(
+                "Candidate domains could not be safely bound to the intended competitor."
+            )
+        return self._candidate(
+            "entity_resolution",
+            "competitor_disambiguation",
+            score,
+            reasons,
+            disambiguation_task_specs,
+        )
+
+    def _dimension_decomposition_candidate(
+        self,
+        split_task_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        score = 0.88 if split_task_specs else 0.0
+        return self._candidate(
+            "scope_refinement",
+            "dimension_decomposition",
+            score,
+            ["The landscape dimension is broad enough to require narrower child dimensions."],
+            split_task_specs,
+        )
+
+    def _source_discovery_candidate(
+        self,
+        branch: ResearchBranch,
+        missing_source_types: list[str],
+        follow_up_task_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        discovery_specs = [
+            spec
+            for spec in follow_up_task_specs
+            if spec.get("decision_action") == "source_discovery"
+        ]
+        if not missing_source_types or not discovery_specs:
+            return self._candidate("source_discovery", "source_type_search", 0.0, [], [])
+
+        critical_missing = [
+            source_type
+            for source_type in missing_source_types
+            if source_type in {"pricing_page", "official_site", "docs"}
+        ]
+        score = 0.62 + min(0.18, 0.06 * len(missing_source_types))
+        if critical_missing:
+            score += 0.12
+        if branch.get("risk_level") == "high":
+            score += 0.04
+        return self._candidate(
+            "source_discovery",
+            "source_type_search",
+            round(min(score, 0.9), 2),
+            [
+                "Landscape observation is missing expected source types: "
+                + ", ".join(missing_source_types)
+                + "."
+            ],
+            discovery_specs,
+        )
+
+    def _evidence_extraction_candidate(
+        self,
+        candidate_sources: list[dict[str, Any]],
+        missing_source_types: list[str],
+        follow_up_task_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        extraction_specs = [
+            spec
+            for spec in follow_up_task_specs
+            if spec.get("decision_action") == "evidence_extraction"
+            and spec.get("target_urls")
+        ]
+        if not candidate_sources or not extraction_specs:
+            return self._candidate("evidence_extraction", "targeted_url_extract", 0.0, [], [])
+
+        best_confidence = max(
+            float(source.get("confidence", 0.5) or 0.5)
+            for source in candidate_sources
+        )
+        score = 0.56 + min(0.22, best_confidence * 0.22)
+        noncritical_missing = [
+            source_type
+            for source_type in missing_source_types
+            if source_type not in {"pricing_page", "official_site", "docs"}
+        ]
+        if missing_source_types and len(noncritical_missing) == len(missing_source_types):
+            score -= 0.04
+        elif missing_source_types:
+            score -= 0.14
+        return self._candidate(
+            "evidence_extraction",
+            "targeted_url_extract",
+            round(max(0.0, min(score, 0.86)), 2),
+            ["Landscape found concrete candidate URLs ready for focused extraction."],
+            extraction_specs,
+        )
+
+    def _stop_candidate(
+        self,
+        candidate_sources: list[dict[str, Any]],
+        follow_up_task_specs: list[dict[str, Any]],
+        split_task_specs: list[dict[str, Any]],
+        disambiguation_task_specs: list[dict[str, Any]],
+        disambiguation: dict[str, Any],
+        source_universe_confidence: float,
+    ) -> dict[str, Any]:
+        has_follow_up = bool(
+            follow_up_task_specs or split_task_specs or disambiguation_task_specs
+        )
+        if has_follow_up:
+            return self._candidate("stop", "sufficient_stop", 0.0, [], [])
+        if candidate_sources and disambiguation.get("status") == "clear":
+            return self._candidate(
+                "stop",
+                "sufficient_stop",
+                max(0.55, source_universe_confidence),
+                ["The source universe is sufficiently clear and no follow-up task was required."],
+                [],
+            )
+        return self._candidate(
+            "stop",
+            "no_viable_followup",
+            0.4,
+            ["No viable landscape follow-up task was generated."],
+            [],
+        )
+
+    def _candidate(
+        self,
+        action: str,
+        subtype: str,
+        score: float,
+        reasons: list[str],
+        follow_up_task_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "action": action,
+            "subtype": subtype,
+            "score": round(score, 2),
+            "reasons": reasons,
+            "follow_up_task_specs": follow_up_task_specs,
+        }
+
+    def _decision_tie_breaker(self, candidate: dict[str, Any]) -> int:
+        priority = {
+            ("scope_refinement", "query_refinement"): 0,
+            ("scope_refinement", "dimension_decomposition"): 1,
+            ("entity_resolution", "competitor_disambiguation"): 2,
+            ("source_discovery", "source_type_search"): 3,
+            ("evidence_extraction", "targeted_url_extract"): 4,
+            ("stop", "sufficient_stop"): 5,
+            ("stop", "no_viable_followup"): 6,
+        }
+        return priority.get((candidate.get("action"), candidate.get("subtype")), 99)
+
+    def _follow_up_specs_for_decision(
+        self,
+        decision: dict[str, str],
+        follow_up_task_specs: list[dict[str, Any]],
+        disambiguation_task_specs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if decision.get("action") == "entity_resolution":
+            return disambiguation_task_specs
+        if decision.get("action") == "stop":
+            return []
+        return follow_up_task_specs
 
     def _summary(
         self,
         discovered_source_types: list[str],
         missing_source_types: list[str],
-        focused_task_specs: list[dict[str, Any]],
+        follow_up_task_specs: list[dict[str, Any]],
         disambiguation: dict[str, Any],
     ) -> str:
         return (
             "Landscape scan discovered source types: "
             f"{', '.join(discovered_source_types) or 'none'}. "
             f"Missing source types: {', '.join(missing_source_types) or 'none'}. "
-            f"Focused follow-up tasks: {len(focused_task_specs)}. "
+            f"Follow-up tasks: {len(follow_up_task_specs)}. "
             f"Competitor disambiguation: {disambiguation.get('status', 'unknown')}."
         )
 

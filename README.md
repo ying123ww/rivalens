@@ -176,6 +176,13 @@ reviews, coverage assessments, depth, and budget in
 `CompetitorAnalysisState.evidence_reviews`, and
 `CompetitorAnalysisState.coverage_assessments`.
 
+`ResearchRoutingAction` is intentionally a shared routing vocabulary, not the
+stage boundary. Consumers should distinguish stages with `search_stage` and the
+assessment `stage_contract`: landscape writes candidate-source observations to
+`landscape_assessments` and has `produces_evidence=false`; focused and
+verification write accepted source-backed items to `evidence_items` and coverage
+observations to `coverage_assessments`.
+
 Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion
 budget applies only to child branches created from `CoverageReviewer`

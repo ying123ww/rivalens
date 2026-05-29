@@ -17,7 +17,7 @@ EvidenceType = Literal[
     "job_posting",
     "other",
 ]
-LandscapeDecisionAction = Literal[
+ResearchRoutingAction = Literal[
     "scope_refinement",
     "entity_resolution",
     "source_discovery",
@@ -25,7 +25,7 @@ LandscapeDecisionAction = Literal[
     "claim_verification",
     "stop",
 ]
-LandscapeDecisionSubtype = Literal[
+ResearchRoutingSubtype = Literal[
     "query_refinement",
     "dimension_decomposition",
     "competitor_disambiguation",
@@ -36,6 +36,16 @@ LandscapeDecisionSubtype = Literal[
     "budget_stop",
     "sufficient_stop",
     "no_viable_followup",
+]
+StageRole = Literal[
+    "source_universe_discovery",
+    "evidence_collection",
+    "claim_verification",
+]
+StageOutputKind = Literal[
+    "candidate_sources",
+    "evidence_items",
+    "claim_evidence_items",
 ]
 
 
@@ -74,8 +84,8 @@ class EvidenceCollectionTask(TypedDict, total=False):
     depth: int
     search_stage: str
     generated_from_gap: str
-    decision_action: LandscapeDecisionAction
-    decision_subtype: LandscapeDecisionSubtype
+    decision_action: ResearchRoutingAction
+    decision_subtype: ResearchRoutingSubtype
     expected_source_types: list[str]
     topic: str
     expansion_reason: str
@@ -155,8 +165,8 @@ class ResearchBranch(TypedDict, total=False):
     target_urls: list[str]
     search_stage: str
     generated_from_gap: str
-    decision_action: LandscapeDecisionAction
-    decision_subtype: LandscapeDecisionSubtype
+    decision_action: ResearchRoutingAction
+    decision_subtype: ResearchRoutingSubtype
     expected_source_types: list[str]
     minimum_coverage: list[str]
     guiding_questions: list[str]
@@ -203,8 +213,8 @@ class ResearchTask(TypedDict, total=False):
     target_urls: list[str]
     expected_source_types: list[str]
     generated_from_gap: str
-    decision_action: LandscapeDecisionAction
-    decision_subtype: LandscapeDecisionSubtype
+    decision_action: ResearchRoutingAction
+    decision_subtype: ResearchRoutingSubtype
     reason: str
     drift_risk: BranchDriftRisk
 
@@ -212,8 +222,8 @@ class ResearchTask(TypedDict, total=False):
 class FollowUpTaskSpec(TypedDict, total=False):
     objective: str
     query: str
-    decision_action: LandscapeDecisionAction
-    decision_subtype: LandscapeDecisionSubtype
+    decision_action: ResearchRoutingAction
+    decision_subtype: ResearchRoutingSubtype
     dimension_id: str
     dimension_name: str
     dimension_type: str
@@ -225,10 +235,29 @@ class FollowUpTaskSpec(TypedDict, total=False):
     search_stage: SearchStage
 
 
-class LandscapeDecision(TypedDict, total=False):
-    action: LandscapeDecisionAction
-    subtype: LandscapeDecisionSubtype
+class ResearchRoutingDecision(TypedDict, total=False):
+    action: ResearchRoutingAction
+    subtype: ResearchRoutingSubtype
     rationale: str
+
+
+class ResearchRoutingDecisionCandidate(TypedDict, total=False):
+    action: ResearchRoutingAction
+    subtype: ResearchRoutingSubtype
+    score: float
+    reasons: list[str]
+    follow_up_task_specs: list[FollowUpTaskSpec]
+
+
+class StageContract(TypedDict, total=False):
+    search_stage: SearchStage
+    stage_role: StageRole
+    research_mode: str
+    reviewer: str
+    output_kind: StageOutputKind
+    produces_evidence: bool
+    state_sink: str
+    evidence_sink: str
 
 
 class CandidateSource(TypedDict, total=False):
@@ -243,6 +272,7 @@ class CandidateSource(TypedDict, total=False):
 
 class LandscapeAssessment(TypedDict, total=False):
     id: str
+    stage_contract: StageContract
     branch_id: str
     research_task_id: str
     competitor: str
@@ -254,15 +284,19 @@ class LandscapeAssessment(TypedDict, total=False):
     competitor_disambiguation: dict[str, Any]
     dimension_split_suggestions: list[str]
     query_refinements: list[str]
+    follow_up_task_specs: list[FollowUpTaskSpec]
     focused_task_specs: list[FollowUpTaskSpec]
     split_task_specs: list[FollowUpTaskSpec]
     selected_follow_up_specs: list[FollowUpTaskSpec]
-    decision: LandscapeDecision
+    decision_candidates: list[ResearchRoutingDecisionCandidate]
+    arbitration: dict[str, Any]
+    decision: ResearchRoutingDecision
     user_visible_summary: str
 
 
 class CoverageAssessment(TypedDict, total=False):
     id: str
+    stage_contract: StageContract
     branch_id: str
     brief_id: str
     research_task_ids: list[str]
@@ -275,6 +309,10 @@ class CoverageAssessment(TypedDict, total=False):
     contradictions: list[str]
     next_action: CoverageNextAction
     follow_up_task_specs: list[FollowUpTaskSpec]
+    selected_follow_up_specs: list[FollowUpTaskSpec]
+    decision_candidates: list[ResearchRoutingDecisionCandidate]
+    arbitration: dict[str, Any]
+    decision: ResearchRoutingDecision
     confidence: float
 
 

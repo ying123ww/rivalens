@@ -616,7 +616,7 @@
         <h2>当前状态</h2>
         <ul class="status-list">
           <li><span class="tag done">已接上</span><span>DAG 顺序是 <code>scope_planner -> source_collection -> knowledge_structuring -> dimension_analysis -> claim_support_review</code>。</span></li>
-          <li><span class="tag done">已接上</span><span><code>landscape</code> 产出 <code>LandscapeAssessment</code> 和 <code>focused_task_specs</code>，不会伪装成最终证据。</span></li>
+          <li><span class="tag done">已接上</span><span><code>landscape</code> 产出 <code>LandscapeAssessment</code>、<code>stage_contract</code> 和 <code>follow_up_task_specs</code>，不会伪装成最终证据。</span></li>
           <li><span class="tag done">已接上</span><span><code>focused</code> 和 <code>verification</code> 才生成 <code>EvidenceItem</code>，再过 evidence / coverage review。</span></li>
           <li><span class="tag done">已接上</span><span><code>ClaimSupportReviewer</code> 会为 weak / unverifiable claim 创建一次 <code>verification_task_queue</code>。</span></li>
           <li><span class="tag done">已接上</span><span><code>dimension_split_suggestions</code> 会生成带血缘的 split child dimension tasks。</span></li>
@@ -631,8 +631,9 @@
       <div class="section-head">
         <h2>Research 逻辑架构</h2>
         <p class="section-note">
-          当前不是固定三轮，而是每个 <code>ResearchTask.search_stage</code> 决定这次采集的目标：
-          landscape 发现 source universe，focused 采 EvidenceItem，verification 只验证具体 claim。
+          当前不是固定三轮，而是每个 <code>ResearchTask.search_stage</code> 和 assessment
+          <code>stage_contract</code> 决定这次采集的目标：landscape 发现 source universe 且
+          <code>produces_evidence=false</code>，focused / verification 才采 <code>EvidenceItem</code>。
         </p>
       </div>
       <div class="logic-figure" aria-label="系统逻辑架构图">
@@ -673,7 +674,7 @@
           <text x="108" y="290" class="svg-small">ResearchBrief</text>
           <line x1="256" y1="284" x2="304" y2="284" class="svg-arrow"></line>
           <rect x="304" y="258" width="168" height="52" class="svg-industry"></rect>
-          <text x="322" y="290" class="svg-small">ResearchTask.stage</text>
+          <text x="318" y="290" class="svg-small">search_stage + contract</text>
           <line x1="472" y1="284" x2="520" y2="284" class="svg-arrow"></line>
           <rect x="520" y="222" width="142" height="48" class="svg-review"></rect>
           <text x="544" y="252" class="svg-small">landscape</text>
@@ -684,15 +685,17 @@
 
           <line x1="662" y1="246" x2="706" y2="246" class="svg-arrow"></line>
           <rect x="706" y="220" width="172" height="52" class="svg-review"></rect>
-          <text x="724" y="252" class="svg-small">LandscapeAssessment</text>
+          <text x="718" y="244" class="svg-small">LandscapeAssessment</text>
+          <text x="726" y="262" class="svg-small">produces_evidence=false</text>
           <line x1="878" y1="246" x2="930" y2="246" class="svg-arrow"></line>
           <rect x="930" y="220" width="88" height="52" class="svg-output"></rect>
-          <text x="944" y="252" class="svg-small">follow-up</text>
+          <text x="938" y="252" class="svg-small">follow_up</text>
 
           <line x1="662" y1="308" x2="706" y2="308" class="svg-arrow"></line>
           <line x1="662" y1="370" x2="706" y2="370" class="svg-arrow"></line>
           <rect x="706" y="310" width="160" height="52" class="svg-core"></rect>
-          <text x="732" y="342" class="svg-small">EvidenceItem</text>
+          <text x="728" y="334" class="svg-small">EvidenceItem</text>
+          <text x="724" y="352" class="svg-small">produces_evidence=true</text>
           <line x1="866" y1="336" x2="922" y2="336" class="svg-arrow"></line>
           <rect x="922" y="310" width="98" height="52" class="svg-review"></rect>
           <text x="936" y="333" class="svg-small">evidence</text>
@@ -805,7 +808,8 @@
       <div class="section-head">
         <h2>三阶段衔接图</h2>
         <p class="section-note">
-          现在 landscape、focused、verification 都是 <code>ResearchTask.search_stage</code>。它们共享 branch lineage，
+          现在 landscape、focused、verification 都是 <code>ResearchTask.search_stage</code>，并由
+          <code>stage_contract</code> 明确 state sink 和 evidence sink。它们共享 branch lineage，
           但输出对象不同，所以不能把 landscape 结果直接送进 analysis。
         </p>
       </div>
@@ -827,8 +831,9 @@
                       <span class="tag risk">landscape</span>
                       <strong>source-universe discovery</strong>
                     </header>
-                    <p>用于 market_growth、competitive_moat 或 high-risk / source universe 不清楚的维度。输出候选 source、source type、消歧状态、decision 和 follow-up specs，不再回退到 next_action。</p>
-                    <code>LandscapeDecision: scope_refinement / entity_resolution / source_discovery / evidence_extraction / claim_verification / stop</code>
+                    <p>用于 market_growth、competitive_moat 或 high-risk / source universe 不清楚的维度。输出候选 source、source type、消歧状态、decision 和 follow_up_task_specs，不再回退到 next_action。</p>
+                    <code>stage_contract: search_stage=landscape, produces_evidence=false</code>
+                    <code>ResearchRoutingAction: scope_refinement / entity_resolution / source_discovery / evidence_extraction / claim_verification / stop</code>
                     <code>subtypes: query_refinement / dimension_decomposition / competitor_disambiguation / source_type_search / targeted_url_extract / coverage_gap_search / evidence_check / budget_stop / sufficient_stop / no_viable_followup</code>
                   </div>
                   <ul>
@@ -859,6 +864,7 @@
                       <strong>evidence collection</strong>
                     </header>
                     <p>默认阶段。大多数 pricing、docs、review、marketplace 维度直接从 focused 开始，或者由 landscape follow-up 生成。</p>
+                    <code>stage_contract: produces_evidence=true</code>
                     <code>EvidenceItem -> EvidenceQualityReviewer -> CoverageReviewer</code>
                   </div>
                   <ul>
@@ -911,7 +917,7 @@
           <h3>读图方式</h3>
           <div class="example-item">
             <strong>1. landscape 不是证据</strong>
-            <p>它只产生 source universe、query refinements 和 focused_task_specs。只有 focused / verification 的结果会变成 EvidenceItem。</p>
+            <p>它只产生 source universe、query refinements 和 follow_up_task_specs。只有 stage_contract.produces_evidence=true 的 focused / verification 结果会变成 EvidenceItem。</p>
           </div>
           <div class="example-item">
             <strong>2. focused 是主采集</strong>
@@ -943,11 +949,11 @@
         </div>
         <div class="card">
           <h3>LandscapeAssessment</h3>
-          <p>只描述 source universe：candidate_sources、discovered_source_types、competitor_disambiguation、dimension_split_suggestions 和 follow-up specs。</p>
+          <p>只描述 source universe：candidate_sources、discovered_source_types、competitor_disambiguation、dimension_split_suggestions、stage_contract 和 follow_up_task_specs。</p>
         </div>
         <div class="card">
           <h3>EvidenceItem / CoverageAssessment</h3>
-          <p>focused / verification 产出 EvidenceItem；EvidenceQualityReviewer 和 CoverageReviewer 决定 accepted evidence 与补采任务。</p>
+          <p>focused / verification 产出 EvidenceItem；CoverageAssessment 带 stage_contract，EvidenceQualityReviewer 和 CoverageReviewer 决定 accepted evidence 与补采任务。</p>
         </div>
         <div class="card">
           <h3>CompetitorKnowledge</h3>
@@ -996,7 +1002,7 @@
             <tr>
               <td><span class="tag done">已接上</span></td>
               <td><strong>landscape decision -> child task 衔接</strong></td>
-              <td>landscape 不进 evidence，改为生成 LandscapeAssessment、LandscapeDecision 和 follow-up specs；budget 阻断会显式记录 stop / budget_stop。</td>
+              <td>landscape 不进 evidence，改为生成 LandscapeAssessment、stage_contract、ResearchRoutingDecision 和 follow_up_task_specs；budget 阻断会显式记录 stop / budget_stop。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>

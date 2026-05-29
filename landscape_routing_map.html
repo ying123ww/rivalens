@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rivalens Landscape Routing Map</title>
+  <style>
+    :root {
+      --bg: #f6f8f9;
+      --paper: #ffffff;
+      --ink: #18212d;
+      --muted: #617083;
+      --line: #d8e0e7;
+      --green: #14745f;
+      --blue: #2f67a1;
+      --amber: #a76a1d;
+      --red: #a13f43;
+      --violet: #6656a8;
+      --teal: #167987;
+      --soft-green: #e5f3ef;
+      --soft-blue: #e8f0f8;
+      --soft-amber: #f8efe3;
+      --soft-red: #f8e8e9;
+      --soft-violet: #efedf8;
+      --soft-teal: #e3f2f4;
+      --shadow: 0 18px 48px rgba(24, 33, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px clamp(18px, 4vw, 48px);
+      background: rgba(246, 248, 249, 0.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-weight: 800;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      color: #fff;
+      background: var(--green);
+      border-radius: 7px;
+      font-weight: 900;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 14px;
+      font-size: 14px;
+    }
+
+    .nav a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .nav a:hover {
+      color: var(--ink);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+      gap: clamp(24px, 5vw, 64px);
+      align-items: end;
+      padding: clamp(34px, 7vw, 76px) clamp(18px, 4vw, 48px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--green);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 980px;
+      font-size: clamp(34px, 5vw, 64px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 860px;
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: clamp(16px, 2vw, 20px);
+    }
+
+    .truth-box {
+      padding: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .truth-box h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .truth-box ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    section {
+      padding: 42px clamp(18px, 4vw, 48px);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 36px);
+      letter-spacing: 0;
+    }
+
+    .section-note {
+      max-width: 760px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .figure {
+      overflow-x: auto;
+      padding: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .figure svg {
+      display: block;
+      min-width: 1120px;
+      width: 100%;
+      height: auto;
+    }
+
+    .svg-title {
+      fill: var(--ink);
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .svg-label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .svg-small {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .svg-box {
+      fill: #fff;
+      stroke: var(--line);
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-green {
+      fill: var(--soft-green);
+      stroke: #b9d9cf;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-blue {
+      fill: var(--soft-blue);
+      stroke: #bfd2e6;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-amber {
+      fill: var(--soft-amber);
+      stroke: #e5c99e;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-violet {
+      fill: var(--soft-violet);
+      stroke: #cec8ea;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-teal {
+      fill: var(--soft-teal);
+      stroke: #b7dce2;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-red {
+      fill: var(--soft-red);
+      stroke: #e3b9bc;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .svg-lane {
+      fill: #f9fbfc;
+      stroke: var(--line);
+      stroke-width: 1.2;
+      rx: 8;
+    }
+
+    .svg-arrow {
+      stroke: #708195;
+      stroke-width: 2;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .svg-feedback {
+      stroke: var(--red);
+      stroke-width: 2;
+      fill: none;
+      marker-end: url(#arrow-red);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .panel {
+      min-width: 0;
+      padding: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .panel ul {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 0 9px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .green { color: var(--green); background: var(--soft-green); }
+    .blue { color: var(--blue); background: var(--soft-blue); }
+    .amber { color: var(--amber); background: var(--soft-amber); }
+    .violet { color: var(--violet); background: var(--soft-violet); }
+    .teal { color: var(--teal); background: var(--soft-teal); }
+    .red { color: var(--red); background: var(--soft-red); }
+
+    .schema {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+      gap: 18px;
+    }
+
+    pre {
+      margin: 0;
+      overflow: auto;
+      padding: 16px;
+      color: #223044;
+      background: #f8fafb;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: var(--ink);
+      background: #f9fbfc;
+      font-weight: 800;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    .path {
+      color: var(--ink);
+      font-weight: 750;
+    }
+
+    @media (max-width: 900px) {
+      .hero,
+      .schema {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark">R</span>
+      <span>Landscape Routing Map</span>
+    </div>
+    <nav class="nav" aria-label="页面导航">
+      <a href="#flow">总图</a>
+      <a href="#shape">返回结构</a>
+      <a href="#decisions">六类分支</a>
+      <a href="#routes">后续路径</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Rivalens control plane</p>
+        <h1>Landscape 搜索结果如何变成 routing decision</h1>
+        <p class="lead">
+          Landscape 和 focused 现在不是靠 action 区分，而是靠 <code>search_stage</code> 和
+          <code>stage_contract</code> 区分执行面。<code>ResearchRoutingAction</code> 是共享路由词汇；
+          landscape 只写 source-universe observation，focused / verification 才写入 evidence plane。
+        </p>
+      </div>
+      <aside class="truth-box">
+        <h2>真源规则</h2>
+        <ul>
+          <li><span class="tag green">Full state</span> <code>landscape_assessments</code> 保存完整 observation 和 routing。</li>
+          <li><span class="tag blue">Stage</span> <code>stage_contract.produces_evidence</code> 明确是否能产证据。</li>
+          <li><span class="tag blue">Artifact</span> 只保存 observation / routing / replay_ref 的轻量投影。</li>
+          <li><span class="tag amber">Evidence</span> landscape candidate 不进入 <code>EvidenceItem</code>，除非后续 focused 深采。</li>
+        </ul>
+      </aside>
+    </section>
+
+    <section id="flow">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">End-to-end control flow</p>
+          <h2>先看 stage contract，再看六类 routing</h2>
+        </div>
+        <p class="section-note">
+          action 决定下一步路由意图；stage contract 决定这次运行的输出落点。真正可用于分析的证据，必须经过
+          focused 或 verification collection 变成 accepted <code>EvidenceItem</code>。
+        </p>
+      </div>
+
+      <div class="figure">
+        <svg viewBox="0 0 1180 760" role="img" aria-label="Stage contract and routing flow diagram">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L8,3 z" fill="#708195"></path>
+            </marker>
+            <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L8,3 z" fill="#a13f43"></path>
+            </marker>
+          </defs>
+
+          <text x="28" y="36" class="svg-title">Stage contract 决定执行面；ResearchRoutingAction 只是共享路由词汇</text>
+
+          <rect x="34" y="78" width="218" height="96" class="svg-box"></rect>
+          <text x="56" y="108" class="svg-label">ResearchTask</text>
+          <text x="56" y="134" class="svg-small">search_stage</text>
+          <text x="56" y="154" class="svg-small">landscape / focused / verification</text>
+
+          <line x1="252" y1="126" x2="316" y2="126" class="svg-arrow"></line>
+
+          <rect x="316" y="78" width="238" height="96" class="svg-lane"></rect>
+          <text x="338" y="108" class="svg-label">StageContract</text>
+          <text x="338" y="134" class="svg-small">stage_role / research_mode</text>
+          <text x="338" y="154" class="svg-small">produces_evidence / state_sink</text>
+
+          <path d="M 554 108 C 628 82 684 82 752 108" class="svg-arrow"></path>
+          <path d="M 554 154 C 628 220 684 220 752 190" class="svg-arrow"></path>
+
+          <rect x="752" y="62" width="364" height="128" class="svg-blue"></rect>
+          <text x="774" y="92" class="svg-label">Landscape control plane</text>
+          <text x="774" y="118" class="svg-small">mode = source_discovery</text>
+          <text x="774" y="140" class="svg-small">output_kind = candidate_sources</text>
+          <text x="774" y="162" class="svg-small">produces_evidence = false</text>
+
+          <rect x="752" y="214" width="364" height="128" class="svg-green"></rect>
+          <text x="774" y="244" class="svg-label">Evidence plane</text>
+          <text x="774" y="270" class="svg-small">focused / verification</text>
+          <text x="774" y="292" class="svg-small">mode = standard_evidence</text>
+          <text x="774" y="314" class="svg-small">produces_evidence = true</text>
+
+          <path d="M 934 190 C 934 214 934 214 934 214" class="svg-arrow"></path>
+          <text x="956" y="204" class="svg-small">follow_up_task_specs</text>
+          <text x="956" y="222" class="svg-small">可生成 focused child</text>
+
+          <rect x="58" y="220" width="268" height="122" class="svg-blue"></rect>
+          <text x="80" y="250" class="svg-label">LandscapeAssessment</text>
+          <text x="80" y="276" class="svg-small">state_sink = landscape_assessments</text>
+          <text x="80" y="298" class="svg-small">candidate_sources / missing_source_types</text>
+          <text x="80" y="320" class="svg-small">evidence_sink = empty</text>
+
+          <rect x="58" y="382" width="268" height="122" class="svg-green"></rect>
+          <text x="80" y="412" class="svg-label">CoverageAssessment</text>
+          <text x="80" y="438" class="svg-small">state_sink = coverage_assessments</text>
+          <text x="80" y="460" class="svg-small">evidence_sink = evidence_items</text>
+          <text x="80" y="482" class="svg-small">accepted / rejected evidence ids</text>
+
+          <line x1="752" y1="126" x2="326" y2="274" class="svg-arrow"></line>
+          <line x1="752" y1="278" x2="326" y2="440" class="svg-arrow"></line>
+
+          <rect x="386" y="382" width="168" height="56" class="svg-green"></rect>
+          <text x="416" y="416" class="svg-small">EvidenceItem</text>
+          <line x1="326" y1="440" x2="386" y2="414" class="svg-arrow"></line>
+
+          <rect x="386" y="218" width="286" height="286" class="svg-lane"></rect>
+          <text x="408" y="250" class="svg-label">Shared routing scorecard</text>
+          <text x="408" y="276" class="svg-small">decision_candidates[]</text>
+          <text x="408" y="298" class="svg-small">action + subtype + score + reasons</text>
+          <text x="408" y="320" class="svg-small">arbitration.method = rules_scorecard</text>
+          <text x="408" y="342" class="svg-small">winner -> decision</text>
+          <text x="408" y="374" class="svg-small">selected_follow_up_specs</text>
+          <text x="408" y="396" class="svg-small">由 decision + branch budget 决定</text>
+          <text x="408" y="428" class="svg-small">action 不区分 stage</text>
+          <text x="408" y="450" class="svg-small">stage_contract 才区分是否产证据</text>
+
+          <line x1="326" y1="282" x2="386" y2="282" class="svg-arrow"></line>
+          <line x1="326" y1="444" x2="386" y2="444" class="svg-arrow"></line>
+
+          <rect x="54" y="558" width="174" height="74" class="svg-violet"></rect>
+          <text x="76" y="586" class="svg-small">scope_refinement</text>
+          <text x="76" y="608" class="svg-small">query / split</text>
+
+          <rect x="246" y="558" width="174" height="74" class="svg-amber"></rect>
+          <text x="268" y="586" class="svg-small">entity_resolution</text>
+          <text x="268" y="608" class="svg-small">official-site task</text>
+
+          <rect x="438" y="558" width="174" height="74" class="svg-teal"></rect>
+          <text x="460" y="586" class="svg-small">source_discovery</text>
+          <text x="460" y="608" class="svg-small">source / coverage gap</text>
+
+          <rect x="630" y="558" width="174" height="74" class="svg-green"></rect>
+          <text x="652" y="586" class="svg-small">evidence_extraction</text>
+          <text x="652" y="608" class="svg-small">targeted_url_extract</text>
+
+          <rect x="822" y="558" width="174" height="74" class="svg-red"></rect>
+          <text x="844" y="586" class="svg-small">claim_verification</text>
+          <text x="844" y="608" class="svg-small">evidence_check</text>
+
+          <rect x="1014" y="558" width="112" height="74" class="svg-box"></rect>
+          <text x="1036" y="586" class="svg-small">stop</text>
+          <text x="1036" y="608" class="svg-small">budget / enough</text>
+
+          <path d="M 470 504 C 470 536 142 536 142 558" class="svg-arrow"></path>
+          <path d="M 494 504 C 494 536 334 536 334 558" class="svg-arrow"></path>
+          <path d="M 518 504 C 518 536 526 536 526 558" class="svg-arrow"></path>
+          <path d="M 542 504 C 542 536 718 536 718 558" class="svg-arrow"></path>
+          <path d="M 566 504 C 566 536 910 536 910 558" class="svg-arrow"></path>
+          <path d="M 590 504 C 590 536 1070 536 1070 558" class="svg-arrow"></path>
+
+          <rect x="330" y="682" width="520" height="48" class="svg-lane"></rect>
+          <text x="352" y="702" class="svg-small">只有 stage_contract.produces_evidence = true</text>
+          <text x="352" y="720" class="svg-small">focused / verification 结果才能进入 EvidenceItem -> Knowledge / Analysis</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="shape">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Returned structure</p>
+          <h2>Landscape 搜索回来的结构</h2>
+        </div>
+        <p class="section-note">
+          Full state 保存完整对象；artifact 只保存可回放投影。两者都指向同一个
+          <code>landscape_assessment_id</code>。
+        </p>
+      </div>
+
+      <div class="schema">
+        <div class="panel">
+          <h3>Full state: <code>LandscapeAssessment</code></h3>
+          <p>router 只从这个对象派生 decision。它保存 observation、候选 follow-up、scorecard 和仲裁结果。</p>
+          <pre><code>{
+  id,
+  stage_contract: {
+    search_stage: "landscape",
+    stage_role: "source_universe_discovery",
+    research_mode: "source_discovery",
+    output_kind: "candidate_sources",
+    produces_evidence: false,
+    state_sink: "landscape_assessments",
+    evidence_sink: ""
+  },
+  branch_id,
+  research_task_id,
+  competitor,
+  dimension_id,
+
+  discovered_source_types: [],
+  missing_source_types: [],
+  candidate_sources: [
+    { url, title, source_type, domain,
+      relevance_reason, confidence,
+      should_collect_deeply }
+  ],
+  source_universe_confidence,
+  competitor_disambiguation,
+  dimension_split_suggestions,
+  query_refinements,
+
+  follow_up_task_specs: [],
+  focused_task_specs: [], // compatibility alias
+  split_task_specs: [],
+  selected_follow_up_specs: [],
+
+  decision_candidates: [
+    { action, subtype, score,
+      reasons, follow_up_task_specs }
+  ],
+  arbitration: {
+    method: "rules_scorecard",
+    winning_score,
+    candidate_count
+  },
+  decision: { action, subtype, rationale },
+  user_visible_summary
+}</code></pre>
+        </div>
+
+        <div class="panel">
+          <h3>Artifact: replay diagnostic</h3>
+          <p>artifact 不重新做决策，只展示 full assessment 的轻量投影，方便前端 timeline 和回放。</p>
+          <pre><code>{
+  mode: "landscape",
+  branch_id,
+  research_task_id,
+  evidence_ids: [],
+  context: {
+    stage_contract: {
+      search_stage: "landscape",
+      produces_evidence: false,
+      state_sink: "landscape_assessments"
+    },
+    observation: {
+      landscape_assessment_id,
+      candidate_source_count,
+      candidate_source_urls,
+      discovered_source_types,
+      missing_source_types,
+      source_universe_confidence,
+      competitor_disambiguation_status,
+      dimension_split_suggestions
+    },
+    routing: {
+      decision,
+      decision_candidates,
+      arbitration,
+      follow_up_task_count,
+      focused_task_count,
+      split_task_count,
+      selected_follow_up_task_count,
+      selected_follow_up_specs,
+      blocked_by_budget
+    },
+    replay_ref: {
+      full_state_collection: "landscape_assessments",
+      full_state_path: "landscape_assessments[id=...]"
+    }
+  }
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Six ResearchRoutingDecision classes</p>
+          <h2>六类 routing 维度</h2>
+        </div>
+        <p class="section-note">
+          这些是 landscape、focused 和 verification 共用的 control taxonomy，不等于六个搜索接口。router 会给每类候选打分，
+          最高分写入 <code>decision</code>；<code>stage_contract</code> 决定当前 observation 来源和能不能产出 evidence。
+        </p>
+      </div>
+
+      <div class="grid">
+        <article class="panel">
+          <span class="tag violet">scope_refinement</span>
+          <h3>范围重整</h3>
+          <p>当搜索入口不清楚，或维度过宽，需要先改 query 或拆子维度。</p>
+          <ul>
+            <li><code>query_refinement</code>: 没有 candidate source。</li>
+            <li><code>dimension_decomposition</code>: 例如 <code>competitive_moat</code> 拆成 switching cost、ecosystem lock-in 等。</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <span class="tag amber">entity_resolution</span>
+          <h3>实体消歧</h3>
+          <p>候选 URL 存在，但域名和 competitor 绑定不安全，可能是同名公司、目录页或错误产品。</p>
+          <ul>
+            <li><code>competitor_disambiguation</code>: 生成 focused official-site task。</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <span class="tag teal">source_discovery</span>
+          <h3>源类型补采</h3>
+          <p>expected source type 没覆盖，尤其是 pricing、official、docs 这类关键来源。</p>
+          <ul>
+            <li><code>source_type_search</code>: landscape 阶段发现 source type 缺口。</li>
+            <li><code>coverage_gap_search</code>: focused 后 CoverageReviewer 发现覆盖缺口。</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <span class="tag green">evidence_extraction</span>
+          <h3>定向抽取</h3>
+          <p>已经找到具体 URL，后续任务不再泛搜，而是把 URL 下推成 <code>source_urls</code>。</p>
+          <ul>
+            <li><code>targeted_url_extract</code>: focused child task 走 URL 抽取。</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <span class="tag red">claim_verification</span>
+          <h3>声明验证</h3>
+          <p>这类不是 LandscapeReviewer 常规产生，而是 ClaimSupportReviewer 在 weak/unverifiable claim 后进入 verification queue。</p>
+          <ul>
+            <li><code>evidence_check</code>: 搜索支持或反驳具体 claim 的证据。</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <span class="tag blue">stop</span>
+          <h3>停止扩展</h3>
+          <p>没有可执行 follow-up，或预算/深度限制阻止继续扩展。</p>
+          <ul>
+            <li><code>budget_stop</code>: depth 或 branch budget 阻断。</li>
+            <li><code>sufficient_stop</code>: source universe 足够清楚且无后续任务。</li>
+            <li><code>no_viable_followup</code>: 无有效后续任务。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="routes">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">After routing</p>
+          <h2>六类分支之后怎么走</h2>
+        </div>
+        <p class="section-note">
+          下面按当前代码行为画清楚每类 decision 对 ResearchTask、EvidenceItem、review loop 的影响。
+        </p>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Decision</th>
+            <th>进入条件信号</th>
+            <th>生成的 follow-up</th>
+            <th>后续路径</th>
+            <th>是否进 EvidenceItem</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag violet">scope_refinement</span></td>
+            <td>无 candidate source，或维度过宽需要拆解。</td>
+            <td><code>query_refinement</code> 生成 landscape child；<code>dimension_decomposition</code> 生成 focused child dimensions；统一写入 <code>follow_up_task_specs</code>。</td>
+            <td class="path">source_collection -> landscape/focused child -> 再次 assessment 或 evidence review</td>
+            <td>否。只有 focused child 深采后才会生成证据。</td>
+          </tr>
+          <tr>
+            <td><span class="tag amber">entity_resolution</span></td>
+            <td>candidate domain 无法绑定 competitor，存在同名或错站风险。</td>
+            <td><code>competitor_disambiguation</code> focused task，目标 source type 通常是 <code>official_site</code>。</td>
+            <td class="path">focused official-site search -> EvidenceItem -> EvidenceQualityReviewer</td>
+            <td>后续 focused 结果可以进。</td>
+          </tr>
+          <tr>
+            <td><span class="tag teal">source_discovery</span></td>
+            <td><code>missing_source_types</code> 非空，关键 source type 缺口会提高分数。</td>
+            <td><code>source_type_search</code> 或 <code>coverage_gap_search</code> focused task。</td>
+            <td class="path">focused search -> EvidenceItem -> CoverageReviewer -> 可能继续补采</td>
+            <td>后续 focused 结果可以进。</td>
+          </tr>
+          <tr>
+            <td><span class="tag green">evidence_extraction</span></td>
+            <td>存在高置信 candidate URL，且缺口不压过 URL 抽取。</td>
+            <td><code>targeted_url_extract</code>，带 <code>target_urls</code>。</td>
+            <td class="path">focused URL extract -> ResearchEngine.source_urls -> EvidenceItem</td>
+            <td>后续定向抽取结果可以进。</td>
+          </tr>
+          <tr>
+            <td><span class="tag red">claim_verification</span></td>
+            <td>analysis claim 被评为 weak、contradicted 或 unverifiable。</td>
+            <td><code>verification_task_queue</code>，search_stage = <code>verification</code>。</td>
+            <td class="path">claim_support_review -> source_collection verification pass -> EvidenceItem -> claim support 再评估</td>
+            <td>verification 采到的证据可以进。</td>
+          </tr>
+          <tr>
+            <td><span class="tag blue">stop</span></td>
+            <td>预算阻断、已经足够、或没有可执行 follow-up。</td>
+            <td>无 child task；写入 assessment 和 artifact routing。</td>
+            <td class="path">branch.status = stopped -> 等待其他 branch 或进入后续 agent</td>
+            <td>否。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

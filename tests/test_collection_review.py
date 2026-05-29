@@ -165,6 +165,22 @@ class CollectionReviewTest(unittest.TestCase):
             result["coverage_assessments"][0]["next_action"],
             "collect_more",
         )
+        self.assertEqual(
+            result["coverage_assessments"][0]["decision"]["action"],
+            "source_discovery",
+        )
+        self.assertEqual(
+            result["coverage_assessments"][0]["decision"]["subtype"],
+            "coverage_gap_search",
+        )
+        self.assertEqual(
+            result["coverage_assessments"][0]["stage_contract"]["search_stage"],
+            "focused",
+        )
+        self.assertTrue(
+            result["coverage_assessments"][0]["stage_contract"]["produces_evidence"],
+        )
+        self.assertTrue(result["coverage_assessments"][0]["selected_follow_up_specs"])
         self.assertTrue(
             any(
                 task.get("generated_from_gap") == "missing_source_type:pricing_page"
@@ -257,13 +273,25 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(len(result["evidence_items"]), 0)
         self.assertEqual(len(result["landscape_assessments"]), 1)
         landscape = result["landscape_assessments"][0]
+        self.assertEqual(landscape["stage_contract"]["search_stage"], "landscape")
+        self.assertEqual(
+            landscape["stage_contract"]["stage_role"],
+            "source_universe_discovery",
+        )
+        self.assertFalse(landscape["stage_contract"]["produces_evidence"])
         self.assertEqual(landscape["decision"]["action"], "evidence_extraction")
         self.assertEqual(landscape["decision"]["subtype"], "targeted_url_extract")
+        self.assertEqual(landscape["arbitration"]["method"], "rules_scorecard")
+        self.assertEqual(
+            landscape["decision_candidates"][0]["action"],
+            "evidence_extraction",
+        )
         self.assertIn("official_site", landscape["discovered_source_types"])
         self.assertEqual(landscape["missing_source_types"], ["review"])
-        self.assertTrue(landscape["focused_task_specs"])
+        self.assertTrue(landscape["follow_up_task_specs"])
+        self.assertEqual(landscape["focused_task_specs"], landscape["follow_up_task_specs"])
         self.assertEqual(
-            landscape["focused_task_specs"][0]["target_urls"],
+            landscape["follow_up_task_specs"][0]["target_urls"],
             ["https://acme.example/product"],
         )
         self.assertEqual(
@@ -286,6 +314,22 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(
             landscape_artifact["context"]["routing"]["decision"],
             landscape["decision"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["routing"]["decision_candidates"],
+            landscape["decision_candidates"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["routing"]["arbitration"],
+            landscape["arbitration"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["stage_contract"],
+            landscape["stage_contract"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["routing"]["follow_up_task_count"],
+            len(landscape["follow_up_task_specs"]),
         )
         self.assertEqual(
             landscape_artifact["context"]["routing"]["selected_follow_up_specs"],
@@ -411,11 +455,14 @@ class CollectionReviewTest(unittest.TestCase):
             ],
         )
 
-        specs = assessment["focused_task_specs"]
+        specs = assessment["follow_up_task_specs"]
+        self.assertEqual(assessment["focused_task_specs"], specs)
         self.assertEqual(
             assessment["missing_source_types"],
             ["pricing_page", "review"],
         )
+        self.assertEqual(assessment["decision"]["action"], "source_discovery")
+        self.assertEqual(assessment["decision"]["subtype"], "source_type_search")
         self.assertEqual(len(specs), 3)
         self.assertEqual(specs[0]["generated_from_gap"], "landscape_candidate_source")
         self.assertEqual(specs[0]["decision_action"], "evidence_extraction")
@@ -459,10 +506,52 @@ class CollectionReviewTest(unittest.TestCase):
             "competitor_disambiguation",
         )
         self.assertEqual(
-            assessment["focused_task_specs"][0]["generated_from_gap"],
+            assessment["follow_up_task_specs"][0]["generated_from_gap"],
             "competitor_disambiguation",
         )
-        self.assertIn("Acme official site", assessment["focused_task_specs"][0]["query"])
+        self.assertIn("Acme official site", assessment["follow_up_task_specs"][0]["query"])
+        self.assertEqual(
+            assessment["decision_candidates"][0]["action"],
+            "entity_resolution",
+        )
+
+    def test_landscape_dimension_split_can_outrank_entity_resolution(self):
+        assessment = LandscapeReviewer().review(
+            branch={
+                "id": "collect_acme_competitive_moat",
+                "competitor": "Acme",
+                "dimension_id": "competitive_moat",
+                "dimension_name": "竞争壁垒",
+                "expected_source_types": ["official_site"],
+            },
+            research_task={
+                "id": "task_collect_acme_competitive_moat",
+                "query": "Compare Acme moat",
+            },
+            sources=[
+                {
+                    "title": "Directory page for Acme",
+                    "url": "https://directory.example/acme",
+                    "source_type": "other",
+                }
+            ],
+        )
+
+        self.assertEqual(assessment["decision"]["action"], "scope_refinement")
+        self.assertEqual(
+            assessment["decision"]["subtype"],
+            "dimension_decomposition",
+        )
+        self.assertEqual(
+            assessment["decision_candidates"][0]["subtype"],
+            "dimension_decomposition",
+        )
+        self.assertTrue(
+            any(
+                candidate["action"] == "entity_resolution"
+                for candidate in assessment["decision_candidates"]
+            )
+        )
 
     def test_landscape_dimension_split_creates_child_dimension_tasks(self):
         class FakeSplitCollector:
@@ -651,6 +740,14 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(result["research_tasks"][0]["decision_action"], "claim_verification")
         self.assertEqual(result["research_tasks"][0]["decision_subtype"], "evidence_check")
         self.assertEqual(
+            result["coverage_assessments"][0]["stage_contract"]["search_stage"],
+            "verification",
+        )
+        self.assertEqual(
+            result["coverage_assessments"][0]["stage_contract"]["stage_role"],
+            "claim_verification",
+        )
+        self.assertEqual(
             result["research_tasks"][0]["generated_from_gap"],
             "verification:claim_1",
         )
@@ -775,11 +872,17 @@ class CollectionReviewTest(unittest.TestCase):
         )
         self.assertEqual(
             assessment["follow_up_task_specs"][0]["decision_action"],
-            "source_discovery",
+            "scope_refinement",
         )
         self.assertEqual(
             assessment["follow_up_task_specs"][0]["decision_subtype"],
-            "coverage_gap_search",
+            "query_refinement",
+        )
+        self.assertEqual(assessment["decision"]["action"], "scope_refinement")
+        self.assertEqual(assessment["decision"]["subtype"], "query_refinement")
+        self.assertEqual(
+            assessment["selected_follow_up_specs"],
+            assessment["follow_up_task_specs"],
         )
 
     def test_coverage_review_generates_follow_up_after_competitor_mismatch(self):
@@ -816,13 +919,18 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(evidence_review["required_action"], "retry")
         self.assertEqual(assessment["next_action"], "refine_query")
         self.assertTrue(assessment["follow_up_task_specs"])
+        self.assertEqual(assessment["decision"]["action"], "entity_resolution")
         self.assertEqual(
-            assessment["follow_up_task_specs"][0]["decision_action"],
-            "source_discovery",
+            assessment["decision"]["subtype"],
+            "competitor_disambiguation",
         )
         self.assertEqual(
-            assessment["follow_up_task_specs"][0]["decision_subtype"],
-            "coverage_gap_search",
+            assessment["selected_follow_up_specs"][0]["decision_action"],
+            "entity_resolution",
+        )
+        self.assertEqual(
+            assessment["selected_follow_up_specs"][0]["decision_subtype"],
+            "competitor_disambiguation",
         )
 
     def test_knowledge_structuring_uses_only_accepted_evidence(self):
