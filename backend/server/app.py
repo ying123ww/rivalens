@@ -33,6 +33,7 @@ from utils import write_md_to_word, write_md_to_pdf
 from rivalens.research.utils.enum import Tone
 from chat.chat import ChatAgentWithMemory
 from rivalens.agents.industry_direction import IndustryDirectionSkill
+from rivalens.schema import IndustryDirectionPlanPayload
 
 from server.report_store import ReportStore
 from server.persistence import get_persistence_config, redact_url
@@ -360,7 +361,17 @@ async def preview_industry_directions(request: IndustryDirectionRequest):
         selected_direction_ids=request.selected_direction_ids,
         user_confirmed=request.confirmed,
     )
-    return {"plan": plan}
+    # Validate through Pydantic before returning — ensures the frontend
+    # always receives a well-formed IndustryDirectionPlan.
+    try:
+        validated = IndustryDirectionPlanPayload(**plan)
+        return {"plan": validated.model_dump()}
+    except Exception as e:
+        logger.error(f"IndustryDirectionPlan validation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Plan validation error: {str(e)}",
+        )
 
 
 @app.post("/upload/")
