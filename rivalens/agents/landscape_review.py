@@ -108,21 +108,36 @@ class LandscapeReviewer:
         missing_source_types: list[str],
         research_task: ResearchTask,
     ) -> list[dict[str, Any]]:
-        specs = []
-        for source in candidate_sources[:2]:
-            specs.append(
+        if not candidate_sources:
+            return [
                 {
-                    "objective": f"Deep collect candidate source: {source.get('title', '')}",
+                    "objective": f"Refine landscape scan for {branch.get('dimension_name', branch.get('dimension_id', 'research'))}",
+                    "query": self._refinement_query(branch, research_task),
+                    "target_source_types": branch.get("expected_source_types", []),
+                    "generated_from_gap": "landscape_refinement",
+                    "reason": "Landscape scan needs another pass before focused evidence collection.",
+                    "search_stage": "landscape",
+                }
+            ]
+
+        candidate_specs = []
+        for source in candidate_sources[:2]:
+            candidate_specs.append(
+                {
+                    "objective": f"Collect candidate source: {source.get('title', '')}",
                     "query": self._source_query(branch, source),
                     "target_source_types": [source.get("source_type", "other")],
                     "generated_from_gap": "landscape_candidate_source",
                     "reason": "Landscape scan found a candidate source worth focused collection.",
                     "search_stage": "focused",
                     "target_urls": [source.get("url", "")],
+                    "source_confidence": source.get("confidence", 0.5),
                 }
             )
+
+        missing_specs = []
         for source_type in missing_source_types[:2]:
-            specs.append(
+            missing_specs.append(
                 {
                     "objective": f"Find missing {source_type} source",
                     "query": self._source_type_query(branch, source_type),
@@ -132,18 +147,51 @@ class LandscapeReviewer:
                     "search_stage": "focused",
                 }
             )
-        if not candidate_sources:
-            specs.append(
-                {
-                    "objective": f"Refine landscape scan for {branch.get('dimension_name', branch.get('dimension_id', 'research'))}",
-                    "query": self._refinement_query(branch, research_task),
-                    "target_source_types": branch.get("expected_source_types", []),
-                    "generated_from_gap": "landscape_refinement",
-                    "reason": "Landscape scan needs another pass before focused evidence collection.",
-                    "search_stage": "landscape",
-                }
-            )
-        return specs[:3]
+        return self._allocate_follow_up_specs(branch, candidate_specs, missing_specs)
+
+    def _allocate_follow_up_specs(
+        self,
+        branch: ResearchBranch,
+        candidate_specs: list[dict[str, Any]],
+        missing_specs: list[dict[str, Any]],
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        expected = list(branch.get("expected_source_types", []))
+
+        def source_type_rank(spec: dict[str, Any]) -> int:
+            source_type = (spec.get("target_source_types") or ["other"])[0]
+            return expected.index(source_type) if source_type in expected else len(expected)
+
+        sorted_candidates = sorted(
+            candidate_specs,
+            key=lambda spec: (
+                source_type_rank(spec),
+                -float(spec.get("source_confidence", 0.5) or 0.5),
+            ),
+        )
+        sorted_missing = sorted(missing_specs, key=source_type_rank)
+
+        selected: list[dict[str, Any]] = []
+        if sorted_candidates:
+            selected.append(sorted_candidates[0])
+        if sorted_missing and len(selected) < limit:
+            selected.append(sorted_missing[0])
+
+        remaining = sorted_candidates[1:] + sorted_missing[1:]
+        remaining = sorted(
+            remaining,
+            key=lambda spec: (
+                source_type_rank(spec),
+                0 if spec.get("target_urls") else 1,
+                -float(spec.get("source_confidence", 0.5) or 0.5),
+            ),
+        )
+
+        for spec in remaining:
+            if len(selected) >= limit:
+                break
+            selected.append(spec)
+        return selected
 
     def _disambiguation_task_specs(
         self,

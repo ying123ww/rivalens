@@ -837,7 +837,7 @@
                           <span class="tag done">needs_focused_collection</span>
                           <strong>candidate source -> focused child branch</strong>
                         </header>
-                        <p>前两个候选 URL 或缺失 source type 会变成 focused task，带 parent_task_id 保留血缘。</p>
+                        <p>allocator 会在固定预算内保留 best candidate URL 和高优先级 missing source type，带 parent_task_id 保留血缘。</p>
                       </div>
                     </li>
                     <li>
@@ -999,7 +999,7 @@
               <td>
                 <details>
                   <summary>查看展开</summary>
-                  <p>candidate_sources 前两个会变成 focused child tasks，缺失的 expected_source_types 也会生成 focused task。无 candidate source 时会生成 landscape refinement task。</p>
+                  <p>follow-up allocator 会保留一个 best candidate URL 和一个最高优先级 missing source type，再用剩余 slot 按 source type priority 与 confidence 填充。无 candidate source 时会生成 landscape refinement task。</p>
                 </details>
               </td>
             </tr>

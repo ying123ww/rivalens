@@ -274,6 +274,45 @@ class CollectionReviewTest(unittest.TestCase):
             )
         )
 
+    def test_landscape_allocator_preserves_candidate_and_missing_source_types(self):
+        assessment = LandscapeReviewer().review(
+            branch={
+                "id": "collect_acme_pricing_business_model",
+                "competitor": "Acme",
+                "dimension_id": "pricing_business_model",
+                "dimension_name": "定价与商业模式",
+                "expected_source_types": ["pricing_page", "official_site", "review"],
+            },
+            research_task={
+                "id": "task_collect_acme_pricing_business_model",
+                "query": "Compare Acme pricing",
+            },
+            sources=[
+                {
+                    "title": "Acme product page",
+                    "url": "https://acme.example/product",
+                    "source_type": "official_site",
+                },
+                {
+                    "title": "Acme docs",
+                    "url": "https://docs.acme.example/start",
+                    "source_type": "docs",
+                },
+            ],
+        )
+
+        specs = assessment["focused_task_specs"]
+        self.assertEqual(len(specs), 3)
+        self.assertEqual(specs[0]["generated_from_gap"], "landscape_candidate_source")
+        self.assertEqual(
+            specs[1]["generated_from_gap"],
+            "landscape_missing_source_type:pricing_page",
+        )
+        self.assertEqual(
+            specs[2]["generated_from_gap"],
+            "landscape_missing_source_type:review",
+        )
+
     def test_landscape_competitor_disambiguation_is_reachable(self):
         assessment = LandscapeReviewer().review(
             branch={

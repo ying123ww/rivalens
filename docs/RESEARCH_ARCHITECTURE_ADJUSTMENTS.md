@@ -34,6 +34,7 @@
 - landscape candidate source 会写入 `target_urls`，对应 focused child task 下推为 `ResearchEngine.source_urls` 定向 URL 抽取。
 - `competitor_disambiguation` 会生成专用 follow-up task，而不是落回通用 refinement。
 - `dimension_split_suggestions` 会生成 split child dimensions，例如 `competitive_moat.switching_cost`。
+- landscape follow-up allocator 会在固定预算内保留 best candidate URL 和高优先级 missing source type，避免简单 `specs[:3]` 挤掉关键补采。
 
 原始问题是：
 
