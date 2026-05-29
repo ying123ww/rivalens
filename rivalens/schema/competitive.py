@@ -15,6 +15,17 @@ EvidenceType = Literal[
     "marketplace",
     "social",
     "job_posting",
+    "regulator_database",
+    "financial_filing",
+    "standards_body",
+    "complaint_database",
+    "incident_database",
+    "case_study",
+    "trust_center",
+    "status_page",
+    "benchmark",
+    "analyst_report",
+    "public_registry",
     "other",
 ]
 ResearchRoutingAction = Literal[
@@ -47,6 +58,31 @@ StageOutputKind = Literal[
 ]
 
 
+SOURCE_TYPE_PRIORITY: dict[str, int] = {
+    "regulator_database": 1,
+    "public_registry": 1,
+    "standards_body": 1,
+    "financial_filing": 1,
+    "complaint_database": 1,
+    "incident_database": 1,
+    "pricing_page": 2,
+    "docs": 2,
+    "trust_center": 2,
+    "status_page": 2,
+    "benchmark": 2,
+    "official_site": 3,
+    "case_study": 3,
+    "analyst_report": 3,
+    "marketplace": 4,
+    "review": 5,
+    "news": 5,
+    "blog": 6,
+    "job_posting": 6,
+    "social": 7,
+    "other": 8,
+}
+
+
 class Competitor(TypedDict, total=False):
     name: str
     product: str
@@ -70,6 +106,8 @@ class EvidenceItem(TypedDict, total=False):
     published_at: str | None
     retrieved_at: str
     excerpt: str
+    source_priority: int
+    is_primary_source: bool
     confidence: float
 
 
@@ -287,12 +325,54 @@ class IndustryCandidate(TypedDict, total=False):
     signals: list[str]
 
 
+class IndustryProfileDirection(TypedDict, total=False):
+    direction_id: str
+    name: str
+    reason: str
+    source_hints: list[str]
+    required: bool
+
+
+class IndustryProfile(TypedDict, total=False):
+    industry: str
+    display_name: str
+    aliases: list[str]
+    known_competitors: list[str]
+    default_directions: list[IndustryProfileDirection]
+
+
+class AnalysisDirection(TypedDict, total=False):
+    direction_id: str
+    name: str
+    reason: str
+    description: str
+    search_focus: str
+    source_hints: list[str]
+    required: bool
+    origin: Literal["industry_template", "user_requested"]
+
+
+class IndustryDirectionPlan(TypedDict, total=False):
+    id: str
+    detected_industry: str
+    industry: IndustryCandidate
+    candidate_industries: list[IndustryCandidate]
+    suggested_directions: list[AnalysisDirection]
+    default_directions: list[AnalysisDirection]
+    user_added_directions: list[AnalysisDirection]
+    final_directions: list[AnalysisDirection]
+    final_analysis_plan: dict[str, Any]
+    user_confirmed: bool
+    created_at: str
+
+
 class SchemaExtension(TypedDict, total=False):
     id: str
     name: str
     description: str
     origin: Literal["core", "schema_registry", "evidence_inferred", "user_requested"]
     evidence_ids: list[str]
+    source_hints: list[str]
     confidence: float
     approved: bool
 
@@ -440,12 +520,56 @@ class IndustryCandidatePayload(StrictPayloadModel):
     signals: list[str] = Field(default_factory=list)
 
 
+class IndustryProfileDirectionPayload(StrictPayloadModel):
+    direction_id: str
+    name: str
+    reason: str = ""
+    source_hints: list[str] = Field(default_factory=list)
+    required: bool = True
+
+
+class IndustryProfilePayload(StrictPayloadModel):
+    industry: str
+    display_name: str
+    aliases: list[str] = Field(default_factory=list)
+    known_competitors: list[str] = Field(default_factory=list)
+    default_directions: list[IndustryProfileDirectionPayload] = Field(
+        default_factory=list,
+    )
+
+
+class AnalysisDirectionPayload(StrictPayloadModel):
+    direction_id: str
+    name: str
+    reason: str = ""
+    description: str = ""
+    search_focus: str = ""
+    source_hints: list[str] = Field(default_factory=list)
+    required: bool = True
+    origin: Literal["industry_template", "user_requested"]
+
+
+class IndustryDirectionPlanPayload(StrictPayloadModel):
+    id: str
+    detected_industry: str = ""
+    industry: IndustryCandidatePayload
+    candidate_industries: list[IndustryCandidatePayload] = Field(default_factory=list)
+    suggested_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    default_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    user_added_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    final_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    final_analysis_plan: dict[str, Any] = Field(default_factory=dict)
+    user_confirmed: bool = False
+    created_at: str
+
+
 class SchemaExtensionPayload(StrictPayloadModel):
     id: str
     name: str
     description: str = ""
     origin: Literal["core", "schema_registry", "evidence_inferred", "user_requested"]
     evidence_ids: list[str] = Field(default_factory=list)
+    source_hints: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
     approved: bool = False
 
@@ -538,6 +662,7 @@ class EvidenceMessagePayload(StrictPayloadModel):
 class SchemaSelectionMessagePayload(StrictPayloadModel):
     active_schema: ActiveKnowledgeSchemaPayloadModel
     candidate_count: int = Field(ge=0)
+    industry_direction_plan: IndustryDirectionPlanPayload | None = None
 
 
 class SchemaMessagePayload(StrictPayloadModel):
@@ -620,11 +745,132 @@ class FileContext(TypedDict, total=False):
     search_hints: list[str]
 
 
+# ── Direction-level research result (universal) ──
+
+DirectionResultStatus = Literal["pending", "partial", "complete", "failed"]
+
+
+class DirectionFinding(TypedDict, total=False):
+    """A single factual finding within a direction."""
+
+    id: str
+    summary: str
+    detail: str
+    data_point: str | None
+    source_url: str | None
+    source_type: EvidenceType
+    evidence_ids: list[str]
+    confidence: float
+
+
+class DirectionResult(TypedDict, total=False):
+    """Universal structure for storing the research result of one direction
+    for one competitor.  Every direction (pricing, safety, UX, ...) produces
+    the same shape so downstream agents can consume results uniformly."""
+
+    id: str
+    direction_id: str
+    direction_name: str
+    competitor: str
+    status: DirectionResultStatus
+    findings: list[DirectionFinding]
+    summary: str
+    gaps: list[str]
+    evidence_ids: list[str]
+    evidence_count: int
+    confidence: float
+    collected_at: str
+    collector_task_ids: list[str]
+
+
+class DirectionFindingPayload(StrictPayloadModel):
+    """Pydantic-validated version of DirectionFinding."""
+
+    id: str
+    summary: str
+    detail: str = ""
+    data_point: str | None = None
+    source_url: str | None = None
+    source_type: EvidenceType = "other"
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+
+
+class DirectionResultPayload(StrictPayloadModel):
+    """Pydantic-validated version of DirectionResult.
+
+    Used for agent-to-agent handoff: the CollectorAgent produces this
+    after researching a direction, the PlanningAgent/QualityAgent
+    validates it before merging into CompetitorKnowledge."""
+
+    id: str
+    direction_id: str
+    direction_name: str = ""
+    competitor: str
+    status: DirectionResultStatus = "pending"
+    findings: list[DirectionFindingPayload] = Field(default_factory=list)
+    summary: str = ""
+    gaps: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    evidence_count: int = Field(default=0, ge=0)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    collected_at: str = ""
+    collector_task_ids: list[str] = Field(default_factory=list)
+
+
+
+def build_direction_result(
+    *,
+    direction_id: str,
+    competitor: str,
+    findings: list[dict[str, Any]] | None = None,
+    summary: str = "",
+    gaps: list[str] | None = None,
+    evidence_ids: list[str] | None = None,
+    status: DirectionResultStatus = "complete",
+    confidence: float = 0.0,
+    direction_name: str = "",
+    collected_at: str = "",
+    collector_task_ids: list[str] | None = None,
+) -> DirectionResult:
+    """Create and validate a DirectionResult in one call.
+
+    Raises ``pydantic.ValidationError`` if the data is malformed.
+    Returns a plain dict (TypedDict) safe for JSON serialization.
+    """
+    from datetime import datetime, timezone
+
+    _findings = findings or []
+    _evidence_ids = evidence_ids or []
+    _gaps = gaps or []
+    _collector_task_ids = collector_task_ids or []
+    _collected_at = collected_at or datetime.now(timezone.utc).isoformat()
+    _result_id = f"dr_{direction_id}_{competitor}_{_collected_at}"
+
+    payload = DirectionResultPayload(
+        id=_result_id,
+        direction_id=direction_id,
+        direction_name=direction_name,
+        competitor=competitor,
+        status=status,
+        findings=[DirectionFindingPayload(**f) for f in _findings],
+        summary=summary,
+        gaps=_gaps,
+        evidence_ids=_evidence_ids,
+        evidence_count=len(_evidence_ids),
+        confidence=confidence,
+        collected_at=_collected_at,
+        collector_task_ids=_collector_task_ids,
+    )
+    return payload.model_dump()
+
+
 class CompetitorAnalysisState(TypedDict, total=False):
     task: dict[str, Any]
     messages: list[AgentMessage]
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
+    industry_direction_plan: IndustryDirectionPlan
     research_branches: list[ResearchBranch]
     research_briefs: list[ResearchBrief]
     research_tasks: list[ResearchTask]
@@ -632,6 +878,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext
     evidence_items: list[EvidenceItem]
+    direction_results: list[DirectionResult]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
     claim_support_reviews: list[ClaimSupportReview]

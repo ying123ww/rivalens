@@ -86,6 +86,13 @@ async def run_competitive_analysis_task(
         "competitors": kwargs.get("competitors", []),
         "files": kwargs.get("files", kwargs.get("file_paths", [])),
         "attachments": kwargs.get("attachments", []),
+        "industry_direction_plan": kwargs.get("industry_direction_plan"),
+        "custom_analysis_directions": kwargs.get("custom_analysis_directions", []),
+        "industry_directions_confirmed": kwargs.get(
+            "industry_directions_confirmed",
+            False,
+        ),
+        "deep_research": kwargs.get("deep_research", False),
         "verbose": kwargs.get("verbose", True),
     }
     graph = build_competitive_analysis_graph(websocket, stream_output, tone, headers).compile()

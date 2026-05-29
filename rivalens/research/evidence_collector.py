@@ -7,7 +7,12 @@ from typing import Any
 from rivalens.research.agent import ResearchEngine
 from rivalens.research.modes import REPORT_TYPE_BY_MODE, ResearchMode
 from rivalens.research.utils.enum import ReportSource, Tone
-from rivalens.schema import EvidenceCollectionResult, EvidenceCollectionTask, EvidenceItem
+from rivalens.schema import (
+    EvidenceCollectionResult,
+    EvidenceCollectionTask,
+    EvidenceItem,
+    SOURCE_TYPE_PRIORITY,
+)
 
 
 class ResearchEngineEvidenceCollector:
@@ -83,6 +88,8 @@ class ResearchEngineEvidenceCollector:
                 query=collection_task.get("query", ""),
                 title=title,
             )
+            source_type = source.get("source_type") or self._infer_source_type(url, title)
+            source_priority = SOURCE_TYPE_PRIORITY.get(source_type, SOURCE_TYPE_PRIORITY["other"])
 
             evidence_items.append(
                 {
@@ -95,10 +102,12 @@ class ResearchEngineEvidenceCollector:
                     "dimension_name": collection_task.get("dimension_name", ""),
                     "title": title,
                     "url": url,
-                    "source_type": source.get("source_type") or self._infer_source_type(url, title),
+                    "source_type": source_type,
                     "published_at": source.get("published_at"),
                     "retrieved_at": retrieved_at,
                     "excerpt": relevant_chunk,
+                    "source_priority": source_priority,
+                    "is_primary_source": source_priority <= 2,
                     "confidence": 0.7 if url else 0.4,
                 }
             )
@@ -192,6 +201,40 @@ class ResearchEngineEvidenceCollector:
 
     def _infer_source_type(self, url: str, title: str) -> str:
         normalized = f"{url} {title}".lower()
+        regulator_markers = (
+            "fda.gov",
+            "ftc.gov",
+            "cfpb.gov",
+            "nhtsa.gov",
+            "fmcsa.dot.gov",
+            "sec.gov",
+            "finra.org",
+            "ed.gov",
+            "hhs.gov",
+            "hud.gov",
+            "gov.cn",
+            "recall",
+            "regulator",
+            "license",
+        )
+        if any(marker in normalized for marker in regulator_markers):
+            return "regulator_database"
+        if any(marker in normalized for marker in ("10-k", "annual report", "financial filing", "investor relations")):
+            return "financial_filing"
+        if any(marker in normalized for marker in ("iso.org", "nist.gov", "pci", "standards", "certification")):
+            return "standards_body"
+        if "complaint" in normalized:
+            return "complaint_database"
+        if any(marker in normalized for marker in ("incident", "adverse event", "maude", "crash")):
+            return "incident_database"
+        if any(marker in normalized for marker in ("trust.", "/trust", "security", "compliance")):
+            return "trust_center"
+        if any(marker in normalized for marker in ("status.", "/status", "uptime")):
+            return "status_page"
+        if any(marker in normalized for marker in ("benchmark", "leaderboard", "eval")):
+            return "benchmark"
+        if any(marker in normalized for marker in ("case-study", "case study", "customer story")):
+            return "case_study"
         if "pricing" in normalized or "price" in normalized:
             return "pricing_page"
         if "docs." in normalized or "/docs" in normalized or "documentation" in normalized:

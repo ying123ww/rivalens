@@ -72,6 +72,10 @@ def get_retriever(retriever: str):
             from rivalens.research.retrievers import TavilySearch
 
             return TavilySearch
+        case "unifuncs_deepsearch":
+            from rivalens.research.retrievers import UniFuncsDeepSearch
+
+            return UniFuncsDeepSearch
         case "exa":
             from rivalens.research.retrievers import ExaSearch
 

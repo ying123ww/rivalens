@@ -10,6 +10,7 @@ from .searchapi.searchapi import SearchApiSearch
 from .serpapi.serpapi import SerpApiSearch
 from .serper.serper import SerperSearch
 from .tavily.tavily_search import TavilySearch
+from .unifuncs_deepsearch import UniFuncsDeepSearch
 from .exa.exa import ExaSearch
 from .mcp import MCPRetriever
 from .bocha.bocha import BoChaSearch
@@ -17,6 +18,7 @@ from .xquik.xquik import XquikSearch
 
 __all__ = [
     "TavilySearch",
+    "UniFuncsDeepSearch",
     "CustomRetriever",
     "Duckduckgo",
     "SearchApiSearch",

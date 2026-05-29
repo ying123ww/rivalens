@@ -138,6 +138,7 @@ async def handle_start_command(websocket, data: str, manager):
         mcp_strategy,
         mcp_configs,
         max_search_results,
+        industry_direction_plan,
     ) = extract_command_data(json_data)
 
     if not task or not report_type:
@@ -170,6 +171,7 @@ async def handle_start_command(websocket, data: str, manager):
         mcp_strategy,
         mcp_configs,
         max_search_results,
+        industry_direction_plan,
     )
     report = str(report)
     file_paths = await generate_report_files(report, sanitized_filename)
@@ -409,4 +411,5 @@ def extract_command_data(json_data: Dict) -> tuple:
         json_data.get("mcp_strategy", "fast"),
         json_data.get("mcp_configs", []),
         json_data.get("max_search_results"),
+        json_data.get("industry_direction_plan"),
     )

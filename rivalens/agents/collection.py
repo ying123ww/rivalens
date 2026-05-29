@@ -15,6 +15,7 @@ from rivalens.schema import (
     ResearchBrief,
     ResearchBranch,
     ResearchTask,
+    SOURCE_TYPE_PRIORITY,
 )
 
 
@@ -606,13 +607,16 @@ class CollectionAgent:
                     "risk_level": dimension.get("risk_level", "medium"),
                     "expected_claim_types": dimension.get("expected_claim_types", []),
                     "priority": dimension.get("priority", "P1"),
+                    "source_hints": self._ranked_source_hints(
+                        dimension.get("source_hints", []),
+                    ),
                 }
                 for dimension in analysis_dimensions
                 if dimension.get("id")
             ]
         return self._schema_dimensions(active_schema)
 
-    def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, str]]:
+    def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, Any]]:
         core_descriptions = {
             "feature_tree": (
                 "product capabilities, feature availability, feature maturity, "
@@ -640,6 +644,7 @@ class CollectionAgent:
                     "name": field.replace("_", " ").title(),
                     "type": "core",
                     "description": core_descriptions.get(field, field.replace("_", " ")),
+                    "source_hints": [],
                     "expected_source_types": self._fallback_expected_source_types(field),
                     "minimum_coverage": ["At least two source-backed public evidence items."],
                     "risk_level": "medium",
@@ -663,14 +668,20 @@ class CollectionAgent:
                         "description",
                         extension_id.replace("_", " "),
                     ),
-                    "expected_source_types": ["official_site", "news", "other"],
+                    "source_hints": self._ranked_source_hints(
+                        extension.get("source_hints", []),
+                    ),
+                    "expected_source_types": extension.get(
+                        "source_hints",
+                        ["official_site", "news", "other"],
+                    ),
                     "minimum_coverage": ["At least two source-backed public evidence items."],
                     "risk_level": "medium",
                     "expected_claim_types": ["industry_specific_signal"],
                 }
             )
 
-        deduped: dict[str, dict[str, str]] = {}
+        deduped: dict[str, dict[str, Any]] = {}
         for dimension in dimensions:
             deduped[dimension["id"]] = dimension
         return list(deduped.values())
@@ -691,21 +702,29 @@ class CollectionAgent:
             if competitor
             else "Competitor: infer from the user query"
         )
-        return "\n".join(
-            [
-                query,
-                competitor_line,
-                f"Selected industry: {selected_industry}",
-                f"Research focus: {dimension['name']} ({dimension['type']})",
-                f"Focus definition: {dimension['description']}",
-                self._guiding_questions_line(dimension),
-                dimension.get("search_intent", ""),
-                self._expected_sources_line(dimension),
-                "Collect public, source-backed evidence only. Prefer official "
-                "pages, pricing pages, docs, reviews, news, and marketplace "
-                "listings when relevant.",
-            ]
+        lines = [
+            query,
+            competitor_line,
+            f"Selected industry: {selected_industry}",
+            f"Research focus: {dimension['name']} ({dimension['type']})",
+            f"Focus definition: {dimension['description']}",
+            self._guiding_questions_line(dimension),
+            dimension.get("search_intent", ""),
+            self._expected_sources_line(dimension),
+        ]
+        source_hints = dimension.get("source_hints", [])
+        if source_hints:
+            lines.append(
+                "Preferred evidence sources, in priority order: "
+                + ", ".join(source_hints)
+                + ".",
+            )
+        lines.append(
+            "Collect public, source-backed evidence only. Prefer official "
+            "pages, pricing pages, docs, reviews, news, and marketplace "
+            "listings when relevant.",
         )
+        return "\n".join(line for line in lines if line)
 
     def _guiding_questions_line(self, dimension: dict[str, Any]) -> str:
         guiding_questions = dimension.get("guiding_questions", [])
@@ -743,6 +762,12 @@ class CollectionAgent:
         if field == "user_personas":
             return ["review", "official_site", "marketplace"]
         return ["official_site", "docs", "other"]
+
+    def _ranked_source_hints(self, source_hints: list[str]) -> list[str]:
+        return sorted(
+            dict.fromkeys(source_hints),
+            key=lambda source_type: SOURCE_TYPE_PRIORITY.get(source_type, 99),
+        )
 
     def _with_file_rag(
         self,

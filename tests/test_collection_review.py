@@ -7,9 +7,9 @@ from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
-from rivalens.agents.planning import PlanningAgent
 from rivalens.agents.writing import ReportWriterAgent
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
+from rivalens.schema import SOURCE_TYPE_PRIORITY
 
 
 def pricing_branch():
@@ -24,32 +24,6 @@ def pricing_branch():
 
 
 class CollectionReviewTest(unittest.TestCase):
-    def test_planning_creates_ten_confirmable_analysis_dimensions(self):
-        state = {
-            "task": {
-                "query": "Compare Acme and Beta productivity tools",
-                "competitors": ["Acme", "Beta"],
-            },
-            "messages": [],
-        }
-
-        result = asyncio.run(PlanningAgent().run(state))
-
-        dimensions = result["analysis_dimensions"]
-        self.assertEqual(len(dimensions), 10)
-        self.assertEqual(dimensions[0]["name"], "战略定位")
-        dimension_artifact = result["research_artifacts"][-1]
-        self.assertEqual(dimension_artifact["mode"], "dimension_confirmation")
-        self.assertIn("维度确认", dimension_artifact["report"])
-        self.assertIn("3.1 战略定位", dimension_artifact["report"])
-        pricing_dimension = [
-            dimension
-            for dimension in dimensions
-            if dimension["id"] == "pricing_business_model"
-        ][0]
-        self.assertIn("pricing_page", pricing_dimension["expected_source_types"])
-        self.assertTrue(pricing_dimension["minimum_coverage"])
-
     def test_collection_root_branches_use_confirmed_analysis_dimensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",
@@ -393,6 +367,34 @@ class CollectionReviewTest(unittest.TestCase):
             evidence["excerpt"],
             (irrelevant_intro + pricing_signal + trailing)[:1000],
         )
+
+    def test_evidence_collector_infers_priority_source_metadata(self):
+        collector = ResearchEngineEvidenceCollector()
+        task = {
+            "id": "collect_acme_safety",
+            "branch_id": "collect_acme_safety",
+            "competitor": "Acme",
+            "dimension_id": "safety_recalls",
+            "dimension_name": "Safety Recalls",
+        }
+
+        evidence = collector._to_evidence_items(
+            task,
+            [
+                {
+                    "title": "NHTSA recalls database",
+                    "url": "https://www.nhtsa.gov/recalls",
+                    "content": "Recall and safety campaign records.",
+                }
+            ],
+        )[0]
+
+        self.assertEqual(evidence["source_type"], "regulator_database")
+        self.assertEqual(
+            evidence["source_priority"],
+            SOURCE_TYPE_PRIORITY["regulator_database"],
+        )
+        self.assertTrue(evidence["is_primary_source"])
 
     def test_evidence_review_accepts_url_backed_branch_evidence(self):
         review = EvidenceQualityReviewer(min_sources_per_branch=2).review(

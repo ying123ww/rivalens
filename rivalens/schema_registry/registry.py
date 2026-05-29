@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 
+from rivalens.industry_templates import INDUSTRY_DIRECTION_TEMPLATES
 from rivalens.schema import IndustryCandidate, SchemaExtension
 
 
@@ -23,9 +24,9 @@ class IndustryDefinition:
     extensions: tuple[SchemaExtension, ...] = field(default_factory=tuple)
 
 
-INDUSTRY_REGISTRY: tuple[IndustryDefinition, ...] = (
+_CORE_INDUSTRY_DEFINITIONS: tuple[IndustryDefinition, ...] = (
     IndustryDefinition(
-        industry_id="productivity_saas",
+        industry_id="saas_collaboration",
         name="Productivity SaaS",
         description="Collaboration, workspace, project management, docs, and knowledge-base software.",
         aliases=(
@@ -76,7 +77,7 @@ INDUSTRY_REGISTRY: tuple[IndustryDefinition, ...] = (
         ),
     ),
     IndustryDefinition(
-        industry_id="consumer_goods",
+        industry_id="consumer_food",
         name="Consumer Goods",
         description="Physical consumer products, retail channels, brand positioning, SKUs, and purchase behavior.",
         aliases=("consumer", "retail", "fmcg", "sku", "brand", "渠道", "消费品", "零售"),
@@ -107,7 +108,7 @@ INDUSTRY_REGISTRY: tuple[IndustryDefinition, ...] = (
         ),
     ),
     IndustryDefinition(
-        industry_id="fintech",
+        industry_id="financial_services",
         name="Fintech",
         description="Payments, lending, banking infrastructure, wealth, risk, compliance, and financial operations.",
         aliases=("fintech", "payment", "banking", "risk", "compliance", "金融", "支付", "风控"),
@@ -168,6 +169,39 @@ INDUSTRY_REGISTRY: tuple[IndustryDefinition, ...] = (
             },
         ),
     ),
+)
+
+
+def _merge_direction_template_definitions(
+    core_definitions: tuple[IndustryDefinition, ...],
+) -> tuple[IndustryDefinition, ...]:
+    definitions = list(core_definitions)
+    defined_ids = {definition.industry_id for definition in definitions}
+
+    for template in INDUSTRY_DIRECTION_TEMPLATES:
+        industry_id = template["industry_id"]
+        if industry_id in defined_ids:
+            continue
+
+        definitions.append(
+            IndustryDefinition(
+                industry_id=industry_id,
+                name=template["name"],
+                description=(
+                    "Industry direction template used for Rivalens "
+                    f"{template['name']} competitor analysis."
+                ),
+                aliases=tuple(template.get("aliases", [])),
+                known_competitors=tuple(template.get("known_competitors", [])),
+            )
+        )
+        defined_ids.add(industry_id)
+
+    return tuple(definitions)
+
+
+INDUSTRY_REGISTRY: tuple[IndustryDefinition, ...] = (
+    _merge_direction_template_definitions(_CORE_INDUSTRY_DEFINITIONS)
 )
 
 
