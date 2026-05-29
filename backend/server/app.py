@@ -29,7 +29,7 @@ from server.server_utils import (
 )
 
 from server.websocket_manager import run_agent
-from utils import write_md_to_word, write_md_to_pdf
+from rivalens.report_export import generate_report_files
 from rivalens.research.utils.enum import Tone
 from chat.chat import ChatAgentWithMemory
 from rivalens.agents.industry_direction import IndustryDirectionSkill
@@ -163,6 +163,16 @@ report_store = ReportStore(Path(os.getenv('REPORT_STORE_PATH', os.path.join('dat
 
 # Constants
 DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
+
+
+def _extract_rivalens_report_text(report_information: Any) -> str:
+    if isinstance(report_information, str):
+        return report_information
+    if isinstance(report_information, dict):
+        return str(report_information.get("report", ""))
+    if isinstance(report_information, (tuple, list)):
+        return str(report_information[0]) if report_information else ""
+    return str(report_information)
 
 # Startup event
 
@@ -314,10 +324,14 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
         return_researcher=True
     )
 
-    docx_path = await write_md_to_word(report_information[0], research_id)
-    pdf_path = await write_md_to_pdf(report_information[0], research_id)
     if research_request.report_type != "rivalens":
         report, researcher = report_information
+        artifacts = await generate_report_files(
+            report,
+            research_id,
+            quote_paths=True,
+            include_legacy_md_key=True,
+        )
         response = {
             "research_id": research_id,
             "research_information": {
@@ -328,11 +342,29 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
                 # "research_sources": researcher.get_research_sources(),  # Raw content of sources may be very large
             },
             "report": report,
-            "docx_path": docx_path,
-            "pdf_path": pdf_path
+            "docx_path": artifacts["docx"],
+            "pdf_path": artifacts["pdf"],
+            "markdown_path": artifacts["markdown"],
+            "html_path": artifacts["html"],
+            "artifacts": artifacts,
         }
     else:
-        response = { "research_id": research_id, "report": "", "docx_path": docx_path, "pdf_path": pdf_path }
+        report = _extract_rivalens_report_text(report_information)
+        artifacts = await generate_report_files(
+            report,
+            research_id,
+            quote_paths=True,
+            include_legacy_md_key=True,
+        )
+        response = {
+            "research_id": research_id,
+            "report": report,
+            "docx_path": artifacts["docx"],
+            "pdf_path": artifacts["pdf"],
+            "markdown_path": artifacts["markdown"],
+            "html_path": artifacts["html"],
+            "artifacts": artifacts,
+        }
 
     return response
 

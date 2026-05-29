@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.report_export import generate_report_files
 from rivalens.schema import CompetitorAnalysisState
 
 
@@ -17,31 +18,34 @@ class PublisherAgent:
             message_type="report",
             sender="writer",
         )
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        report_path = self.output_dir / "competitor_analysis.md"
-        report_path.write_text(state.get("report", ""), encoding="utf-8")
+        report = state.get("report", "")
+        artifacts = await generate_report_files(
+            report,
+            "competitor_analysis",
+            output_dir=self.output_dir,
+        )
 
         return {
-            "published_artifacts": {"markdown": str(report_path)},
+            "published_artifacts": artifacts,
             "messages": state.get("messages", [])
             + [
                 create_agent_message(
                     sender="publisher",
                     receiver="end",
                     message_type="publish",
-                    payload={"markdown": str(report_path)},
+                    payload=artifacts,
                 )
             ],
             "agent_events": state.get("agent_events", [])
             + [
                 {
                     "agent": "publisher",
-                    "action": "publish_markdown_report",
+                    "action": "publish_report_artifacts",
                     "input": {
-                        "report_length": len(state.get("report", "")),
+                        "report_length": len(report),
                         "message_id": report_message.get("id") if report_message else None,
                     },
-                    "output": {"markdown": str(report_path)},
+                    "output": artifacts,
                 }
             ],
         }

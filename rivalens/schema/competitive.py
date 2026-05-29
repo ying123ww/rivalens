@@ -707,6 +707,9 @@ class ReportMessagePayload(StrictPayloadModel):
 
 class PublishMessagePayload(StrictPayloadModel):
     markdown: str
+    pdf: str = ""
+    docx: str = ""
+    html: str = ""
 
 
 AgentMessagePayload = (
