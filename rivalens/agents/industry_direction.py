@@ -156,6 +156,15 @@ class IndustryDirectionSkill:
         candidate_industries = self.rank_industries(query, competitors or [])
         selected = candidate_industries[0]
         template = self._template_for(selected["industry_id"]) or self.templates[0]
+        detected_competitors = self._detected_competitors(
+            query,
+            competitors or [],
+            template,
+        )
+        suggested_competitors = self._suggested_competitors(
+            template,
+            detected_competitors,
+        )
         default_directions = [
             self._template_direction_to_payload(direction, index)
             for index, direction in enumerate(template.default_directions, start=1)
@@ -182,6 +191,8 @@ class IndustryDirectionSkill:
             "detected_industry": selected["name"],
             "industry": selected,
             "candidate_industries": candidate_industries,
+            "detected_competitors": detected_competitors,
+            "suggested_competitors": suggested_competitors,
             "suggested_directions": default_directions,
             "default_directions": default_directions,
             "planner_added_directions": planner_added_directions,
@@ -191,6 +202,8 @@ class IndustryDirectionSkill:
                 "detected_industry": selected["name"],
                 "industry_id": selected["industry_id"],
                 "industry_name": selected["name"],
+                "detected_competitors": detected_competitors,
+                "suggested_competitors": suggested_competitors,
                 "direction_count": len(final_directions),
                 "suggested_directions": default_directions,
                 "planner_added_directions": planner_added_directions,
@@ -241,6 +254,39 @@ class IndustryDirectionSkill:
             if template.industry == industry_id:
                 return template
         return None
+
+    def _detected_competitors(
+        self,
+        query: str,
+        competitors: list[Competitor] | list[dict[str, Any]],
+        template: IndustryDirectionTemplate,
+    ) -> list[str]:
+        detected = []
+        for competitor in competitors:
+            if isinstance(competitor, str):
+                name = competitor.strip()
+            else:
+                name = str(competitor.get("name", "")).strip()
+            if name:
+                detected.append(name)
+
+        haystack = query.lower()
+        for competitor in template.known_competitors:
+            if competitor.lower() in haystack:
+                detected.append(competitor)
+        return self._dedupe_text(detected)
+
+    def _suggested_competitors(
+        self,
+        template: IndustryDirectionTemplate,
+        detected_competitors: list[str],
+    ) -> list[str]:
+        detected = {competitor.lower() for competitor in detected_competitors}
+        return [
+            competitor
+            for competitor in template.known_competitors
+            if competitor.lower() not in detected
+        ][:8]
 
     def _haystack(
         self,
@@ -347,6 +393,14 @@ class IndustryDirectionSkill:
             ).strip("_")
             or "direction"
         )
+
+    def _dedupe_text(self, values: list[str]) -> list[str]:
+        deduped: dict[str, str] = {}
+        for value in values:
+            cleaned = value.strip()
+            if cleaned:
+                deduped[cleaned.lower()] = cleaned
+        return list(deduped.values())
 
     def _select_default_directions(
         self,

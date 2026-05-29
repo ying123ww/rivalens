@@ -46,6 +46,14 @@ class PlanningAgent:
             planning_query,
             normalized,
         )
+        if not normalized:
+            normalized = [
+                {"name": competitor}
+                for competitor in industry_direction_plan.get(
+                    "detected_competitors",
+                    [],
+                )
+            ]
         active_schema = self._select_active_schema(
             planning_query,
             normalized,

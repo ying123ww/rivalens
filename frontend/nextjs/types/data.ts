@@ -61,6 +61,8 @@ export interface IndustryDirectionPlan {
   detected_industry?: string;
   industry: IndustryCandidate;
   candidate_industries: IndustryCandidate[];
+  detected_competitors?: string[];
+  suggested_competitors?: string[];
   suggested_directions?: AnalysisDirection[];
   default_directions: AnalysisDirection[];
   planner_added_directions?: AnalysisDirection[];

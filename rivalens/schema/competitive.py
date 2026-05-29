@@ -356,6 +356,8 @@ class IndustryDirectionPlan(TypedDict, total=False):
     detected_industry: str
     industry: IndustryCandidate
     candidate_industries: list[IndustryCandidate]
+    detected_competitors: list[str]
+    suggested_competitors: list[str]
     suggested_directions: list[AnalysisDirection]
     default_directions: list[AnalysisDirection]
     planner_added_directions: list[AnalysisDirection]
@@ -553,6 +555,8 @@ class IndustryDirectionPlanPayload(StrictPayloadModel):
     detected_industry: str = ""
     industry: IndustryCandidatePayload
     candidate_industries: list[IndustryCandidatePayload] = Field(default_factory=list)
+    detected_competitors: list[str] = Field(default_factory=list)
+    suggested_competitors: list[str] = Field(default_factory=list)
     suggested_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     default_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     planner_added_directions: list[AnalysisDirectionPayload] = Field(

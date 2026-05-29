@@ -103,9 +103,14 @@ The planner uses the ten general product-analysis directions only as a coverage
 check for missing task-level `planner_added_directions`; they are not written
 back as original industry defaults. The confirmed direction plan is stored in
 `CompetitorAnalysisState.industry_direction_plan`, so the search scope can be
-reviewed before evidence collection. `source_collection` expands the confirmed
-analysis dimensions into competitor-by-dimension collection tasks and runs them
-concurrently through
+reviewed before evidence collection. When the user has not specified a clear
+competitor pair, the preview plan surfaces industry-template example
+competitors as `suggested_competitors` without automatically treating them as
+selected analysis targets. When known competitors are detected in the user query
+and no explicit competitor list was provided, `PlanningAgent` promotes those
+`detected_competitors` into the workflow competitor scope before collection.
+`source_collection` expands the confirmed analysis dimensions into
+competitor-by-dimension collection tasks and runs them concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and analysis

@@ -281,6 +281,35 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             default_ids,
         )
 
+    def test_plan_suggests_competitors_when_query_has_no_pair(self):
+        from rivalens.schema import IndustryDirectionPlanPayload
+
+        plan = IndustryDirectionSkill().build_plan(
+            query="分析 SaaS 协作文档工具的竞争格局",
+        )
+        validated = IndustryDirectionPlanPayload(**plan)
+
+        self.assertEqual(validated.detected_competitors, [])
+        self.assertIn("notion", validated.suggested_competitors)
+        self.assertIn("飞书", validated.suggested_competitors)
+        self.assertEqual(
+            validated.final_analysis_plan["detected_competitors"],
+            [],
+        )
+        self.assertIn(
+            "suggested_competitors",
+            validated.final_analysis_plan,
+        )
+
+    def test_plan_detects_known_competitors_from_query(self):
+        plan = IndustryDirectionSkill().build_plan(
+            query="对比 Notion 和 飞书 的 SaaS 协作能力",
+        )
+
+        self.assertEqual(plan["detected_competitors"], ["notion", "飞书"])
+        self.assertNotIn("notion", plan["suggested_competitors"])
+        self.assertNotIn("飞书", plan["suggested_competitors"])
+
     def test_identifies_ai_tools_and_merges_user_directions(self):
         plan = IndustryDirectionSkill().build_plan(
             query="对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品竞争格局",
@@ -398,6 +427,25 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         )
         self.assertIn("source_hints", promotion_extension)
         self.assertIn("pricing_page", promotion_extension["source_hints"])
+
+    def test_planning_agent_uses_detected_competitors_when_none_are_explicit(self):
+        state = {
+            "task": {
+                "query": "对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品体验",
+            },
+            "messages": [],
+        }
+
+        result = asyncio.run(PlanningAgent().run(state))
+
+        self.assertEqual(
+            [competitor["name"] for competitor in result["competitors"]],
+            ["chatgpt", "kimi", "perplexity"],
+        )
+        self.assertEqual(
+            result["industry_direction_plan"]["detected_competitors"],
+            ["chatgpt", "kimi", "perplexity"],
+        )
 
     def test_priority_directions_are_required_and_use_specific_sources(self):
         required_direction_ids = {

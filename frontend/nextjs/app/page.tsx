@@ -958,6 +958,15 @@ function IndustryDirectionDialog({
       .filter(Boolean)
       .map((item, index) => customDirectionPreviewId(item, index)),
   ];
+  const detectedCompetitors = plan.detected_competitors || [];
+  const suggestedCompetitors = plan.suggested_competitors || [];
+  const shouldSuggestCompetitors = detectedCompetitors.length < 2;
+  const requiredDirectionIds = baseDirections
+    .filter((direction) => direction.required)
+    .map((direction) => direction.direction_id);
+  const plannerAddedDirectionIds = plannerAddedDirections.map(
+    (direction) => direction.direction_id
+  );
 
   const toggleDirection = (directionId: string) => {
     const direction = directions.find(
@@ -1052,6 +1061,38 @@ function IndustryDirectionDialog({
         </div>
 
         <div className="max-h-[64vh] space-y-5 overflow-y-auto px-5 py-4 sm:px-6">
+          {shouldSuggestCompetitors && suggestedCompetitors.length > 0 && (
+            <section className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
+              <h3 className="text-sm font-semibold text-amber-100">
+                还没有识别到明确的对比竞品
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-amber-50/90">
+                可以参考这些 {plan.detected_industry || plan.industry.name} 竞品：
+                {suggestedCompetitors.slice(0, 6).join("、")}。你可以在问题里写明要对比的竞品后重新开始，也可以继续确认下方方向。
+              </p>
+            </section>
+          )}
+
+          <section className="rounded-md border border-gray-800 bg-gray-950/50 p-4">
+            <h3 className="text-sm font-semibold text-gray-100">
+              已分析出的行业与 direction_id
+            </h3>
+            <div className="mt-3 space-y-3 text-xs leading-5 text-gray-300">
+              <p>
+                <span className="text-gray-500">industry:</span>{" "}
+                {plan.industry.industry_id} / {plan.detected_industry || plan.industry.name}
+              </p>
+              <p className="break-words font-mono">
+                <span className="font-sans text-gray-500">必备 direction_id:</span>{" "}
+                [{requiredDirectionIds.map((id) => `"${id}"`).join(", ")}]
+              </p>
+              <p className="break-words font-mono">
+                <span className="font-sans text-gray-500">Agent 补充 direction_id:</span>{" "}
+                [{plannerAddedDirectionIds.map((id) => `"${id}"`).join(", ")}]
+              </p>
+            </div>
+          </section>
+
           {renderDirectionCards(baseDirections, "行业原有方向")}
 
           {plannerAddedDirections.length > 0 &&
@@ -1064,7 +1105,7 @@ function IndustryDirectionDialog({
           {showCustomDirections && (
             <label className="mt-4 block">
               <span className="text-sm font-medium text-gray-200">
-                你还想重点分析哪些方向？
+                还需要增加 direction_id 吗？需要的话直接输入方向即可。
               </span>
               <textarea
                 value={customDirectionText}
