@@ -38,12 +38,10 @@ ResearchRoutingSubtype = Literal[
     "no_viable_followup",
 ]
 StageRole = Literal[
-    "source_universe_discovery",
     "evidence_collection",
     "claim_verification",
 ]
 StageOutputKind = Literal[
-    "candidate_sources",
     "evidence_items",
     "claim_evidence_items",
 ]
@@ -175,7 +173,7 @@ class ResearchBranch(TypedDict, total=False):
     expansion_reason: str
 
 
-SearchStage = Literal["landscape", "focused", "verification"]
+SearchStage = Literal["focused", "verification"]
 CoverageNextAction = Literal[
     "ready_for_analysis",
     "collect_more",
@@ -258,40 +256,6 @@ class StageContract(TypedDict, total=False):
     produces_evidence: bool
     state_sink: str
     evidence_sink: str
-
-
-class CandidateSource(TypedDict, total=False):
-    url: str
-    title: str
-    source_type: EvidenceType
-    domain: str
-    relevance_reason: str
-    confidence: float
-    should_collect_deeply: bool
-
-
-class LandscapeAssessment(TypedDict, total=False):
-    id: str
-    stage_contract: StageContract
-    branch_id: str
-    research_task_id: str
-    competitor: str
-    dimension_id: str
-    discovered_source_types: list[str]
-    missing_source_types: list[str]
-    candidate_sources: list[CandidateSource]
-    source_universe_confidence: float
-    competitor_disambiguation: dict[str, Any]
-    dimension_split_suggestions: list[str]
-    query_refinements: list[str]
-    follow_up_task_specs: list[FollowUpTaskSpec]
-    focused_task_specs: list[FollowUpTaskSpec]
-    split_task_specs: list[FollowUpTaskSpec]
-    selected_follow_up_specs: list[FollowUpTaskSpec]
-    decision_candidates: list[ResearchRoutingDecisionCandidate]
-    arbitration: dict[str, Any]
-    decision: ResearchRoutingDecision
-    user_visible_summary: str
 
 
 class CoverageAssessment(TypedDict, total=False):
@@ -664,7 +628,6 @@ class CompetitorAnalysisState(TypedDict, total=False):
     research_branches: list[ResearchBranch]
     research_briefs: list[ResearchBrief]
     research_tasks: list[ResearchTask]
-    landscape_assessments: list[LandscapeAssessment]
     coverage_assessments: list[CoverageAssessment]
     evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext

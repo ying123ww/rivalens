@@ -57,7 +57,7 @@ flowchart TB
     Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
     ClaimSupport --> VerificationQueue["verification_task_queue\nclaim-driven follow-up"]
     VerificationQueue --> Collector
-    EvidenceCollector --> Modes["ResearchMode\nsource discovery / standard evidence"]
+    EvidenceCollector --> Modes["ResearchMode\nstandard evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
 
@@ -156,7 +156,7 @@ ResearchEngine wiring out of agent business logic:
 CollectionAgent
   -> ResearchBranch frontier
   -> ResearchBrief / ResearchTask queue
-  -> landscape / focused / verification search_stage control
+  -> focused / verification search_stage control
   -> ResearchEngineEvidenceCollector (explicit ResearchMode)
   -> ResearchEngine
   -> EvidenceItem[]
@@ -164,11 +164,10 @@ CollectionAgent
   -> CoverageReviewer (coverage gaps and follow-up task specs)
 ```
 
-The collection path uses explicit research modes for each branch. Landscape
-tasks use source discovery; focused and verification tasks use standard
-evidence collection. Deep research recursion is not used as a black box inside
-`ResearchEngine`; instead, Rivalens keeps branch lineage, research briefs,
-research tasks, evidence
+The collection path starts every confirmed competitor x dimension branch as
+focused evidence collection. Claim-support follow-up uses verification. Deep
+research recursion is not used as a black box inside `ResearchEngine`; instead,
+Rivalens keeps branch lineage, research briefs, research tasks, evidence
 reviews, coverage assessments, depth, and budget in
 `CompetitorAnalysisState.research_branches`,
 `CompetitorAnalysisState.research_briefs`,
@@ -178,10 +177,11 @@ reviews, coverage assessments, depth, and budget in
 
 `ResearchRoutingAction` is intentionally a shared routing vocabulary, not the
 stage boundary. Consumers should distinguish stages with `search_stage` and the
-assessment `stage_contract`: landscape writes candidate-source observations to
-`landscape_assessments` and has `produces_evidence=false`; focused and
-verification write accepted source-backed items to `evidence_items` and coverage
-observations to `coverage_assessments`.
+assessment `stage_contract`: focused and verification write accepted
+source-backed items to `evidence_items` and coverage observations to
+`coverage_assessments`. Missing source types are handled by
+`CoverageReviewer` follow-up tasks instead of a separate pre-evidence
+discovery stage.
 
 Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion

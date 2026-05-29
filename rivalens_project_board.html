@@ -14,20 +14,13 @@
       --green: #14745f;
       --blue: #2f67a1;
       --amber: #a76a1d;
-      --red: #a13f43;
       --soft-green: #e5f3ef;
       --soft-blue: #e8f0f8;
       --soft-amber: #f8efe3;
-      --soft-red: #f8e8e9;
-      --shadow: 0 18px 48px rgba(24, 33, 45, 0.08);
     }
 
     * {
       box-sizing: border-box;
-    }
-
-    html {
-      scroll-behavior: smooth;
     }
 
     body {
@@ -38,1063 +31,187 @@
       line-height: 1.55;
     }
 
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      padding: 14px clamp(18px, 4vw, 48px);
-      background: rgba(246, 248, 249, 0.93);
-      border-bottom: 1px solid var(--line);
-      backdrop-filter: blur(14px);
+    header,
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
     }
 
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-      font-weight: 800;
-    }
-
-    .mark {
-      display: grid;
-      place-items: center;
-      width: 30px;
-      height: 30px;
-      color: #fff;
-      background: var(--green);
-      border-radius: 7px;
-      font-weight: 900;
-    }
-
-    .nav {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 14px;
-      font-size: 14px;
-    }
-
-    .nav a {
-      color: var(--muted);
-      text-decoration: none;
-    }
-
-    .nav a:hover {
-      color: var(--ink);
-    }
-
-    .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.82fr);
-      gap: clamp(26px, 5vw, 64px);
-      align-items: center;
-      padding: clamp(36px, 7vw, 78px) clamp(18px, 4vw, 48px);
-      border-bottom: 1px solid var(--line);
-    }
-
-    .eyebrow {
-      margin: 0 0 12px;
-      color: var(--green);
-      font-size: 14px;
-      font-weight: 800;
+    header {
+      padding: 48px 0 24px;
     }
 
     h1 {
-      margin: 0;
-      max-width: 880px;
-      font-size: clamp(34px, 5vw, 68px);
-      line-height: 1.05;
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      line-height: 1.08;
       letter-spacing: 0;
-    }
-
-    .lead {
-      max-width: 820px;
-      margin: 22px 0 0;
-      color: var(--muted);
-      font-size: clamp(17px, 2vw, 21px);
-    }
-
-    .status-card {
-      padding: 20px;
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-    }
-
-    .status-card h2 {
-      margin: 0 0 14px;
-      font-size: 18px;
-    }
-
-    .status-list {
-      display: grid;
-      gap: 10px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-
-    .status-list li {
-      display: grid;
-      grid-template-columns: 96px minmax(0, 1fr);
-      gap: 10px;
-      align-items: start;
-      padding-top: 10px;
-      color: var(--muted);
-      border-top: 1px solid var(--line);
-      font-size: 14px;
-    }
-
-    .status-list li:first-child {
-      padding-top: 0;
-      border-top: 0;
-    }
-
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 26px;
-      padding: 0 9px;
-      border: 1px solid currentColor;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
-
-    .done {
-      color: var(--green);
-      background: var(--soft-green);
-    }
-
-    .next {
-      color: var(--blue);
-      background: var(--soft-blue);
-    }
-
-    .risk {
-      color: var(--amber);
-      background: var(--soft-amber);
-    }
-
-    section {
-      padding: 42px clamp(18px, 4vw, 48px);
-    }
-
-    .section-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      gap: 24px;
-      margin-bottom: 20px;
     }
 
     h2 {
-      margin: 0;
-      font-size: clamp(24px, 3vw, 36px);
+      margin: 0 0 16px;
+      font-size: 1.25rem;
       letter-spacing: 0;
     }
 
-    .section-note {
-      max-width: 700px;
+    p {
       margin: 0;
+    }
+
+    .eyebrow {
+      color: var(--green);
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .lede {
+      max-width: 760px;
       color: var(--muted);
-      font-size: 15px;
-    }
-
-    .logic-figure {
-      overflow-x: auto;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--paper);
-      box-shadow: var(--shadow);
-    }
-
-    .logic-figure svg {
-      display: block;
-      width: 100%;
-      min-width: 940px;
-      height: auto;
-    }
-
-    .svg-title {
-      font-size: 17px;
-      font-weight: 850;
-      fill: var(--ink);
-    }
-
-    .svg-label {
-      font-size: 14px;
-      font-weight: 800;
-      fill: var(--ink);
-    }
-
-    .svg-small {
-      font-size: 12px;
-      fill: var(--muted);
-    }
-
-    .svg-box {
-      fill: #fff;
-      stroke: #cbd5df;
-      stroke-width: 1.2;
-      rx: 8;
-    }
-
-    .svg-core {
-      fill: var(--soft-green);
-      stroke: #8bbcaf;
-    }
-
-    .svg-industry {
-      fill: var(--soft-blue);
-      stroke: #91b4d6;
-    }
-
-    .svg-review {
-      fill: var(--soft-amber);
-      stroke: #d7b27e;
-    }
-
-    .svg-risk {
-      fill: var(--soft-red);
-      stroke: #d99da0;
-    }
-
-    .svg-hole {
-      fill: var(--soft-red);
-      stroke: #d99da0;
-      stroke-dasharray: 5 4;
-    }
-
-    .svg-output {
-      fill: #eef1f3;
-      stroke: #b8c4ce;
-    }
-
-    .svg-lane {
-      fill: #fbfcfd;
-      stroke: #dde4ea;
-      stroke-width: 1;
-      rx: 10;
-    }
-
-    .svg-arrow {
-      stroke: #566577;
-      stroke-width: 2;
-      fill: none;
-      marker-end: url(#arrow);
-    }
-
-    .svg-feedback {
-      stroke: var(--red);
-      stroke-width: 2;
-      fill: none;
-      stroke-dasharray: 6 5;
-      marker-end: url(#arrow-red);
+      font-size: 1.06rem;
     }
 
     .grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-    }
-
-    .card {
-      min-width: 0;
-      padding: 18px;
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-    }
-
-    .card h3 {
-      margin: 0 0 8px;
-      font-size: 18px;
-    }
-
-    .card p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .research-tree-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
       gap: 16px;
-      align-items: start;
+      margin: 24px 0;
     }
 
-    .branch-tree,
-    .tree-examples {
-      min-width: 0;
-      padding: 20px;
+    .panel {
       background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 8px;
-      box-shadow: var(--shadow);
+      padding: 18px;
     }
 
-    .branch-tree {
-      overflow-x: auto;
-    }
-
-    .tree-list,
-    .tree-list ul {
-      position: relative;
-      margin: 0;
-      padding: 0 0 0 28px;
-      list-style: none;
-    }
-
-    .tree-list {
-      min-width: 760px;
-      padding-left: 0;
-    }
-
-    .tree-list ul::before {
-      content: "";
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 10px;
-      border-left: 2px solid var(--line);
-    }
-
-    .tree-list li {
-      position: relative;
-      margin: 12px 0 0;
-    }
-
-    .tree-list > li:first-child {
-      margin-top: 0;
-    }
-
-    .tree-list ul li::before {
-      content: "";
-      position: absolute;
-      top: 30px;
-      left: -18px;
-      width: 18px;
-      border-top: 2px solid var(--line);
-    }
-
-    .branch-node {
-      min-width: 0;
-      padding: 13px 14px;
-      background: #fbfcfd;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-
-    .branch-node header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+    .tag {
+      display: inline-flex;
       align-items: center;
-      margin-bottom: 7px;
-    }
-
-    .branch-node strong {
-      color: var(--ink);
-      font-size: 14px;
-    }
-
-    .branch-node p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .branch-node code {
-      display: block;
-      margin-top: 8px;
-      padding: 8px;
-      color: #24445f;
-      background: #eef3f5;
-      border: 1px solid #d9e2e8;
+      min-height: 26px;
+      padding: 3px 8px;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      margin-bottom: 12px;
     }
 
-    .node-root {
-      background: var(--soft-blue);
-      border-color: #91b4d6;
-    }
-
-    .node-search {
-      background: #fff;
-      border-color: #cbd5df;
-    }
-
-    .node-review {
-      background: var(--soft-amber);
-      border-color: #d7b27e;
-    }
-
-    .node-branch {
+    .green {
+      color: var(--green);
       background: var(--soft-green);
-      border-color: #8bbcaf;
     }
 
-    .node-stop {
-      background: #eef1f3;
-      border-color: #b8c4ce;
+    .blue {
+      color: var(--blue);
+      background: var(--soft-blue);
     }
 
-    .step-dot {
-      display: inline-grid;
-      place-items: center;
-      width: 24px;
-      height: 24px;
-      color: #fff;
-      background: var(--green);
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 850;
+    .amber {
+      color: var(--amber);
+      background: var(--soft-amber);
     }
 
-    .tree-examples h3 {
-      margin: 0 0 10px;
-      font-size: 18px;
-    }
-
-    .example-item {
-      padding: 12px 0 12px 12px;
-      border-left: 3px solid var(--line);
-    }
-
-    .example-item + .example-item {
-      border-top: 1px solid var(--line);
-    }
-
-    .example-item strong {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--ink);
-      font-size: 14px;
-    }
-
-    .example-item p {
+    ol,
+    ul {
       margin: 0;
-      color: var(--muted);
-      font-size: 13px;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 8px;
     }
 
     code {
-      color: var(--blue);
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      font-size: 0.94em;
-      overflow-wrap: anywhere;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.92em;
     }
 
-    .table-wrap {
-      overflow-x: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-    }
-
-    table {
-      width: 100%;
-      min-width: 900px;
-      border-collapse: collapse;
-      background: var(--paper);
-    }
-
-    th,
-    td {
-      padding: 15px;
-      text-align: left;
-      vertical-align: top;
-      border-bottom: 1px solid var(--line);
-      font-size: 14px;
-    }
-
-    th {
-      background: #ecf1f3;
-      color: #303b48;
-      font-size: 13px;
-      font-weight: 800;
-    }
-
-    tr:last-child td {
-      border-bottom: 0;
-    }
-
-    td {
-      color: var(--muted);
-    }
-
-    td strong {
-      color: var(--ink);
-    }
-
-    details summary {
-      cursor: pointer;
-      color: var(--ink);
-      font-weight: 800;
-    }
-
-    details p {
-      margin: 9px 0 0;
-      color: var(--muted);
-    }
-
-    footer {
-      padding: 28px clamp(18px, 4vw, 48px) 44px;
-      color: var(--muted);
-      border-top: 1px solid var(--line);
-    }
-
-    @media (max-width: 980px) {
-      .hero,
-      .grid,
-      .research-tree-layout {
-        grid-template-columns: 1fr;
-      }
-
-      .section-head {
-        display: grid;
-      }
-    }
-
-    @media (max-width: 720px) {
-      .topbar {
-        position: static;
-        display: grid;
-      }
-
-      .nav {
-        justify-content: flex-start;
-      }
-
-      .status-list li {
+    @media (max-width: 820px) {
+      .grid {
         grid-template-columns: 1fr;
       }
     }
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="mark">R</span>
-      <span>Rivalens 项目看板</span>
-    </div>
-    <nav class="nav" aria-label="页面导航">
-      <a href="#architecture">架构</a>
-      <a href="#dag">DAG</a>
-      <a href="#research-tree">三阶段</a>
-      <a href="#schema">对象</a>
-      <a href="#roadmap">漏洞</a>
-    </nav>
+  <header>
+    <p class="eyebrow">当前代码主线：focused / verification research control</p>
+    <h1>Rivalens 可追溯竞品分析工作流</h1>
+    <p class="lede">
+      维度 ID 已由 planning 阶段确认，collection 直接按 competitor x dimension 执行 focused evidence collection。
+      覆盖缺口由 CoverageReviewer 生成结构化补采任务；claim 证据不足时再进入 verification。
+    </p>
   </header>
 
   <main>
-    <section class="hero">
-      <div>
-        <p class="eyebrow">当前代码主线：landscape / focused / verification research control</p>
-        <h1>Rivalens 现在是“先发现入口，再采证据，最后按 claim 验证”的研究链路</h1>
-        <p class="lead">
-          当前主流程已经调整为：
-          PlanningAgent 生成竞品和 10 个 analysis dimensions，CollectionAgent 按 competitor x dimension
-          建 research branches，并按 search_stage 执行 landscape、focused 或 verification。landscape 只发现入口，
-          focused 才产出 EvidenceItem，ClaimSupportReviewer 会把弱 claim 推回一次 verification 补采。
+    <section class="grid" aria-label="核心链路">
+      <article class="panel">
+        <span class="tag green">Planning</span>
+        <h2>确认分析维度</h2>
+        <p>
+          <code>PlanningAgent</code> 生成 10 个 confirmed analysis dimensions，并写入
+          <code>CompetitorAnalysisState.analysis_dimensions</code>。
         </p>
-      </div>
-      <aside class="status-card">
-        <h2>当前状态</h2>
-        <ul class="status-list">
-          <li><span class="tag done">已接上</span><span>DAG 顺序是 <code>scope_planner -> source_collection -> knowledge_structuring -> dimension_analysis -> claim_support_review</code>。</span></li>
-          <li><span class="tag done">已接上</span><span><code>landscape</code> 产出 <code>LandscapeAssessment</code>、<code>stage_contract</code> 和 <code>follow_up_task_specs</code>，不会伪装成最终证据。</span></li>
-          <li><span class="tag done">已接上</span><span><code>focused</code> 和 <code>verification</code> 才生成 <code>EvidenceItem</code>，再过 evidence / coverage review。</span></li>
-          <li><span class="tag done">已接上</span><span><code>ClaimSupportReviewer</code> 会为 weak / unverifiable claim 创建一次 <code>verification_task_queue</code>。</span></li>
-          <li><span class="tag done">已接上</span><span><code>dimension_split_suggestions</code> 会生成带血缘的 split child dimension tasks。</span></li>
-          <li><span class="tag done">已接上</span><span><code>competitor_disambiguation</code> 会生成专用 follow-up task，不再落回通用 refinement。</span></li>
-          <li><span class="tag risk">漏洞</span><span>claim support 现在是词面 overlap 检查，还不是严格 entailment / contradiction 判断。</span></li>
-          <li><span class="tag next">下一步</span><span>补更强 claim support、verification span 判断和更强 claim 生成。</span></li>
+      </article>
+
+      <article class="panel">
+        <span class="tag blue">Collection</span>
+        <h2>直接采集证据</h2>
+        <p>
+          <code>CollectionAgent</code> 为每个 competitor x dimension 建 root branch，
+          默认使用 <code>search_stage=focused</code> 并产出 <code>EvidenceItem</code>。
+        </p>
+      </article>
+
+      <article class="panel">
+        <span class="tag amber">Review</span>
+        <h2>覆盖驱动补采</h2>
+        <p>
+          <code>EvidenceQualityReviewer</code> 过滤证据，<code>CoverageReviewer</code>
+          根据 expected source types 和 guiding questions 生成 focused follow-up tasks。
+        </p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Workflow</h2>
+      <ol>
+        <li><code>scope_planner</code>: 规范竞品输入，冻结 schema，确认维度。</li>
+        <li><code>source_collection</code>: focused collection，证据 review，coverage review，按预算补采。</li>
+        <li><code>knowledge_structuring</code>: 将 accepted evidence 结构化为 competitor knowledge。</li>
+        <li><code>dimension_analysis</code>: 基于结构化知识和 accepted evidence 生成 traceable claims。</li>
+        <li><code>claim_support_review</code>: 对 weak / unverifiable claims 触发一次 verification pass。</li>
+        <li><code>report_writer</code> 和 <code>publisher</code>: 输出报告与证据索引。</li>
+      </ol>
+    </section>
+
+    <section class="grid" aria-label="验收重点">
+      <article class="panel">
+        <span class="tag green">Traceability</span>
+        <h2>证据链</h2>
+        <ul>
+          <li><code>EvidenceItem</code> 保留 URL、branch、collection task、research task 和 dimension metadata。</li>
+          <li><code>AnalysisClaim</code> 必须绑定 accepted evidence IDs。</li>
         </ul>
-      </aside>
-    </section>
+      </article>
 
-    <section id="architecture">
-      <div class="section-head">
-        <h2>Research 逻辑架构</h2>
-        <p class="section-note">
-          当前不是固定三轮，而是每个 <code>ResearchTask.search_stage</code> 和 assessment
-          <code>stage_contract</code> 决定这次采集的目标：landscape 发现 source universe 且
-          <code>produces_evidence=false</code>，focused / verification 才采 <code>EvidenceItem</code>。
-        </p>
-      </div>
-      <div class="logic-figure" aria-label="系统逻辑架构图">
-        <svg viewBox="0 0 1120 640" role="img">
-          <defs>
-            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
-            </marker>
-            <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
-            </marker>
-          </defs>
+      <article class="panel">
+        <span class="tag blue">Control</span>
+        <h2>阶段边界</h2>
+        <ul>
+          <li><code>focused</code> 是默认 evidence collection。</li>
+          <li><code>verification</code> 只服务 claim support review 的补证。</li>
+        </ul>
+      </article>
 
-          <text x="24" y="34" class="svg-title">Rivalens Research Control：阶段是 task 类型，不是固定流水线</text>
-
-          <rect x="42" y="78" width="170" height="72" class="svg-box"></rect>
-          <text x="64" y="106" class="svg-label">用户任务</text>
-          <text x="64" y="130" class="svg-small">query / 竞品 / 目标</text>
-
-          <line x1="212" y1="114" x2="276" y2="114" class="svg-arrow"></line>
-
-          <rect x="276" y="64" width="762" height="100" class="svg-lane"></rect>
-          <text x="300" y="94" class="svg-label">Planning</text>
-          <rect x="440" y="88" width="164" height="50" class="svg-box"></rect>
-          <text x="466" y="119" class="svg-small">PlanningAgent</text>
-          <line x1="604" y1="113" x2="666" y2="113" class="svg-arrow"></line>
-          <rect x="666" y="88" width="220" height="50" class="svg-industry"></rect>
-          <text x="686" y="119" class="svg-small">competitors + dimensions</text>
-          <line x1="886" y1="113" x2="930" y2="113" class="svg-arrow"></line>
-          <rect x="930" y="88" width="88" height="50" class="svg-output"></rect>
-          <text x="944" y="119" class="svg-small">State</text>
-
-          <line x1="974" y1="164" x2="974" y2="198" class="svg-arrow"></line>
-
-          <rect x="42" y="198" width="1000" height="194" class="svg-lane"></rect>
-          <text x="64" y="232" class="svg-label">CollectionAgent 内部 research control</text>
-          <rect x="86" y="258" width="170" height="52" class="svg-box"></rect>
-          <text x="108" y="290" class="svg-small">ResearchBrief</text>
-          <line x1="256" y1="284" x2="304" y2="284" class="svg-arrow"></line>
-          <rect x="304" y="258" width="168" height="52" class="svg-industry"></rect>
-          <text x="318" y="290" class="svg-small">search_stage + contract</text>
-          <line x1="472" y1="284" x2="520" y2="284" class="svg-arrow"></line>
-          <rect x="520" y="222" width="142" height="48" class="svg-review"></rect>
-          <text x="544" y="252" class="svg-small">landscape</text>
-          <rect x="520" y="284" width="142" height="48" class="svg-core"></rect>
-          <text x="552" y="314" class="svg-small">focused</text>
-          <rect x="520" y="346" width="142" height="48" class="svg-risk"></rect>
-          <text x="542" y="376" class="svg-small">verification</text>
-
-          <line x1="662" y1="246" x2="706" y2="246" class="svg-arrow"></line>
-          <rect x="706" y="220" width="172" height="52" class="svg-review"></rect>
-          <text x="718" y="244" class="svg-small">LandscapeAssessment</text>
-          <text x="726" y="262" class="svg-small">produces_evidence=false</text>
-          <line x1="878" y1="246" x2="930" y2="246" class="svg-arrow"></line>
-          <rect x="930" y="220" width="88" height="52" class="svg-output"></rect>
-          <text x="938" y="252" class="svg-small">follow_up</text>
-
-          <line x1="662" y1="308" x2="706" y2="308" class="svg-arrow"></line>
-          <line x1="662" y1="370" x2="706" y2="370" class="svg-arrow"></line>
-          <rect x="706" y="310" width="160" height="52" class="svg-core"></rect>
-          <text x="728" y="334" class="svg-small">EvidenceItem</text>
-          <text x="724" y="352" class="svg-small">produces_evidence=true</text>
-          <line x1="866" y1="336" x2="922" y2="336" class="svg-arrow"></line>
-          <rect x="922" y="310" width="98" height="52" class="svg-review"></rect>
-          <text x="936" y="333" class="svg-small">evidence</text>
-          <text x="942" y="351" class="svg-small">review</text>
-
-          <path d="M 974 220 C 974 186 420 184 386 258" class="svg-feedback"></path>
-          <text x="530" y="204" class="svg-small">landscape follow-up: focused / refinement</text>
-
-          <line x1="780" y1="392" x2="780" y2="428" class="svg-arrow"></line>
-          <rect x="42" y="428" width="1000" height="92" class="svg-lane"></rect>
-          <text x="64" y="462" class="svg-label">Knowledge 与 analysis</text>
-          <rect x="190" y="456" width="210" height="44" class="svg-box"></rect>
-          <text x="212" y="484" class="svg-small">KnowledgeStructuringAgent</text>
-          <line x1="400" y1="478" x2="460" y2="478" class="svg-arrow"></line>
-          <rect x="460" y="456" width="156" height="44" class="svg-core"></rect>
-          <text x="488" y="484" class="svg-small">AnalysisAgent</text>
-          <line x1="616" y1="478" x2="676" y2="478" class="svg-arrow"></line>
-          <rect x="676" y="456" width="170" height="44" class="svg-industry"></rect>
-          <text x="704" y="484" class="svg-small">AnalysisClaim</text>
-
-          <line x1="760" y1="520" x2="760" y2="548" class="svg-arrow"></line>
-          <rect x="42" y="548" width="1000" height="68" class="svg-lane"></rect>
-          <rect x="138" y="558" width="176" height="44" class="svg-review"></rect>
-          <text x="160" y="586" class="svg-small">ClaimSupportReviewer</text>
-          <line x1="314" y1="580" x2="374" y2="580" class="svg-arrow"></line>
-          <rect x="374" y="558" width="168" height="44" class="svg-risk"></rect>
-          <text x="396" y="586" class="svg-small">verification queue</text>
-          <path d="M 458 558 C 458 418 516 380 520 370" class="svg-feedback"></path>
-          <text x="466" y="534" class="svg-small">one bounded loop</text>
-          <line x1="542" y1="580" x2="604" y2="580" class="svg-arrow"></line>
-          <rect x="604" y="558" width="150" height="44" class="svg-box"></rect>
-          <text x="626" y="586" class="svg-small">ReportWriter</text>
-          <line x1="754" y1="580" x2="814" y2="580" class="svg-arrow"></line>
-          <rect x="814" y="558" width="120" height="44" class="svg-output"></rect>
-          <text x="848" y="586" class="svg-small">Publisher</text>
-
-          <rect x="86" y="334" width="332" height="54" class="svg-hole"></rect>
-          <text x="104" y="356" class="svg-small">剩余漏洞：claim support 与 report-level QA</text>
-          <text x="104" y="374" class="svg-small">split / disambiguation 已接成带血缘 follow-up task</text>
-        </svg>
-      </div>
-    </section>
-
-    <section id="dag">
-      <div class="section-head">
-        <h2>当前 DAG 流转</h2>
-        <p class="section-note">
-          这是 <code>rivalens/workflows/competitive_analysis.py</code> 的主链路。关键变化是 analysis 现在在 knowledge 之后，
-          claim support 在 writer 之前，并且只有 weak / unverifiable claim 能触发一次 verification 回采。
-        </p>
-      </div>
-      <div class="logic-figure" aria-label="当前 DAG 流转图">
-        <svg viewBox="0 0 1120 430" role="img">
-          <defs>
-            <marker id="arrow-dag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#566577"></path>
-            </marker>
-            <marker id="arrow-dag-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a13f43"></path>
-            </marker>
-          </defs>
-
-          <text x="24" y="34" class="svg-title">LangGraph DAG：claim support 前置到写作之前</text>
-
-          <rect x="38" y="110" width="132" height="58" class="svg-box"></rect>
-          <text x="58" y="134" class="svg-small">scope_planner</text>
-          <text x="66" y="152" class="svg-small">PlanningAgent</text>
-          <line x1="170" y1="139" x2="214" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-
-          <rect x="214" y="110" width="150" height="58" class="svg-industry"></rect>
-          <text x="234" y="134" class="svg-small">source_collection</text>
-          <text x="242" y="152" class="svg-small">CollectionAgent</text>
-          <line x1="364" y1="139" x2="408" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-
-          <rect x="408" y="110" width="190" height="58" class="svg-core"></rect>
-          <text x="434" y="134" class="svg-small">knowledge_structuring</text>
-          <text x="428" y="152" class="svg-small">KnowledgeStructuringAgent</text>
-          <line x1="598" y1="139" x2="642" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-
-          <rect x="642" y="110" width="154" height="58" class="svg-box"></rect>
-          <text x="664" y="134" class="svg-small">dimension_analysis</text>
-          <text x="680" y="152" class="svg-small">AnalysisAgent</text>
-          <line x1="796" y1="139" x2="840" y2="139" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-
-          <rect x="840" y="110" width="184" height="58" class="svg-review"></rect>
-          <text x="860" y="134" class="svg-small">claim_support_review</text>
-          <text x="864" y="152" class="svg-small">ClaimSupportReviewer</text>
-
-          <path d="M 932 168 C 930 248 300 250 290 168" class="svg-feedback" marker-end="url(#arrow-dag-red)"></path>
-          <text x="480" y="232" class="svg-small">needs_verification: 仅当 queue 非空且 verification_rounds == 0</text>
-
-          <line x1="932" y1="168" x2="932" y2="216" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-          <rect x="854" y="216" width="156" height="58" class="svg-box"></rect>
-          <text x="884" y="240" class="svg-small">report_writer</text>
-          <text x="886" y="258" class="svg-small">ReportWriterAgent</text>
-
-          <line x1="932" y1="274" x2="932" y2="316" class="svg-arrow" marker-end="url(#arrow-dag)"></line>
-          <rect x="854" y="316" width="156" height="58" class="svg-output"></rect>
-          <text x="902" y="340" class="svg-small">publisher</text>
-          <text x="904" y="358" class="svg-small">Publisher</text>
-
-          <rect x="58" y="302" width="660" height="72" class="svg-hole"></rect>
-          <text x="82" y="330" class="svg-small">仍要补：Final QA 还没有单独节点；writer 过滤 supported claims，但报告级 coverage / contradiction replay 还弱。</text>
-          <text x="82" y="352" class="svg-small">当前 source_collection 里 evidence review / coverage review 是内部控制，不是 LangGraph 显式节点。</text>
-        </svg>
-      </div>
-    </section>
-
-    <section id="research-tree">
-      <div class="section-head">
-        <h2>三阶段衔接图</h2>
-        <p class="section-note">
-          现在 landscape、focused、verification 都是 <code>ResearchTask.search_stage</code>，并由
-          <code>stage_contract</code> 明确 state sink 和 evidence sink。它们共享 branch lineage，
-          但输出对象不同，所以不能把 landscape 结果直接送进 analysis。
-        </p>
-      </div>
-      <div class="research-tree-layout">
-        <div class="branch-tree" aria-label="research branch tree example">
-          <ul class="tree-list">
-            <li>
-              <div class="branch-node node-root">
-                <header>
-                  <span class="tag next">Root Branch</span>
-                  <strong>Competitor x Analysis Dimension</strong>
-                </header>
-                <p>PlanningAgent 给出竞品和确认维度，CollectionAgent 生成 root branch、ResearchBrief 和 ResearchTask。</p>
-              </div>
-              <ul>
-                <li>
-                  <div class="branch-node node-search">
-                    <header>
-                      <span class="tag risk">landscape</span>
-                      <strong>source-universe discovery</strong>
-                    </header>
-                    <p>用于 market_growth、competitive_moat 或 high-risk / source universe 不清楚的维度。输出候选 source、source type、消歧状态、decision 和 follow_up_task_specs，不再回退到 next_action。</p>
-                    <code>stage_contract: search_stage=landscape, produces_evidence=false</code>
-                    <code>ResearchRoutingAction: scope_refinement / entity_resolution / source_discovery / evidence_extraction / claim_verification / stop</code>
-                    <code>subtypes: query_refinement / dimension_decomposition / competitor_disambiguation / source_type_search / targeted_url_extract / coverage_gap_search / evidence_check / budget_stop / sufficient_stop / no_viable_followup</code>
-                  </div>
-                  <ul>
-                    <li>
-                      <div class="branch-node node-branch">
-                        <header>
-                          <span class="tag done">evidence_extraction</span>
-                          <strong>candidate source -> focused child branch</strong>
-                        </header>
-                        <p>allocator 会在固定预算内保留 best candidate URL 和高优先级 missing source type，带 parent_task_id 保留血缘。</p>
-                      </div>
-                    </li>
-                    <li>
-                      <div class="branch-node node-review">
-                        <header>
-                          <span class="tag done">已接上</span>
-                          <strong>scope_refinement / entity_resolution 会生成 child task</strong>
-                        </header>
-                        <p>split suggestions 会变成新的 child dimensions；消歧会生成 <code>competitor_disambiguation</code> follow-up task。</p>
-                      </div>
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  <div class="branch-node node-search">
-                    <header>
-                      <span class="tag done">focused</span>
-                      <strong>evidence collection</strong>
-                    </header>
-                    <p>默认阶段。大多数 pricing、docs、review、marketplace 维度直接从 focused 开始，或者由 landscape follow-up 生成。</p>
-                    <code>stage_contract: produces_evidence=true</code>
-                    <code>EvidenceItem -> EvidenceQualityReviewer -> CoverageReviewer</code>
-                  </div>
-                  <ul>
-                    <li>
-                      <div class="branch-node node-review">
-                        <header>
-                          <span class="tag done">accepted evidence</span>
-                          <strong>进入 KnowledgeStructuringAgent</strong>
-                        </header>
-                        <p>EvidenceItem 保留 branch_id、collection_task_id、research_task_id、dimension_id 和 URL，用于后续 claim 回查。</p>
-                      </div>
-                    </li>
-                    <li>
-                      <div class="branch-node node-branch">
-                        <header>
-                          <span class="tag risk">coverage gap</span>
-                          <strong>collect_more / refine_query</strong>
-                        </header>
-                        <p>CoverageReviewer 可以生成 follow_up_task_specs，继续扩一个 depth 以内的 child branch。</p>
-                      </div>
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  <div class="branch-node node-search">
-                    <header>
-                      <span class="tag risk">verification</span>
-                      <strong>claim-driven follow-up</strong>
-                    </header>
-                    <p>不是普通覆盖率补采。只有 ClaimSupportReviewer 发现 weak / unverifiable claim 时才会把 verification_task_queue 推回 CollectionAgent。</p>
-                    <code>ClaimSupportReview -> verification_task_queue -> verify_* branch</code>
-                  </div>
-                  <ul>
-                    <li>
-                      <div class="branch-node node-stop">
-                        <header>
-                          <span class="tag done">bounded loop</span>
-                          <strong>最多一轮 verification</strong>
-                        </header>
-                        <p>route_after_claim_support 只有在 queue 非空且 verification_rounds 为 0 时回 source_collection，避免无限循环。</p>
-                      </div>
-                    </li>
-                  </ul>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        </div>
-        <aside class="tree-examples" aria-label="research tree examples">
-          <h3>读图方式</h3>
-          <div class="example-item">
-            <strong>1. landscape 不是证据</strong>
-            <p>它只产生 source universe、query refinements 和 follow_up_task_specs。只有 stage_contract.produces_evidence=true 的 focused / verification 结果会变成 EvidenceItem。</p>
-          </div>
-          <div class="example-item">
-            <strong>2. focused 是主采集</strong>
-            <p>它接受 root branch、landscape follow-up 或 coverage follow-up，产出可被 knowledge / analysis 使用的 accepted evidence。</p>
-          </div>
-          <div class="example-item">
-            <strong>3. verification 只服务 claim</strong>
-            <p>它从 ClaimSupportReview 生成，目标是支持或推翻具体 claim，不负责扩大普通维度覆盖。</p>
-          </div>
-          <div class="example-item">
-            <strong>4. 当前漏洞</strong>
-            <p>strong entailment、verification span 判断、report-level QA 和更强 analysis claim 还需要继续补。</p>
-          </div>
-        </aside>
-      </div>
-    </section>
-
-    <section id="schema">
-      <div class="section-head">
-        <h2>当前核心对象</h2>
-        <p class="section-note">
-          现在最重要的不是前后端，而是这些对象之间的血缘：task、branch、evidence、claim、claim support review 必须能互相回查。
-        </p>
-      </div>
-      <div class="grid">
-        <div class="card">
-          <h3>ResearchBrief / ResearchTask</h3>
-          <p>ResearchBrief 定义 competitor x dimension 的目标；ResearchTask 带 <code>search_stage</code>、query、parent_task_id 和 generated_from_gap。</p>
-        </div>
-        <div class="card">
-          <h3>LandscapeAssessment</h3>
-          <p>只描述 source universe：candidate_sources、discovered_source_types、competitor_disambiguation、dimension_split_suggestions、stage_contract 和 follow_up_task_specs。</p>
-        </div>
-        <div class="card">
-          <h3>EvidenceItem / CoverageAssessment</h3>
-          <p>focused / verification 产出 EvidenceItem；CoverageAssessment 带 stage_contract，EvidenceQualityReviewer 和 CoverageReviewer 决定 accepted evidence 与补采任务。</p>
-        </div>
-        <div class="card">
-          <h3>CompetitorKnowledge</h3>
-          <p>KnowledgeStructuringAgent 只消费 accepted evidence，结构化每个竞品的公开证据和维度知识。</p>
-        </div>
-        <div class="card">
-          <h3>AnalysisClaim</h3>
-          <p>AnalysisAgent 基于 CompetitorKnowledge 生成 claim，每条 claim 必须绑定 evidence_ids、dimension、competitors 和 confidence。</p>
-        </div>
-        <div class="card">
-          <h3>ClaimSupportReview</h3>
-          <p>ClaimSupportReviewer 标记 supported / weak / contradicted / unverifiable，并为弱 claim 生成一次 verification task。</p>
-        </div>
-      </div>
-    </section>
-
-    <section id="roadmap">
-      <div class="section-head">
-        <h2>漏洞看板</h2>
-        <p class="section-note">
-          这里按现在 research 三阶段的实际断点排序。绿色是已经接上，黄色是还能跑但语义不够强，红色是下一步应该优先补的洞。
-        </p>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>优先级</th>
-              <th>TODO</th>
-              <th>总结</th>
-              <th>展开</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="tag done">已接上</span></td>
-              <td><strong>DAG stage 顺序</strong></td>
-              <td>analysis 已移到 knowledge_structuring 之后，writer 之前新增 claim support gate。</td>
-              <td>
-                <details open>
-                  <summary>查看展开</summary>
-                  <p>当前代码是 <code>scope_planner -> source_collection -> knowledge_structuring -> dimension_analysis -> claim_support_review -> report_writer -> publisher</code>。这解决了之前 analysis 读不到 structured knowledge 的问题。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag done">已接上</span></td>
-              <td><strong>landscape decision -> child task 衔接</strong></td>
-              <td>landscape 不进 evidence，改为生成 LandscapeAssessment、stage_contract、ResearchRoutingDecision 和 follow_up_task_specs；budget 阻断会显式记录 stop / budget_stop。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>follow-up allocator 会保留一个 best candidate URL 和一个最高优先级 missing source type，再用剩余 slot 按 source type priority 与 confidence 填充。无 candidate source 时会生成 landscape refinement task。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag done">已接上</span></td>
-              <td><strong>claim-driven verification 回环</strong></td>
-              <td>weak / unverifiable claim 可以触发一次 verification pass。</td>
-              <td>
-                <details open>
-                  <summary>查看展开</summary>
-                  <p>ClaimSupportReviewer 生成 <code>verification_task_queue</code>；LangGraph conditional edge 在 <code>verification_rounds == 0</code> 时回到 source_collection。CollectionAgent verification pass 只消费 queue，不重建普通 root branches。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag done">已接上</span></td>
-              <td><strong>dimension split 会生成 child dimensions</strong></td>
-              <td><code>dimension_split_suggestions</code> 会转成带 parent lineage 的 split child tasks。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>例如 competitive_moat 会建议 switching_cost、ecosystem_lock_in、proprietary_data、brand_distribution，并生成 <code>competitive_moat.switching_cost</code> 这类 child dimension。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag done">已接上</span></td>
-              <td><strong>competitor disambiguation 有专用 task</strong></td>
-              <td>LandscapeReviewer 标记 ambiguous / unknown 后会生成 <code>competitor_disambiguation</code> follow-up。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>follow-up query 会写入 official site constraint、候选 domain 和同名公司排除要求，避免把模糊 candidate source 直接推进 focused evidence。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag risk">漏洞</span></td>
-              <td><strong>claim support 仍然浅</strong></td>
-              <td>当前支持判断主要是 claim tokens 和 evidence text 的词面 overlap。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>这能挡住无 evidence claim，但不能可靠判断“证据是否真的蕴含 claim”或是否 contradicted。下一步需要句子级 evidence spans、claim decomposition 和 contradiction checks。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag done">已接上</span></td>
-              <td><strong>candidate URL 会走 source_urls 定向抽取</strong></td>
-              <td>landscape candidate source 会写入 <code>target_urls</code>，对应 focused task 下推为 <code>ResearchEngine.source_urls</code>。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>verification 明确使用 <code>STANDARD_EVIDENCE</code>，不再通过 deep true/false 选择 engine；它保留 claim-specific query，后续由 ClaimSupportReviewer 判断支持或反驳。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag risk">漏洞</span></td>
-              <td><strong>Analysis claim 质量仍要增强</strong></td>
-              <td>AnalysisAgent 已经接在 knowledge 后面，但 claim 可能仍偏浅。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>下一步应按 dimension 生成可比较的 claims，避免“has quality-reviewed evidence”这类占位式 claim，并为每条 claim 绑定最小充分 evidence set。</p>
-                </details>
-              </td>
-            </tr>
-            <tr>
-              <td><span class="tag next">后续</span></td>
-              <td><strong>前端 replay / source review</strong></td>
-              <td>现在 HTML 看板只说明架构，产品里还要能看 research decisions。</td>
-              <td>
-                <details>
-                  <summary>查看展开</summary>
-                  <p>需要展示 ResearchBrief、ResearchTask、LandscapeAssessment、CoverageAssessment、ClaimSupportReview，让用户能从报告句子回到 claim、evidence、URL 和当时为什么补采。</p>
-                </details>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <article class="panel">
+        <span class="tag amber">Observability</span>
+        <h2>可回放状态</h2>
+        <ul>
+          <li><code>research_tasks</code>、<code>coverage_assessments</code>、<code>research_artifacts</code> 保留执行轨迹。</li>
+          <li><code>agent_events</code> 汇总输入、输出、预算和覆盖情况。</li>
+        </ul>
+      </article>
     </section>
   </main>
-
-  <footer>
-    当前结论：research 三阶段已经有主链路、一次 verification 回环、split/disambiguation follow-up 和 candidate URL 定向抽取；下一步优先补更强 claim support 与 report-level QA。
-  </footer>
 </body>
 </html>

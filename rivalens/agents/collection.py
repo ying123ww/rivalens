@@ -5,7 +5,6 @@ from typing import Any
 
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
-from rivalens.agents.landscape_review import LandscapeReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
@@ -25,7 +24,6 @@ class CollectionAgent:
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
         evidence_reviewer: EvidenceQualityReviewer | None = None,
         coverage_reviewer: CoverageReviewer | None = None,
-        landscape_reviewer: LandscapeReviewer | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 24,
         max_root_branch_hard_limit: int = 80,
@@ -33,7 +31,6 @@ class CollectionAgent:
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
         self.coverage_reviewer = coverage_reviewer or CoverageReviewer()
-        self.landscape_reviewer = landscape_reviewer or LandscapeReviewer()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
@@ -60,7 +57,6 @@ class CollectionAgent:
         research_branches = list(state.get("research_branches", []))
         research_briefs = list(state.get("research_briefs", []))
         research_tasks = list(state.get("research_tasks", []))
-        landscape_assessments = list(state.get("landscape_assessments", []))
         coverage_assessments = list(state.get("coverage_assessments", []))
         evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
@@ -137,83 +133,6 @@ class CollectionAgent:
                             "error": str(result),
                         }
                     )
-                    continue
-
-                if research_task.get("search_stage") == "landscape":
-                    landscape_assessment = self.landscape_reviewer.review(
-                        branch=branch,
-                        research_task=research_task,
-                        sources=result.get("evidence_items", []),
-                    )
-                    follow_up_specs = self._landscape_follow_up_specs(
-                        landscape_assessment,
-                    )
-                    should_expand = self._landscape_should_expand(landscape_assessment)
-                    if should_expand and not follow_up_specs:
-                        self._mark_landscape_stop(
-                            landscape_assessment,
-                            subtype="no_viable_followup",
-                            rationale="Landscape decision requested expansion but produced no executable follow-up task.",
-                        )
-                    elif should_expand and branch.get("depth", 0) >= self.max_branch_depth:
-                        self._mark_landscape_stop(
-                            landscape_assessment,
-                            subtype="budget_stop",
-                            rationale="Landscape follow-up was blocked by the configured branch depth budget.",
-                        )
-                    elif should_expand and expansion_branch_count >= self.max_expansion_branches:
-                        self._mark_landscape_stop(
-                            landscape_assessment,
-                            subtype="budget_stop",
-                            rationale="Landscape follow-up was blocked by the configured expansion branch budget.",
-                        )
-                    selected_follow_up_specs = self._selected_landscape_follow_up_specs(
-                        landscape_assessment,
-                        follow_up_specs,
-                        expansion_branch_count,
-                    )
-                    landscape_assessment["selected_follow_up_specs"] = selected_follow_up_specs
-
-                    landscape_assessments.append(landscape_assessment)
-                    contexts.append(result)
-                    research_artifacts.append(
-                        {
-                            "id": f"artifact_collection_{len(research_artifacts) + 1}",
-                            "agent": "collection",
-                            "mode": "landscape",
-                            "query": result["query"],
-                            "competitor": collection_task["competitor"],
-                            "branch_id": branch["id"],
-                            "research_brief_id": collection_task.get("research_brief_id", ""),
-                            "research_task_id": collection_task.get("research_task_id", ""),
-                            "search_stage": "landscape",
-                            "generated_from_gap": collection_task.get("generated_from_gap", ""),
-                            "dimension_id": collection_task["dimension_id"],
-                            "dimension_name": collection_task["dimension_name"],
-                            "collection_task_id": collection_task["id"],
-                            "context": self._landscape_artifact_context(
-                                landscape_assessment,
-                            ),
-                            "evidence_ids": [],
-                            "costs": result["costs"],
-                        }
-                    )
-                    if (
-                        self._landscape_should_expand(landscape_assessment)
-                        and selected_follow_up_specs
-                        and branch.get("depth", 0) < self.max_branch_depth
-                    ):
-                        branch["status"] = "expanded"
-                        children = self._build_child_branches(
-                            branch,
-                            selected_follow_up_specs,
-                            parent_task_id=research_task["id"],
-                        )
-                        expansion_branch_count += len(children)
-                        next_frontier.extend(children)
-                        research_branches.extend(children)
-                    else:
-                        branch["status"] = "stopped"
                     continue
 
                 sources = self._assign_evidence_ids(
@@ -331,7 +250,6 @@ class CollectionAgent:
             "research_branches": research_branches,
             "research_briefs": research_briefs,
             "research_tasks": research_tasks,
-            "landscape_assessments": landscape_assessments,
             "coverage_assessments": coverage_assessments,
             "research_artifacts": research_artifacts,
             "verification_task_queue": [],
@@ -366,7 +284,6 @@ class CollectionAgent:
                         "branch_count": len(research_branches),
                         "research_brief_count": len(research_briefs),
                         "research_task_count": len(research_tasks),
-                        "landscape_assessment_count": len(landscape_assessments),
                         "expanded_branch_count": expansion_branch_count,
                         "evidence_review_count": len(evidence_reviews),
                         "coverage_assessment_count": len(coverage_assessments),
@@ -394,130 +311,7 @@ class CollectionAgent:
         self,
         collection_task: EvidenceCollectionTask,
     ) -> ResearchMode:
-        if collection_task.get("search_stage") == "landscape":
-            return ResearchMode.SOURCE_DISCOVERY
         return ResearchMode.STANDARD_EVIDENCE
-
-    def _landscape_follow_up_specs(
-        self,
-        landscape_assessment: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        decision = landscape_assessment.get("decision", {})
-        if (
-            decision.get("action") == "scope_refinement"
-            and decision.get("subtype") == "dimension_decomposition"
-        ):
-            return list(landscape_assessment.get("split_task_specs", []))
-        return list(
-            landscape_assessment.get("follow_up_task_specs")
-            or landscape_assessment.get("focused_task_specs", [])
-        )
-
-    def _landscape_should_expand(self, landscape_assessment: dict[str, Any]) -> bool:
-        decision = landscape_assessment.get("decision", {})
-        action = decision.get("action")
-        return bool(action and action != "stop")
-
-    def _selected_landscape_follow_up_specs(
-        self,
-        landscape_assessment: dict[str, Any],
-        follow_up_specs: list[dict[str, Any]],
-        expansion_branch_count: int,
-    ) -> list[dict[str, Any]]:
-        if not self._landscape_should_expand(landscape_assessment):
-            return []
-        remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
-        if remaining_branch_slots <= 0:
-            return []
-        return list(follow_up_specs)[:remaining_branch_slots]
-
-    def _landscape_artifact_context(
-        self,
-        landscape_assessment: dict[str, Any],
-    ) -> dict[str, Any]:
-        decision = landscape_assessment.get("decision", {})
-        candidate_sources = landscape_assessment.get("candidate_sources", [])
-        selected_follow_up_specs = landscape_assessment.get("selected_follow_up_specs", [])
-        return {
-            "stage_contract": landscape_assessment.get("stage_contract", {}),
-            "observation": {
-                "landscape_assessment_id": landscape_assessment.get("id", ""),
-                "candidate_source_count": len(candidate_sources),
-                "candidate_source_urls": [
-                    source.get("url", "")
-                    for source in candidate_sources[:5]
-                    if source.get("url")
-                ],
-                "discovered_source_types": landscape_assessment.get(
-                    "discovered_source_types",
-                    [],
-                ),
-                "missing_source_types": landscape_assessment.get(
-                    "missing_source_types",
-                    [],
-                ),
-                "source_universe_confidence": landscape_assessment.get(
-                    "source_universe_confidence",
-                    0.0,
-                ),
-                "competitor_disambiguation_status": landscape_assessment.get(
-                    "competitor_disambiguation",
-                    {},
-                ).get("status", "unknown"),
-                "dimension_split_suggestions": landscape_assessment.get(
-                    "dimension_split_suggestions",
-                    [],
-                ),
-            },
-            "routing": {
-                "decision": decision,
-                "decision_candidates": landscape_assessment.get(
-                    "decision_candidates",
-                    [],
-                ),
-                "arbitration": landscape_assessment.get("arbitration", {}),
-                "follow_up_task_count": len(
-                    landscape_assessment.get("follow_up_task_specs")
-                    or landscape_assessment.get("focused_task_specs", []),
-                ),
-                "focused_task_count": len(
-                    [
-                        spec
-                        for spec in (
-                            landscape_assessment.get("follow_up_task_specs")
-                            or landscape_assessment.get("focused_task_specs", [])
-                        )
-                        if spec.get("search_stage") == "focused"
-                    ],
-                ),
-                "split_task_count": len(
-                    landscape_assessment.get("split_task_specs", []),
-                ),
-                "selected_follow_up_task_count": len(selected_follow_up_specs),
-                "selected_follow_up_specs": selected_follow_up_specs,
-                "blocked_by_budget": decision.get("subtype") == "budget_stop",
-            },
-            "replay_ref": {
-                "landscape_assessment_id": landscape_assessment.get("id", ""),
-                "full_state_collection": "landscape_assessments",
-                "full_state_path": (
-                    "landscape_assessments"
-                    f"[id={landscape_assessment.get('id', '')}]"
-                ),
-            },
-        }
-
-    def _mark_landscape_stop(
-        self,
-        landscape_assessment: dict[str, Any],
-        subtype: str,
-        rationale: str,
-    ) -> None:
-        landscape_assessment["decision"] = {
-            "action": "stop",
-            "subtype": subtype,
-            "rationale": rationale,
-        }
 
     def _build_root_branches(
         self,
@@ -926,21 +720,9 @@ class CollectionAgent:
         return "Expected source types: " + ", ".join(str(source) for source in expected_source_types)
 
     def _initial_search_stage_from_dimension(self, dimension: dict[str, Any]) -> str:
-        if dimension.get("id") in {"market_growth", "competitive_moat"}:
-            return "landscape"
-        expected_source_types = set(dimension.get("expected_source_types", []))
-        if {"pricing_page", "docs", "review", "marketplace"} & expected_source_types:
-            return "focused"
-        if dimension.get("risk_level") == "high":
-            return "landscape"
         return "focused"
 
     def _initial_search_stage(self, branch: ResearchBranch) -> str:
-        expected_source_types = set(branch.get("expected_source_types", []))
-        if {"pricing_page", "docs", "review", "marketplace"} & expected_source_types:
-            return "focused"
-        if branch.get("dimension_id") in {"market_growth", "competitive_moat"}:
-            return "landscape"
         return "focused"
 
     def _effort_level(self, branch: ResearchBranch) -> str:
