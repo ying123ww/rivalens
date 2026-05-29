@@ -213,6 +213,8 @@ class ClaimSupportReviewer:
                 ),
                 "target_source_types": target_source_types,
                 "generated_from_gap": f"verification:{claim.get('id', '')}",
+                "decision_action": "claim_verification",
+                "decision_subtype": "evidence_check",
                 "reason": "Claim support review marked this claim as weak or unverifiable.",
                 "search_stage": "verification",
                 "competitor": competitor,

@@ -17,6 +17,26 @@ EvidenceType = Literal[
     "job_posting",
     "other",
 ]
+LandscapeDecisionAction = Literal[
+    "scope_refinement",
+    "entity_resolution",
+    "source_discovery",
+    "evidence_extraction",
+    "claim_verification",
+    "stop",
+]
+LandscapeDecisionSubtype = Literal[
+    "query_refinement",
+    "dimension_decomposition",
+    "competitor_disambiguation",
+    "source_type_search",
+    "targeted_url_extract",
+    "coverage_gap_search",
+    "evidence_check",
+    "budget_stop",
+    "sufficient_stop",
+    "no_viable_followup",
+]
 
 
 class Competitor(TypedDict, total=False):
@@ -54,6 +74,8 @@ class EvidenceCollectionTask(TypedDict, total=False):
     depth: int
     search_stage: str
     generated_from_gap: str
+    decision_action: LandscapeDecisionAction
+    decision_subtype: LandscapeDecisionSubtype
     expected_source_types: list[str]
     topic: str
     expansion_reason: str
@@ -133,6 +155,8 @@ class ResearchBranch(TypedDict, total=False):
     target_urls: list[str]
     search_stage: str
     generated_from_gap: str
+    decision_action: LandscapeDecisionAction
+    decision_subtype: LandscapeDecisionSubtype
     expected_source_types: list[str]
     minimum_coverage: list[str]
     guiding_questions: list[str]
@@ -149,15 +173,6 @@ CoverageNextAction = Literal[
     "split_dimension",
     "stop_with_limit",
 ]
-LandscapeNextAction = Literal[
-    "needs_focused_collection",
-    "needs_refinement",
-    "needs_competitor_disambiguation",
-    "needs_dimension_split",
-    "stop_with_limit",
-]
-
-
 class ResearchBrief(TypedDict, total=False):
     id: str
     branch_id: str
@@ -188,6 +203,8 @@ class ResearchTask(TypedDict, total=False):
     target_urls: list[str]
     expected_source_types: list[str]
     generated_from_gap: str
+    decision_action: LandscapeDecisionAction
+    decision_subtype: LandscapeDecisionSubtype
     reason: str
     drift_risk: BranchDriftRisk
 
@@ -195,6 +212,8 @@ class ResearchTask(TypedDict, total=False):
 class FollowUpTaskSpec(TypedDict, total=False):
     objective: str
     query: str
+    decision_action: LandscapeDecisionAction
+    decision_subtype: LandscapeDecisionSubtype
     dimension_id: str
     dimension_name: str
     dimension_type: str
@@ -204,6 +223,12 @@ class FollowUpTaskSpec(TypedDict, total=False):
     generated_from_gap: str
     reason: str
     search_stage: SearchStage
+
+
+class LandscapeDecision(TypedDict, total=False):
+    action: LandscapeDecisionAction
+    subtype: LandscapeDecisionSubtype
+    rationale: str
 
 
 class CandidateSource(TypedDict, total=False):
@@ -230,7 +255,7 @@ class LandscapeAssessment(TypedDict, total=False):
     query_refinements: list[str]
     focused_task_specs: list[FollowUpTaskSpec]
     split_task_specs: list[FollowUpTaskSpec]
-    next_action: LandscapeNextAction
+    decision: LandscapeDecision
     user_visible_summary: str
 
 

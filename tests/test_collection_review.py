@@ -167,6 +167,14 @@ class CollectionReviewTest(unittest.TestCase):
         )
         self.assertTrue(
             any(
+                task.get("generated_from_gap") == "missing_source_type:pricing_page"
+                and task.get("decision_action") == "source_discovery"
+                and task.get("decision_subtype") == "coverage_gap_search"
+                for task in result["research_tasks"]
+            )
+        )
+        self.assertTrue(
+            any(
                 assessment["next_action"] == "ready_for_analysis"
                 for assessment in result["coverage_assessments"][1:]
             )
@@ -249,7 +257,8 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(len(result["evidence_items"]), 0)
         self.assertEqual(len(result["landscape_assessments"]), 1)
         landscape = result["landscape_assessments"][0]
-        self.assertEqual(landscape["next_action"], "needs_focused_collection")
+        self.assertEqual(landscape["decision"]["action"], "evidence_extraction")
+        self.assertEqual(landscape["decision"]["subtype"], "targeted_url_extract")
         self.assertIn("official_site", landscape["discovered_source_types"])
         self.assertTrue(landscape["focused_task_specs"])
         self.assertEqual(
@@ -262,6 +271,8 @@ class CollectionReviewTest(unittest.TestCase):
                 and task["generated_from_gap"] == "landscape_candidate_source"
                 and task["parent_task_id"] == "task_collect_acme_market_growth"
                 and task["target_urls"] == ["https://acme.example/product"]
+                and task["decision_action"] == "evidence_extraction"
+                and task["decision_subtype"] == "targeted_url_extract"
                 for task in result["research_tasks"]
             )
         )
@@ -273,6 +284,57 @@ class CollectionReviewTest(unittest.TestCase):
                 for call in seen_calls
             )
         )
+
+    def test_landscape_budget_stop_is_recorded_when_depth_budget_blocks_follow_up(self):
+        class FakeLandscapeCollector:
+            async def collect(self, collection_task, deep=False, verbose=True, source_urls=None):
+                return {
+                    "task": dict(collection_task),
+                    "mode": "standard_evidence",
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [
+                        {
+                            "title": "Acme market page",
+                            "url": "https://acme.example/market",
+                            "source_type": "official_site",
+                            "excerpt": "Acme market page.",
+                            "confidence": 0.8,
+                        }
+                    ],
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme market growth",
+                "competitors": [{"name": "Acme"}],
+                "verbose": False,
+            },
+            "analysis_dimensions": [
+                {
+                    "id": "market_growth",
+                    "name": "市场增长",
+                    "expected_source_types": ["official_site"],
+                    "risk_level": "high",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=FakeLandscapeCollector(),
+                max_branch_depth=0,
+                max_expansion_branches=4,
+            ).run(state)
+        )
+
+        landscape = result["landscape_assessments"][0]
+        self.assertEqual(landscape["decision"]["action"], "stop")
+        self.assertEqual(landscape["decision"]["subtype"], "budget_stop")
+        self.assertEqual(len(result["research_tasks"]), 1)
+        self.assertEqual(result["research_branches"][0]["status"], "stopped")
 
     def test_landscape_allocator_preserves_candidate_and_missing_source_types(self):
         assessment = LandscapeReviewer().review(
@@ -304,10 +366,14 @@ class CollectionReviewTest(unittest.TestCase):
         specs = assessment["focused_task_specs"]
         self.assertEqual(len(specs), 3)
         self.assertEqual(specs[0]["generated_from_gap"], "landscape_candidate_source")
+        self.assertEqual(specs[0]["decision_action"], "evidence_extraction")
+        self.assertEqual(specs[0]["decision_subtype"], "targeted_url_extract")
         self.assertEqual(
             specs[1]["generated_from_gap"],
             "landscape_missing_source_type:pricing_page",
         )
+        self.assertEqual(specs[1]["decision_action"], "source_discovery")
+        self.assertEqual(specs[1]["decision_subtype"], "source_type_search")
         self.assertEqual(
             specs[2]["generated_from_gap"],
             "landscape_missing_source_type:review",
@@ -335,9 +401,10 @@ class CollectionReviewTest(unittest.TestCase):
             ],
         )
 
+        self.assertEqual(assessment["decision"]["action"], "entity_resolution")
         self.assertEqual(
-            assessment["next_action"],
-            "needs_competitor_disambiguation",
+            assessment["decision"]["subtype"],
+            "competitor_disambiguation",
         )
         self.assertEqual(
             assessment["focused_task_specs"][0]["generated_from_gap"],
@@ -395,7 +462,11 @@ class CollectionReviewTest(unittest.TestCase):
         )
 
         landscape = result["landscape_assessments"][0]
-        self.assertEqual(landscape["next_action"], "needs_dimension_split")
+        self.assertEqual(landscape["decision"]["action"], "scope_refinement")
+        self.assertEqual(
+            landscape["decision"]["subtype"],
+            "dimension_decomposition",
+        )
         self.assertTrue(landscape["split_task_specs"])
         split_tasks = [
             task
@@ -407,6 +478,8 @@ class CollectionReviewTest(unittest.TestCase):
             split_tasks[0]["dimension_id"],
             "competitive_moat.switching_cost",
         )
+        self.assertEqual(split_tasks[0]["decision_action"], "scope_refinement")
+        self.assertEqual(split_tasks[0]["decision_subtype"], "dimension_decomposition")
         self.assertEqual(split_tasks[0]["parent_task_id"], "task_collect_acme_competitive_moat")
 
     def test_claim_support_review_generates_verification_task_for_unverifiable_claim(self):
@@ -440,6 +513,14 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(
             result["verification_task_queue"][0]["generated_from_gap"],
             "verification:claim_1",
+        )
+        self.assertEqual(
+            result["verification_task_queue"][0]["decision_action"],
+            "claim_verification",
+        )
+        self.assertEqual(
+            result["verification_task_queue"][0]["decision_subtype"],
+            "evidence_check",
         )
 
     def test_collection_processes_verification_queue_without_rebuilding_roots(self):
@@ -515,6 +596,8 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertFalse(seen_tasks[0]["deep"])
         self.assertEqual(seen_tasks[0]["source_urls"], [])
         self.assertEqual(result["research_tasks"][0]["search_stage"], "verification")
+        self.assertEqual(result["research_tasks"][0]["decision_action"], "claim_verification")
+        self.assertEqual(result["research_tasks"][0]["decision_subtype"], "evidence_check")
         self.assertEqual(
             result["research_tasks"][0]["generated_from_gap"],
             "verification:claim_1",
@@ -638,6 +721,14 @@ class CollectionReviewTest(unittest.TestCase):
             assessment["follow_up_task_specs"][0]["generated_from_gap"],
             "retry_source_quality",
         )
+        self.assertEqual(
+            assessment["follow_up_task_specs"][0]["decision_action"],
+            "source_discovery",
+        )
+        self.assertEqual(
+            assessment["follow_up_task_specs"][0]["decision_subtype"],
+            "coverage_gap_search",
+        )
 
     def test_coverage_review_generates_follow_up_after_competitor_mismatch(self):
         branch = pricing_branch()
@@ -673,6 +764,14 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(evidence_review["required_action"], "retry")
         self.assertEqual(assessment["next_action"], "refine_query")
         self.assertTrue(assessment["follow_up_task_specs"])
+        self.assertEqual(
+            assessment["follow_up_task_specs"][0]["decision_action"],
+            "source_discovery",
+        )
+        self.assertEqual(
+            assessment["follow_up_task_specs"][0]["decision_subtype"],
+            "coverage_gap_search",
+        )
 
     def test_knowledge_structuring_uses_only_accepted_evidence(self):
         state = {

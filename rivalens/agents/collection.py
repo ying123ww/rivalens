@@ -145,6 +145,29 @@ class CollectionAgent:
                         research_task=research_task,
                         sources=result.get("evidence_items", []),
                     )
+                    follow_up_specs = self._landscape_follow_up_specs(
+                        landscape_assessment,
+                    )
+                    should_expand = self._landscape_should_expand(landscape_assessment)
+                    if should_expand and not follow_up_specs:
+                        self._mark_landscape_stop(
+                            landscape_assessment,
+                            subtype="no_viable_followup",
+                            rationale="Landscape decision requested expansion but produced no executable follow-up task.",
+                        )
+                    elif should_expand and branch.get("depth", 0) >= self.max_branch_depth:
+                        self._mark_landscape_stop(
+                            landscape_assessment,
+                            subtype="budget_stop",
+                            rationale="Landscape follow-up was blocked by the configured branch depth budget.",
+                        )
+                    elif should_expand and expansion_branch_count >= self.max_expansion_branches:
+                        self._mark_landscape_stop(
+                            landscape_assessment,
+                            subtype="budget_stop",
+                            rationale="Landscape follow-up was blocked by the configured expansion branch budget.",
+                        )
+
                     landscape_assessments.append(landscape_assessment)
                     contexts.append(result)
                     research_artifacts.append(
@@ -164,23 +187,15 @@ class CollectionAgent:
                             "collection_task_id": collection_task["id"],
                             "context": {
                                 "candidate_sources": landscape_assessment.get("candidate_sources", []),
+                                "decision": landscape_assessment.get("decision", {}),
                                 "user_visible_summary": landscape_assessment.get("user_visible_summary", ""),
                             },
                             "evidence_ids": [],
                             "costs": result["costs"],
                         }
                     )
-                    follow_up_specs = self._landscape_follow_up_specs(
-                        landscape_assessment,
-                    )
                     if (
-                        landscape_assessment.get("next_action")
-                        in {
-                            "needs_focused_collection",
-                            "needs_refinement",
-                            "needs_competitor_disambiguation",
-                            "needs_dimension_split",
-                        }
+                        self._landscape_should_expand(landscape_assessment)
                         and follow_up_specs
                         and branch.get("depth", 0) < self.max_branch_depth
                     ):
@@ -379,9 +394,30 @@ class CollectionAgent:
         self,
         landscape_assessment: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if landscape_assessment.get("next_action") == "needs_dimension_split":
+        decision = landscape_assessment.get("decision", {})
+        if (
+            decision.get("action") == "scope_refinement"
+            and decision.get("subtype") == "dimension_decomposition"
+        ):
             return list(landscape_assessment.get("split_task_specs", []))
         return list(landscape_assessment.get("focused_task_specs", []))
+
+    def _landscape_should_expand(self, landscape_assessment: dict[str, Any]) -> bool:
+        decision = landscape_assessment.get("decision", {})
+        action = decision.get("action")
+        return bool(action and action != "stop")
+
+    def _mark_landscape_stop(
+        self,
+        landscape_assessment: dict[str, Any],
+        subtype: str,
+        rationale: str,
+    ) -> None:
+        landscape_assessment["decision"] = {
+            "action": "stop",
+            "subtype": subtype,
+            "rationale": rationale,
+        }
 
     def _build_root_branches(
         self,
@@ -469,6 +505,8 @@ class CollectionAgent:
                     "target_urls": task_spec.get("target_urls", []),
                     "search_stage": "verification",
                     "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
+                    "decision_action": task_spec.get("decision_action", "claim_verification"),
+                    "decision_subtype": task_spec.get("decision_subtype", "evidence_check"),
                     "expected_source_types": task_spec.get(
                         "target_source_types",
                         dimension.get("expected_source_types", []),
@@ -548,6 +586,8 @@ class CollectionAgent:
             "target_urls": branch.get("target_urls", []),
             "expected_source_types": branch.get("expected_source_types", []),
             "generated_from_gap": generated_from_gap,
+            "decision_action": branch.get("decision_action", ""),
+            "decision_subtype": branch.get("decision_subtype", ""),
             "reason": reason,
             "drift_risk": "low" if not generated_from_gap else "medium",
         }
@@ -567,6 +607,8 @@ class CollectionAgent:
             "depth": branch.get("depth", 0),
             "search_stage": research_task.get("search_stage", branch.get("search_stage", "")),
             "generated_from_gap": research_task.get("generated_from_gap", branch.get("generated_from_gap", "")),
+            "decision_action": research_task.get("decision_action", branch.get("decision_action", "")),
+            "decision_subtype": research_task.get("decision_subtype", branch.get("decision_subtype", "")),
             "expected_source_types": research_task.get("expected_source_types", branch.get("expected_source_types", [])),
             "topic": branch.get("topic", ""),
             "expansion_reason": branch.get("expansion_reason", ""),
@@ -618,6 +660,8 @@ class CollectionAgent:
                         "generated_from_gap",
                         "",
                     ),
+                    "decision_action": follow_up_spec.get("decision_action", ""),
+                    "decision_subtype": follow_up_spec.get("decision_subtype", ""),
                     "expected_source_types": follow_up_spec.get(
                         "target_source_types",
                         parent.get("expected_source_types", []),

@@ -29,12 +29,15 @@
 - `ClaimSupportReviewer` 作为 claim-level support gate，输出 `ClaimSupportReview` 和一次性的 `verification_task_queue`。
 - `claim_support_review` 可通过 LangGraph conditional edge 回到 `source_collection` 执行 claim-driven `verification` 搜索阶段。
 - `CollectionAgent` 区分 initial/gap collection 与 verification pass，verification pass 只消费 `verification_task_queue`，不会重建 root branches。
-- landscape 的 `needs_refinement`、`needs_competitor_disambiguation`、`needs_dimension_split` 不再直接吞掉；已转为带血缘的后续 task。
+- landscape 不再使用 `next_action` 兜底；`LandscapeAssessment.decision` 是唯一控制字段。
+- landscape 的 query refinement、competitor disambiguation、dimension decomposition 不再直接吞掉；已转为带血缘的后续 task。
 - `ResearchTask.parent_task_id` 已贯通 landscape/focused/split follow-up 任务，便于回放阶段衔接。
 - landscape candidate source 会写入 `target_urls`，对应 focused child task 下推为 `ResearchEngine.source_urls` 定向 URL 抽取。
 - `competitor_disambiguation` 会生成专用 follow-up task，而不是落回通用 refinement。
 - `dimension_split_suggestions` 会生成 split child dimensions，例如 `competitive_moat.switching_cost`。
 - landscape follow-up allocator 会在固定预算内保留 best candidate URL 和高优先级 missing source type，避免简单 `specs[:3]` 挤掉关键补采。
+- `LandscapeAssessment.decision` 已按 6 类 research control taxonomy 表达：`scope_refinement`、`entity_resolution`、`source_discovery`、`evidence_extraction`、`claim_verification`、`stop`；follow-up specs 也携带 `decision_action` 和 `decision_subtype`。
+- `coverage_gap_search` 已用于 coverage review 产生的补采 task；landscape depth/branch budget 阻断扩展时会显式记录 `stop / budget_stop`。
 
 原始问题是：
 
@@ -126,6 +129,8 @@ CoverageReviewer:
 CollectionAgent:
   直接执行 max_depth、max_expansion_branches、root hard limit 等 guard。
 ```
+
+注意：这里的 `next_action` 只保留在 focused evidence coverage loop。landscape 阶段不再读取或回退到 `next_action`，只读取 `LandscapeAssessment.decision`。
 
 ### 4. AnalysisAgent 在 KnowledgeStructuringAgent 前运行
 
@@ -479,9 +484,22 @@ LandscapeAssessment:
   source_universe_confidence
   competitor_disambiguation
   dimension_split_suggestions
+  decision
   query_refinements
   focused_task_specs
+  split_task_specs
   user_visible_summary
+```
+
+`LandscapeDecision` 使用六类动作：
+
+```text
+scope_refinement     -> query_refinement / dimension_decomposition
+entity_resolution    -> competitor_disambiguation
+source_discovery     -> source_type_search / coverage_gap_search
+evidence_extraction  -> targeted_url_extract
+claim_verification   -> evidence_check
+stop                 -> budget_stop / sufficient_stop / no_viable_followup
 ```
 
 原因：landscape 的输出是“信息入口”和“后续采集计划”，不是最终证据。只有后续 focused collection 深采后的内容才可以变成 `EvidenceItem` 并被 analysis 使用。
@@ -503,7 +521,11 @@ LandscapeAssessment:
 
 ### CoverageAssessment
 
-`CoverageAssessment` 是 collection 是否完成的核心判断。
+`CoverageAssessment` 是 focused collection 是否完成的核心判断。它保留 `next_action` 作为 coverage loop 的旧控制字段，但其 follow-up specs 会同时携带 6 类 taxonomy 标签：
+
+```text
+source_discovery -> coverage_gap_search
+```
 
 ```text
 CoverageAssessment:
@@ -713,7 +735,7 @@ compliance_risk:
 - `frontier` 从 branch list 逐步改为 task queue。
 - branch 继续表示 lineage 和 dimension coverage。
 - task 表示一次具体搜索行动。
-- `CoverageAssessment.next_action` 是 collection loop 的唯一决策来源。
+- `CoverageAssessment.next_action` 是 focused evidence coverage loop 的决策来源；landscape loop 使用 `LandscapeAssessment.decision`，不再用 `next_action` fallback。
 
 ### `rivalens/agents/evidence_review.py`
 

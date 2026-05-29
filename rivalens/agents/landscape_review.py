@@ -42,12 +42,12 @@ class LandscapeReviewer:
         disambiguation = self._competitor_disambiguation(branch, candidate_sources)
         split_suggestions = self._dimension_split_suggestions(branch)
         split_task_specs = self._split_task_specs(branch, split_suggestions)
-        if disambiguation.get("status") in {"ambiguous", "unknown"}:
+        if disambiguation.get("status") == "ambiguous":
             focused_task_specs = self._disambiguation_task_specs(
                 branch,
                 disambiguation,
             )
-        next_action = self._next_action(
+        decision = self._decision(
             focused_task_specs,
             disambiguation,
             split_task_specs,
@@ -67,7 +67,7 @@ class LandscapeReviewer:
             "query_refinements": [spec.get("query", "") for spec in focused_task_specs],
             "focused_task_specs": focused_task_specs,
             "split_task_specs": split_task_specs,
-            "next_action": next_action,
+            "decision": decision,
             "user_visible_summary": self._summary(
                 discovered_source_types,
                 missing_source_types,
@@ -115,6 +115,8 @@ class LandscapeReviewer:
                     "query": self._refinement_query(branch, research_task),
                     "target_source_types": branch.get("expected_source_types", []),
                     "generated_from_gap": "landscape_refinement",
+                    "decision_action": "scope_refinement",
+                    "decision_subtype": "query_refinement",
                     "reason": "Landscape scan needs another pass before focused evidence collection.",
                     "search_stage": "landscape",
                 }
@@ -128,6 +130,8 @@ class LandscapeReviewer:
                     "query": self._source_query(branch, source),
                     "target_source_types": [source.get("source_type", "other")],
                     "generated_from_gap": "landscape_candidate_source",
+                    "decision_action": "evidence_extraction",
+                    "decision_subtype": "targeted_url_extract",
                     "reason": "Landscape scan found a candidate source worth focused collection.",
                     "search_stage": "focused",
                     "target_urls": [source.get("url", "")],
@@ -143,6 +147,8 @@ class LandscapeReviewer:
                     "query": self._source_type_query(branch, source_type),
                     "target_source_types": [source_type],
                     "generated_from_gap": f"landscape_missing_source_type:{source_type}",
+                    "decision_action": "source_discovery",
+                    "decision_subtype": "source_type_search",
                     "reason": f"Landscape scan did not discover a {source_type} source.",
                     "search_stage": "focused",
                 }
@@ -225,6 +231,8 @@ class LandscapeReviewer:
                 ),
                 "target_source_types": ["official_site"],
                 "generated_from_gap": "competitor_disambiguation",
+                "decision_action": "entity_resolution",
+                "decision_subtype": "competitor_disambiguation",
                 "reason": "Landscape scan could not bind candidate sources to the intended competitor.",
                 "search_stage": "focused",
             }
@@ -320,31 +328,61 @@ class LandscapeReviewer:
                     "parent_dimension_id": branch.get("dimension_id", ""),
                     "target_source_types": branch.get("expected_source_types", []),
                     "generated_from_gap": f"dimension_split:{suggestion}",
+                    "decision_action": "scope_refinement",
+                    "decision_subtype": "dimension_decomposition",
                     "reason": "Landscape scan marked this broad dimension as needing focused sub-dimensions.",
                     "search_stage": "focused",
                 }
             )
         return specs
 
-    def _next_action(
+    def _decision(
         self,
         focused_task_specs: list[dict[str, Any]],
         disambiguation: dict[str, Any],
         split_task_specs: list[dict[str, Any]],
-    ) -> str:
-        if disambiguation.get("status") in {"ambiguous", "unknown"} and focused_task_specs:
-            return "needs_competitor_disambiguation"
+    ) -> dict[str, str]:
+        if disambiguation.get("status") == "ambiguous" and focused_task_specs:
+            return {
+                "action": "entity_resolution",
+                "subtype": "competitor_disambiguation",
+                "rationale": "Candidate sources could not be safely bound to the intended competitor.",
+            }
         if split_task_specs:
-            return "needs_dimension_split"
-        if focused_task_specs and any(
-            spec.get("search_stage") == "focused" for spec in focused_task_specs
-        ):
-            return "needs_focused_collection"
+            return {
+                "action": "scope_refinement",
+                "subtype": "dimension_decomposition",
+                "rationale": "The landscape dimension is broad enough to require narrower child dimensions.",
+            }
         if focused_task_specs:
-            return "needs_refinement"
-        if disambiguation.get("status") == "unknown":
-            return "needs_refinement"
-        return "stop_with_limit"
+            if any(spec.get("search_stage") == "landscape" for spec in focused_task_specs):
+                return {
+                    "action": "scope_refinement",
+                    "subtype": "query_refinement",
+                    "rationale": "The landscape scan did not find a viable source universe entrance.",
+                }
+            if any(spec.get("target_urls") for spec in focused_task_specs):
+                return {
+                    "action": "evidence_extraction",
+                    "subtype": "targeted_url_extract",
+                    "rationale": "Landscape found concrete candidate URLs ready for focused extraction.",
+                }
+            return {
+                "action": "source_discovery",
+                "subtype": "source_type_search",
+                "rationale": "Landscape identified missing source types that need focused source search.",
+            }
+        if disambiguation.get("status") == "clear":
+            return {
+                "action": "stop",
+                "subtype": "sufficient_stop",
+                "rationale": "The source universe is sufficiently clear and no follow-up task was required.",
+            }
+        return {
+            "action": "stop",
+            "subtype": "no_viable_followup",
+            "rationale": "No viable landscape follow-up task was generated.",
+        }
 
     def _summary(
         self,

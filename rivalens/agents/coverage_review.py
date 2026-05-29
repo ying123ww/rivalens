@@ -131,6 +131,8 @@ class CoverageReviewer:
                     "query": self._base_query(branch, "official source URL"),
                     "target_source_types": branch.get("expected_source_types", []),
                     "generated_from_gap": "retry_source_quality",
+                    "decision_action": "source_discovery",
+                    "decision_subtype": "coverage_gap_search",
                     "reason": "Source-level review rejected all usable evidence.",
                     "search_stage": "focused",
                 }
@@ -144,6 +146,8 @@ class CoverageReviewer:
                     "query": self._query_for_source_type(branch, source_type),
                     "target_source_types": [source_type],
                     "generated_from_gap": f"missing_source_type:{source_type}",
+                    "decision_action": "source_discovery",
+                    "decision_subtype": "coverage_gap_search",
                     "reason": f"Coverage review found no accepted {source_type} source.",
                     "search_stage": "focused",
                 }
@@ -156,6 +160,8 @@ class CoverageReviewer:
                     "query": self._base_query(branch, question),
                     "target_source_types": branch.get("expected_source_types", []),
                     "generated_from_gap": "missing_guiding_question",
+                    "decision_action": "source_discovery",
+                    "decision_subtype": "coverage_gap_search",
                     "reason": "Coverage review found an unanswered guiding question.",
                     "search_stage": "focused",
                 }

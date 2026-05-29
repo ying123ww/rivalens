@@ -827,14 +827,15 @@
                       <span class="tag risk">landscape</span>
                       <strong>source-universe discovery</strong>
                     </header>
-                    <p>用于 market_growth、competitive_moat 或 high-risk / source universe 不清楚的维度。输出候选 source、source type、消歧状态和 follow-up specs。</p>
-                    <code>LandscapeAssessment: candidate_sources, focused_task_specs, next_action</code>
+                    <p>用于 market_growth、competitive_moat 或 high-risk / source universe 不清楚的维度。输出候选 source、source type、消歧状态、decision 和 follow-up specs，不再回退到 next_action。</p>
+                    <code>LandscapeDecision: scope_refinement / entity_resolution / source_discovery / evidence_extraction / claim_verification / stop</code>
+                    <code>subtypes: query_refinement / dimension_decomposition / competitor_disambiguation / source_type_search / targeted_url_extract / coverage_gap_search / evidence_check / budget_stop / sufficient_stop / no_viable_followup</code>
                   </div>
                   <ul>
                     <li>
                       <div class="branch-node node-branch">
                         <header>
-                          <span class="tag done">needs_focused_collection</span>
+                          <span class="tag done">evidence_extraction</span>
                           <strong>candidate source -> focused child branch</strong>
                         </header>
                         <p>allocator 会在固定预算内保留 best candidate URL 和高优先级 missing source type，带 parent_task_id 保留血缘。</p>
@@ -844,7 +845,7 @@
                       <div class="branch-node node-review">
                         <header>
                           <span class="tag done">已接上</span>
-                          <strong>needs_dimension_split / disambiguation 会生成 child task</strong>
+                          <strong>scope_refinement / entity_resolution 会生成 child task</strong>
                         </header>
                         <p>split suggestions 会变成新的 child dimensions；消歧会生成 <code>competitor_disambiguation</code> follow-up task。</p>
                       </div>
@@ -994,8 +995,8 @@
             </tr>
             <tr>
               <td><span class="tag done">已接上</span></td>
-              <td><strong>landscape -> focused 衔接</strong></td>
-              <td>landscape 不进 evidence，改为生成 LandscapeAssessment 和 focused_task_specs。</td>
+              <td><strong>landscape decision -> child task 衔接</strong></td>
+              <td>landscape 不进 evidence，改为生成 LandscapeAssessment、LandscapeDecision 和 follow-up specs；budget 阻断会显式记录 stop / budget_stop。</td>
               <td>
                 <details>
                   <summary>查看展开</summary>
