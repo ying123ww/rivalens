@@ -260,10 +260,40 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(landscape["decision"]["action"], "evidence_extraction")
         self.assertEqual(landscape["decision"]["subtype"], "targeted_url_extract")
         self.assertIn("official_site", landscape["discovered_source_types"])
+        self.assertEqual(landscape["missing_source_types"], ["review"])
         self.assertTrue(landscape["focused_task_specs"])
         self.assertEqual(
             landscape["focused_task_specs"][0]["target_urls"],
             ["https://acme.example/product"],
+        )
+        self.assertEqual(
+            landscape["selected_follow_up_specs"][0]["target_urls"],
+            ["https://acme.example/product"],
+        )
+        landscape_artifact = [
+            artifact
+            for artifact in result["research_artifacts"]
+            if artifact.get("mode") == "landscape"
+        ][0]
+        self.assertEqual(
+            landscape_artifact["context"]["observation"]["landscape_assessment_id"],
+            landscape["id"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["observation"]["missing_source_types"],
+            ["review"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["routing"]["decision"],
+            landscape["decision"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["routing"]["selected_follow_up_specs"],
+            landscape["selected_follow_up_specs"],
+        )
+        self.assertEqual(
+            landscape_artifact["context"]["replay_ref"]["full_state_collection"],
+            "landscape_assessments",
         )
         self.assertTrue(
             any(
@@ -340,6 +370,17 @@ class CollectionReviewTest(unittest.TestCase):
         landscape = result["landscape_assessments"][0]
         self.assertEqual(landscape["decision"]["action"], "stop")
         self.assertEqual(landscape["decision"]["subtype"], "budget_stop")
+        self.assertEqual(landscape["selected_follow_up_specs"], [])
+        landscape_artifact = [
+            artifact
+            for artifact in result["research_artifacts"]
+            if artifact.get("mode") == "landscape"
+        ][0]
+        self.assertTrue(landscape_artifact["context"]["routing"]["blocked_by_budget"])
+        self.assertEqual(
+            landscape_artifact["context"]["routing"]["selected_follow_up_specs"],
+            [],
+        )
         self.assertEqual(len(result["research_tasks"]), 1)
         self.assertEqual(result["research_branches"][0]["status"], "stopped")
 
@@ -371,6 +412,10 @@ class CollectionReviewTest(unittest.TestCase):
         )
 
         specs = assessment["focused_task_specs"]
+        self.assertEqual(
+            assessment["missing_source_types"],
+            ["pricing_page", "review"],
+        )
         self.assertEqual(len(specs), 3)
         self.assertEqual(specs[0]["generated_from_gap"], "landscape_candidate_source")
         self.assertEqual(specs[0]["decision_action"], "evidence_extraction")

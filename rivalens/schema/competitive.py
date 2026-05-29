@@ -248,6 +248,7 @@ class LandscapeAssessment(TypedDict, total=False):
     competitor: str
     dimension_id: str
     discovered_source_types: list[str]
+    missing_source_types: list[str]
     candidate_sources: list[CandidateSource]
     source_universe_confidence: float
     competitor_disambiguation: dict[str, Any]
@@ -255,6 +256,7 @@ class LandscapeAssessment(TypedDict, total=False):
     query_refinements: list[str]
     focused_task_specs: list[FollowUpTaskSpec]
     split_task_specs: list[FollowUpTaskSpec]
+    selected_follow_up_specs: list[FollowUpTaskSpec]
     decision: LandscapeDecision
     user_visible_summary: str
 

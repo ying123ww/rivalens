@@ -60,6 +60,7 @@ class LandscapeReviewer:
             "competitor": branch.get("competitor", ""),
             "dimension_id": branch.get("dimension_id", ""),
             "discovered_source_types": discovered_source_types,
+            "missing_source_types": missing_source_types,
             "candidate_sources": candidate_sources,
             "source_universe_confidence": self._confidence(candidate_sources, missing_source_types),
             "competitor_disambiguation": disambiguation,

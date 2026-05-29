@@ -167,6 +167,12 @@ class CollectionAgent:
                             subtype="budget_stop",
                             rationale="Landscape follow-up was blocked by the configured expansion branch budget.",
                         )
+                    selected_follow_up_specs = self._selected_landscape_follow_up_specs(
+                        landscape_assessment,
+                        follow_up_specs,
+                        expansion_branch_count,
+                    )
+                    landscape_assessment["selected_follow_up_specs"] = selected_follow_up_specs
 
                     landscape_assessments.append(landscape_assessment)
                     contexts.append(result)
@@ -185,30 +191,24 @@ class CollectionAgent:
                             "dimension_id": collection_task["dimension_id"],
                             "dimension_name": collection_task["dimension_name"],
                             "collection_task_id": collection_task["id"],
-                            "context": {
-                                "candidate_sources": landscape_assessment.get("candidate_sources", []),
-                                "decision": landscape_assessment.get("decision", {}),
-                                "user_visible_summary": landscape_assessment.get("user_visible_summary", ""),
-                            },
+                            "context": self._landscape_artifact_context(
+                                landscape_assessment,
+                            ),
                             "evidence_ids": [],
                             "costs": result["costs"],
                         }
                     )
                     if (
                         self._landscape_should_expand(landscape_assessment)
-                        and follow_up_specs
+                        and selected_follow_up_specs
                         and branch.get("depth", 0) < self.max_branch_depth
                     ):
                         branch["status"] = "expanded"
-                        remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
-                        if remaining_branch_slots <= 0:
-                            branch["status"] = "stopped"
-                            continue
                         children = self._build_child_branches(
                             branch,
-                            follow_up_specs,
+                            selected_follow_up_specs,
                             parent_task_id=research_task["id"],
-                        )[:remaining_branch_slots]
+                        )
                         expansion_branch_count += len(children)
                         next_frontier.extend(children)
                         research_branches.extend(children)
@@ -414,6 +414,78 @@ class CollectionAgent:
         decision = landscape_assessment.get("decision", {})
         action = decision.get("action")
         return bool(action and action != "stop")
+
+    def _selected_landscape_follow_up_specs(
+        self,
+        landscape_assessment: dict[str, Any],
+        follow_up_specs: list[dict[str, Any]],
+        expansion_branch_count: int,
+    ) -> list[dict[str, Any]]:
+        if not self._landscape_should_expand(landscape_assessment):
+            return []
+        remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
+        if remaining_branch_slots <= 0:
+            return []
+        return list(follow_up_specs)[:remaining_branch_slots]
+
+    def _landscape_artifact_context(
+        self,
+        landscape_assessment: dict[str, Any],
+    ) -> dict[str, Any]:
+        decision = landscape_assessment.get("decision", {})
+        candidate_sources = landscape_assessment.get("candidate_sources", [])
+        selected_follow_up_specs = landscape_assessment.get("selected_follow_up_specs", [])
+        return {
+            "observation": {
+                "landscape_assessment_id": landscape_assessment.get("id", ""),
+                "candidate_source_count": len(candidate_sources),
+                "candidate_source_urls": [
+                    source.get("url", "")
+                    for source in candidate_sources[:5]
+                    if source.get("url")
+                ],
+                "discovered_source_types": landscape_assessment.get(
+                    "discovered_source_types",
+                    [],
+                ),
+                "missing_source_types": landscape_assessment.get(
+                    "missing_source_types",
+                    [],
+                ),
+                "source_universe_confidence": landscape_assessment.get(
+                    "source_universe_confidence",
+                    0.0,
+                ),
+                "competitor_disambiguation_status": landscape_assessment.get(
+                    "competitor_disambiguation",
+                    {},
+                ).get("status", "unknown"),
+                "dimension_split_suggestions": landscape_assessment.get(
+                    "dimension_split_suggestions",
+                    [],
+                ),
+            },
+            "routing": {
+                "decision": decision,
+                "focused_task_count": len(
+                    landscape_assessment.get("focused_task_specs", []),
+                ),
+                "split_task_count": len(
+                    landscape_assessment.get("split_task_specs", []),
+                ),
+                "selected_follow_up_task_count": len(selected_follow_up_specs),
+                "selected_follow_up_specs": selected_follow_up_specs,
+                "blocked_by_budget": decision.get("subtype") == "budget_stop",
+            },
+            "replay_ref": {
+                "landscape_assessment_id": landscape_assessment.get("id", ""),
+                "full_state_collection": "landscape_assessments",
+                "full_state_path": (
+                    "landscape_assessments"
+                    f"[id={landscape_assessment.get('id', '')}]"
+                ),
+            },
+        }
 
     def _mark_landscape_stop(
         self,
