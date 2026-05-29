@@ -9,13 +9,13 @@ from typing import Awaitable, Dict, List, Any
 from fastapi.responses import JSONResponse, FileResponse
 from rivalens.research.document.document import DocumentLoader
 from rivalens.research import ResearchEngine
-from utils import write_md_to_pdf, write_md_to_word, write_text_to_md
 from pathlib import Path
 from datetime import datetime
 from fastapi import HTTPException
 import logging
 import hashlib
 
+from rivalens.report_export import generate_report_files
 from .rivalens_runner import run_rivalens_task
 
 # Import chat agent
@@ -100,7 +100,12 @@ class Researcher:
         
         # Generate the files
         sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{self.query}")
-        file_paths = await generate_report_files(report, sanitized_filename)
+        file_paths = await generate_report_files(
+            report,
+            sanitized_filename,
+            quote_paths=True,
+            include_legacy_md_key=True,
+        )
         
         # Get the JSON log path that was created by CustomLogsHandler
         json_relative_path = os.path.relpath(self.logs_handler.log_file)
@@ -174,7 +179,12 @@ async def handle_start_command(websocket, data: str, manager):
         industry_direction_plan,
     )
     report = str(report)
-    file_paths = await generate_report_files(report, sanitized_filename)
+    file_paths = await generate_report_files(
+        report,
+        sanitized_filename,
+        quote_paths=True,
+        include_legacy_md_key=True,
+    )
     # Add JSON log path to file_paths
     file_paths["json"] = os.path.relpath(logs_handler.log_file)
     await send_file_paths(websocket, file_paths)
@@ -254,13 +264,6 @@ async def handle_chat_command(websocket, data: str):
             "content": f"Error processing your message: {str(e)}",
             "role": "assistant"
         })
-
-async def generate_report_files(report: str, filename: str) -> Dict[str, str]:
-    pdf_path = await write_md_to_pdf(report, filename)
-    docx_path = await write_md_to_word(report, filename)
-    md_path = await write_text_to_md(report, filename)
-    return {"pdf": pdf_path, "docx": docx_path, "md": md_path}
-
 
 async def send_file_paths(websocket, file_paths: Dict[str, str]):
     await websocket.send_json({"type": "path", "output": file_paths})

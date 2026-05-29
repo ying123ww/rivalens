@@ -26,8 +26,16 @@ class ReportStore:
     async def _write_all_unlocked(self, data: Dict[str, Dict[str, Any]]) -> None:
         await self._ensure_parent_dir()
         tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        tmp_path.replace(self._path)
+        serialized = json.dumps(data, ensure_ascii=False)
+        tmp_path.write_text(serialized, encoding="utf-8")
+        try:
+            tmp_path.replace(self._path)
+        except PermissionError:
+            self._path.write_text(serialized, encoding="utf-8")
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
 
     async def list_reports(self, report_ids: List[str] | None = None) -> List[Dict[str, Any]]:
         async with self._lock:

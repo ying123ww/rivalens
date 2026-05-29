@@ -17,6 +17,79 @@ from rivalens.schema import (
 DEFAULT_SOURCE_HINTS = ["official_site", "pricing_page", "docs", "news", "review"]
 USER_DIRECTION_SOURCE_HINTS = ["official_site", "news", "review"]
 
+PLANNER_COVERAGE_DIRECTIONS: tuple[dict[str, Any], ...] = (
+    {
+        "direction_id": "strategic_positioning",
+        "name": "战略定位",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖战略定位、市场卡位和差异化叙事。",
+        "source_hints": ["official_site", "news", "analyst_report", "social"],
+        "coverage_terms": ["战略", "定位", "卡位", "竞争格局", "品牌", "positioning", "strategy"],
+    },
+    {
+        "direction_id": "target_users",
+        "name": "目标用户",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖目标用户、用户画像和核心使用场景。",
+        "source_hints": ["official_site", "review", "social", "news"],
+        "coverage_terms": ["目标用户", "用户画像", "使用场景", "persona", "segment", "use case"],
+    },
+    {
+        "direction_id": "business_model",
+        "name": "商业模式",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖商业模式、变现路径和收费结构。",
+        "source_hints": ["pricing_page", "official_site", "financial_filing", "news"],
+        "coverage_terms": ["商业模式", "定价", "套餐", "收费", "费用", "pricing", "fee", "monetization"],
+    },
+    {
+        "direction_id": "operations_strategy",
+        "name": "运营策略",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖获客、增长、留存和运营打法。",
+        "source_hints": ["official_site", "news", "social", "review"],
+        "coverage_terms": ["运营", "增长", "留存", "获客", "复购", "growth", "retention", "loyalty"],
+    },
+    {
+        "direction_id": "product_features",
+        "name": "产品功能",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖核心功能矩阵和功能深度对比。",
+        "source_hints": ["official_site", "docs", "marketplace", "review"],
+        "coverage_terms": ["功能", "能力", "feature", "capability", "matrix"],
+    },
+    {
+        "direction_id": "product_flow",
+        "name": "产品流程",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖核心任务流程、转化路径和使用链路。",
+        "source_hints": ["official_site", "docs", "review", "social"],
+        "coverage_terms": ["流程", "工作流", "链路", "workflow", "journey", "process"],
+    },
+    {
+        "direction_id": "product_structure",
+        "name": "产品结构",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖产品模块、信息架构和功能层级。",
+        "source_hints": ["official_site", "docs", "review"],
+        "coverage_terms": ["产品结构", "信息架构", "模块", "层级", "architecture", "structure", "module"],
+    },
+    {
+        "direction_id": "interaction_design",
+        "name": "交互设计",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖界面交互、操作体验和多端体验细节。",
+        "source_hints": ["official_site", "review", "marketplace", "social"],
+        "coverage_terms": ["交互", "界面", "操作体验", "移动端", "ux", "ui", "interaction", "mobile"],
+    },
+    {
+        "direction_id": "signature_features",
+        "name": "特色功能",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖独有功能、差异化能力和竞争亮点。",
+        "source_hints": ["official_site", "docs", "news", "review"],
+        "coverage_terms": ["特色", "差异", "独有", "亮点", "signature", "differentiation", "unique"],
+    },
+    {
+        "direction_id": "user_reputation",
+        "name": "用户口碑",
+        "reason": "PlanningAgent 根据通用竞品分析框架补充：现有行业方向未充分覆盖用户评价、口碑、痛点和公开反馈。",
+        "source_hints": ["review", "social", "marketplace", "complaint_database"],
+        "coverage_terms": ["口碑", "评价", "痛点", "投诉", "review", "sentiment", "complaint"],
+    },
+)
+
 
 @dataclass(frozen=True)
 class IndustryDirectionTemplate:
@@ -83,6 +156,15 @@ class IndustryDirectionSkill:
         candidate_industries = self.rank_industries(query, competitors or [])
         selected = candidate_industries[0]
         template = self._template_for(selected["industry_id"]) or self.templates[0]
+        detected_competitors = self._detected_competitors(
+            query,
+            competitors or [],
+            template,
+        )
+        suggested_competitors = self._suggested_competitors(
+            template,
+            detected_competitors,
+        )
         default_directions = [
             self._template_direction_to_payload(direction, index)
             for index, direction in enumerate(template.default_directions, start=1)
@@ -91,9 +173,16 @@ class IndustryDirectionSkill:
             default_directions,
             selected_direction_ids,
         )
+        planner_added_directions = self._planner_added_directions(default_directions)
+        selected_planner_directions = self._select_planner_directions(
+            planner_added_directions,
+            selected_direction_ids,
+        )
         user_added_directions = self._normalize_user_directions(user_directions or [])
         final_directions = self._dedupe_directions(
-            selected_default_directions + user_added_directions
+            selected_default_directions
+            + selected_planner_directions
+            + user_added_directions
         )
         created_at = datetime.now(timezone.utc).isoformat()
 
@@ -102,16 +191,25 @@ class IndustryDirectionSkill:
             "detected_industry": selected["name"],
             "industry": selected,
             "candidate_industries": candidate_industries,
+            "detected_competitors": detected_competitors,
+            "suggested_competitors": suggested_competitors,
             "suggested_directions": default_directions,
             "default_directions": default_directions,
+            "planner_added_directions": planner_added_directions,
             "user_added_directions": user_added_directions,
             "final_directions": final_directions,
             "final_analysis_plan": {
                 "detected_industry": selected["name"],
                 "industry_id": selected["industry_id"],
                 "industry_name": selected["name"],
+                "detected_competitors": detected_competitors,
+                "suggested_competitors": suggested_competitors,
                 "direction_count": len(final_directions),
                 "suggested_directions": default_directions,
+                "planner_added_directions": planner_added_directions,
+                "planner_coverage_basis": [
+                    direction["name"] for direction in PLANNER_COVERAGE_DIRECTIONS
+                ],
                 "directions": final_directions,
                 "final_directions": [
                     direction.get("direction_id", "")
@@ -156,6 +254,39 @@ class IndustryDirectionSkill:
             if template.industry == industry_id:
                 return template
         return None
+
+    def _detected_competitors(
+        self,
+        query: str,
+        competitors: list[Competitor] | list[dict[str, Any]],
+        template: IndustryDirectionTemplate,
+    ) -> list[str]:
+        detected = []
+        for competitor in competitors:
+            if isinstance(competitor, str):
+                name = competitor.strip()
+            else:
+                name = str(competitor.get("name", "")).strip()
+            if name:
+                detected.append(name)
+
+        haystack = query.lower()
+        for competitor in template.known_competitors:
+            if competitor.lower() in haystack:
+                detected.append(competitor)
+        return self._dedupe_text(detected)
+
+    def _suggested_competitors(
+        self,
+        template: IndustryDirectionTemplate,
+        detected_competitors: list[str],
+    ) -> list[str]:
+        detected = {competitor.lower() for competitor in detected_competitors}
+        return [
+            competitor
+            for competitor in template.known_competitors
+            if competitor.lower() not in detected
+        ][:8]
 
     def _haystack(
         self,
@@ -263,6 +394,14 @@ class IndustryDirectionSkill:
             or "direction"
         )
 
+    def _dedupe_text(self, values: list[str]) -> list[str]:
+        deduped: dict[str, str] = {}
+        for value in values:
+            cleaned = value.strip()
+            if cleaned:
+                deduped[cleaned.lower()] = cleaned
+        return list(deduped.values())
+
     def _select_default_directions(
         self,
         default_directions: list[AnalysisDirection],
@@ -280,6 +419,61 @@ class IndustryDirectionSkill:
         return [
             direction
             for direction in default_directions
+            if direction.get("direction_id") in selected
+        ]
+
+    def _planner_added_directions(
+        self,
+        default_directions: list[AnalysisDirection],
+    ) -> list[AnalysisDirection]:
+        existing_direction_ids = {
+            direction.get("direction_id", "") for direction in default_directions
+        }
+        existing_text = "\n".join(
+            " ".join(
+                str(direction.get(field, ""))
+                for field in ("direction_id", "name", "reason", "description")
+            )
+            for direction in default_directions
+        ).lower()
+
+        additions: list[AnalysisDirection] = []
+        for coverage_direction in PLANNER_COVERAGE_DIRECTIONS:
+            direction_id = str(coverage_direction["direction_id"])
+            if direction_id in existing_direction_ids:
+                continue
+            terms = [
+                str(term).lower()
+                for term in coverage_direction.get("coverage_terms", [])
+            ]
+            if any(term and term in existing_text for term in terms):
+                continue
+            additions.append(
+                {
+                    "direction_id": direction_id,
+                    "name": str(coverage_direction["name"]),
+                    "reason": str(coverage_direction["reason"]),
+                    "description": str(coverage_direction["reason"]),
+                    "search_focus": str(coverage_direction["name"]),
+                    "source_hints": list(coverage_direction["source_hints"]),
+                    "required": False,
+                    "origin": "planner_suggested",
+                }
+            )
+        return additions
+
+    def _select_planner_directions(
+        self,
+        planner_added_directions: list[AnalysisDirection],
+        selected_direction_ids: list[str] | None,
+    ) -> list[AnalysisDirection]:
+        if selected_direction_ids is None:
+            return planner_added_directions
+
+        selected = set(selected_direction_ids)
+        return [
+            direction
+            for direction in planner_added_directions
             if direction.get("direction_id") in selected
         ]
 

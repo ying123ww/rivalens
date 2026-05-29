@@ -348,7 +348,7 @@ class AnalysisDirection(TypedDict, total=False):
     search_focus: str
     source_hints: list[str]
     required: bool
-    origin: Literal["industry_template", "user_requested"]
+    origin: Literal["industry_template", "planner_suggested", "user_requested"]
 
 
 class IndustryDirectionPlan(TypedDict, total=False):
@@ -356,8 +356,11 @@ class IndustryDirectionPlan(TypedDict, total=False):
     detected_industry: str
     industry: IndustryCandidate
     candidate_industries: list[IndustryCandidate]
+    detected_competitors: list[str]
+    suggested_competitors: list[str]
     suggested_directions: list[AnalysisDirection]
     default_directions: list[AnalysisDirection]
+    planner_added_directions: list[AnalysisDirection]
     user_added_directions: list[AnalysisDirection]
     final_directions: list[AnalysisDirection]
     final_analysis_plan: dict[str, Any]
@@ -544,7 +547,7 @@ class AnalysisDirectionPayload(StrictPayloadModel):
     search_focus: str = ""
     source_hints: list[str] = Field(default_factory=list)
     required: bool = True
-    origin: Literal["industry_template", "user_requested"]
+    origin: Literal["industry_template", "planner_suggested", "user_requested"]
 
 
 class IndustryDirectionPlanPayload(StrictPayloadModel):
@@ -552,8 +555,13 @@ class IndustryDirectionPlanPayload(StrictPayloadModel):
     detected_industry: str = ""
     industry: IndustryCandidatePayload
     candidate_industries: list[IndustryCandidatePayload] = Field(default_factory=list)
+    detected_competitors: list[str] = Field(default_factory=list)
+    suggested_competitors: list[str] = Field(default_factory=list)
     suggested_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     default_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    planner_added_directions: list[AnalysisDirectionPayload] = Field(
+        default_factory=list,
+    )
     user_added_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     final_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     final_analysis_plan: dict[str, Any] = Field(default_factory=dict)
@@ -699,6 +707,9 @@ class ReportMessagePayload(StrictPayloadModel):
 
 class PublishMessagePayload(StrictPayloadModel):
     markdown: str
+    pdf: str = ""
+    docx: str = ""
+    html: str = ""
 
 
 AgentMessagePayload = (

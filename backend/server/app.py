@@ -29,14 +29,14 @@ from server.server_utils import (
 )
 
 from server.websocket_manager import run_agent
-from utils import write_md_to_word, write_md_to_pdf
+from rivalens.report_export import generate_report_files
 from rivalens.research.utils.enum import Tone
 from chat.chat import ChatAgentWithMemory
 from rivalens.agents.industry_direction import IndustryDirectionSkill
 from rivalens.schema import IndustryDirectionPlanPayload
 
 from server.report_store import ReportStore
-from server.persistence import get_persistence_config, redact_url
+from server.persistence import get_persistence_config, initialize_database, redact_url
 
 # Database services are available through Docker, but no tables are created yet.
 
@@ -101,6 +101,17 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Frontend directory not found: {frontend_path}")
     
     persistence_config = get_persistence_config()
+    if persistence_config.auto_create_tables:
+        try:
+            initialize_database()
+            logger.info("Rivalens persistence tables are ready")
+        except Exception as exc:
+            logger.warning("Rivalens persistence initialization failed: %s", exc)
+    else:
+        logger.info(
+            "Rivalens automatic table creation is disabled; set "
+            "RIVALENS_AUTO_CREATE_TABLES=true to enable it."
+        )
     logger.info(
         "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
         redact_url(persistence_config.database_url),
@@ -152,6 +163,16 @@ report_store = ReportStore(Path(os.getenv('REPORT_STORE_PATH', os.path.join('dat
 
 # Constants
 DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
+
+
+def _extract_rivalens_report_text(report_information: Any) -> str:
+    if isinstance(report_information, str):
+        return report_information
+    if isinstance(report_information, dict):
+        return str(report_information.get("report", ""))
+    if isinstance(report_information, (tuple, list)):
+        return str(report_information[0]) if report_information else ""
+    return str(report_information)
 
 # Startup event
 
@@ -303,10 +324,14 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
         return_researcher=True
     )
 
-    docx_path = await write_md_to_word(report_information[0], research_id)
-    pdf_path = await write_md_to_pdf(report_information[0], research_id)
     if research_request.report_type != "rivalens":
         report, researcher = report_information
+        artifacts = await generate_report_files(
+            report,
+            research_id,
+            quote_paths=True,
+            include_legacy_md_key=True,
+        )
         response = {
             "research_id": research_id,
             "research_information": {
@@ -317,11 +342,29 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
                 # "research_sources": researcher.get_research_sources(),  # Raw content of sources may be very large
             },
             "report": report,
-            "docx_path": docx_path,
-            "pdf_path": pdf_path
+            "docx_path": artifacts["docx"],
+            "pdf_path": artifacts["pdf"],
+            "markdown_path": artifacts["markdown"],
+            "html_path": artifacts["html"],
+            "artifacts": artifacts,
         }
     else:
-        response = { "research_id": research_id, "report": "", "docx_path": docx_path, "pdf_path": pdf_path }
+        report = _extract_rivalens_report_text(report_information)
+        artifacts = await generate_report_files(
+            report,
+            research_id,
+            quote_paths=True,
+            include_legacy_md_key=True,
+        )
+        response = {
+            "research_id": research_id,
+            "report": report,
+            "docx_path": artifacts["docx"],
+            "pdf_path": artifacts["pdf"],
+            "markdown_path": artifacts["markdown"],
+            "html_path": artifacts["html"],
+            "artifacts": artifacts,
+        }
 
     return response
 
@@ -479,14 +522,3 @@ async def research_report_chat(research_id: str, request: Request):
         logger.error(f"Error in research report chat: {str(e)}", exc_info=True)
         return {"error": str(e)}
 
-@app.put("/api/reports/{research_id}")
-async def update_report(research_id: str, request: Request):
-    """Update a specific research report by ID - no database configured."""
-    logger.debug(f"Update requested for report {research_id} - no database configured, not persisted")
-    return {"success": True, "id": research_id}
-
-@app.delete("/api/reports/{research_id}")
-async def delete_report(research_id: str):
-    """Delete a specific research report by ID - no database configured."""
-    logger.debug(f"Delete requested for report {research_id} - no database configured, nothing to delete")
-    return {"success": True, "id": research_id}

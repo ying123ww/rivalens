@@ -23,9 +23,13 @@ Docker Compose provisions two persistence services:
 
 The application receives these endpoints through `DATABASE_URL` and `REDIS_URL`.
 PostgreSQL data is stored in the `rivalens-postgres-data` Docker volume, and
-Redis data is stored in `rivalens-redis-data`. No application tables are created
-yet; `backend/server/persistence.py` only centralizes endpoint configuration for
-future schema and repository wiring.
+Redis data is stored in `rivalens-redis-data`. `backend/server/persistence.py`
+defines the traceability tables for run scope, confirmed directions, collection
+DAG nodes, evidence, coverage and evidence review gates, structured knowledge,
+analysis claims, claim-support reviews, and compact Agent events. Automatic
+table creation is disabled by default; set `RIVALENS_AUTO_CREATE_TABLES=true`
+to enable SQLAlchemy `create_all()` on backend startup, or run the SQL scripts
+under `backend/server/sql_table_create` manually.
 
 ## Architecture
 
@@ -97,13 +101,20 @@ flowchart LR
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
 inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
-builds a fixed 10-dimension competitor-analysis plan for user review, then
-emits one `schema_selection` handoff to `source_collection`. The dimension plan
-is stored in `CompetitorAnalysisState.analysis_dimensions` and mirrored as a
-planning artifact named `dimension_confirmation`, so the search scope can be
-reviewed before evidence collection. `source_collection` expands the confirmed
-analysis dimensions into competitor-by-dimension collection tasks and runs them
-concurrently through
+keeps the industry template directions separate from PlanningAgent supplement
+directions, then emits one `schema_selection` handoff to `source_collection`.
+The planner uses the ten general product-analysis directions only as a coverage
+check for missing task-level `planner_added_directions`; they are not written
+back as original industry defaults. The confirmed direction plan is stored in
+`CompetitorAnalysisState.industry_direction_plan`, so the search scope can be
+reviewed before evidence collection. When the user has not specified a clear
+competitor pair, the preview plan surfaces industry-template example
+competitors as `suggested_competitors` without automatically treating them as
+selected analysis targets. When known competitors are detected in the user query
+and no explicit competitor list was provided, `PlanningAgent` promotes those
+`detected_competitors` into the workflow competitor scope before collection.
+`source_collection` expands the confirmed analysis dimensions into
+competitor-by-dimension collection tasks and runs them concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and analysis

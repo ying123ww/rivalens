@@ -46,6 +46,14 @@ class PlanningAgent:
             planning_query,
             normalized,
         )
+        if not normalized:
+            normalized = [
+                {"name": competitor}
+                for competitor in industry_direction_plan.get(
+                    "detected_competitors",
+                    [],
+                )
+            ]
         active_schema = self._select_active_schema(
             planning_query,
             normalized,
@@ -110,6 +118,12 @@ class PlanningAgent:
                         ).get("industry_id"),
                         "default_direction_count": len(
                             industry_direction_plan.get("default_directions", []),
+                        ),
+                        "planner_added_direction_count": len(
+                            industry_direction_plan.get(
+                                "planner_added_directions",
+                                [],
+                            ),
                         ),
                         "user_added_direction_count": len(
                             industry_direction_plan.get("user_added_directions", []),
