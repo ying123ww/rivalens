@@ -45,7 +45,12 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(branches[0]["dimension_id"], "direction_strategic_positioning")
         self.assertEqual(branches[0]["dimension_name"], "战略定位")
         self.assertIn("品牌定位和市场细分", branches[0]["query"])
-        self.assertIn("Expected source types: official_site, news", branches[0]["query"])
+        self.assertNotIn("Expected source types", branches[0]["query"])
+        self.assertIn(
+            "Preferred evidence sources, in priority order: official_site, news",
+            branches[0]["query"],
+        )
+        self.assertEqual(branches[0]["source_hints"], ["official_site", "news"])
         self.assertEqual(branches[0]["search_stage"], "focused")
 
     def test_collection_does_not_fallback_to_core_fields(self):
@@ -61,29 +66,19 @@ class CollectionReviewTest(unittest.TestCase):
 
         self.assertEqual(branches, [])
 
-    def test_collection_generates_gap_driven_follow_up_tasks(self):
+    def test_collection_generates_guiding_question_follow_up_tasks(self):
         class FakeEvidenceCollector:
             async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 gap = collection_task.get("generated_from_gap", "")
-                if "pricing_page" in gap:
+                if gap == "missing_guiding_question":
                     source = {
                         "competitor": "Acme",
                         "dimension_id": "pricing_business_model",
-                        "title": "Acme Pricing",
-                        "url": "https://acme.example/pricing",
-                        "source_type": "pricing_page",
-                        "excerpt": "Acme publishes official pricing plans and enterprise packaging.",
+                        "title": "Acme packaging",
+                        "url": "https://acme.example/packaging",
+                        "source_type": "official_site",
+                        "excerpt": "Acme publishes packaging details for enterprise buyers.",
                         "confidence": 0.9,
-                    }
-                elif "official_site" in gap:
-                    source = {
-                        "competitor": "Acme",
-                        "dimension_id": "pricing_business_model",
-                        "title": "Acme Plans",
-                        "url": "https://acme.example/plans",
-                        "source_type": "other",
-                        "excerpt": "Acme describes plan packaging on its official site.",
-                        "confidence": 0.8,
                     }
                 else:
                     source = {
@@ -120,6 +115,7 @@ class CollectionReviewTest(unittest.TestCase):
                         "name": "定价与商业模式",
                         "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
                         "source_hints": ["pricing_page", "official_site"],
+                        "guiding_questions": ["What packaging details are available?"],
                     }
                 ],
             },
@@ -138,8 +134,7 @@ class CollectionReviewTest(unittest.TestCase):
             task.get("generated_from_gap", "")
             for task in result["research_tasks"]
         ]
-        self.assertIn("missing_source_type:pricing_page", generated_gaps)
-        self.assertIn("missing_source_type:official_site", generated_gaps)
+        self.assertIn("missing_guiding_question", generated_gaps)
         self.assertGreaterEqual(len(result["coverage_assessments"]), 2)
         self.assertEqual(
             result["coverage_assessments"][0]["next_action"],
@@ -163,7 +158,7 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertTrue(result["coverage_assessments"][0]["selected_follow_up_specs"])
         self.assertTrue(
             any(
-                task.get("generated_from_gap") == "missing_source_type:pricing_page"
+                task.get("generated_from_gap") == "missing_guiding_question"
                 and task.get("decision_action") == "source_discovery"
                 and task.get("decision_subtype") == "coverage_gap_search"
                 for task in result["research_tasks"]
@@ -177,7 +172,7 @@ class CollectionReviewTest(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                evidence["source_type"] == "pricing_page"
+                "packaging details" in evidence.get("excerpt", "")
                 for evidence in result["evidence_items"]
             )
         )
@@ -550,7 +545,7 @@ class CollectionReviewTest(unittest.TestCase):
             "competitor_disambiguation",
         )
 
-    def test_coverage_review_uses_dimension_policy_when_planner_policy_is_absent(self):
+    def test_coverage_review_uses_dimension_policy_guiding_questions(self):
         branch = {
             "id": "collect_acme_pricing_business_model",
             "depth": 0,
@@ -558,7 +553,6 @@ class CollectionReviewTest(unittest.TestCase):
             "dimension_id": "pricing_business_model",
             "dimension_name": "定价与商业模式",
             "topic": "定价与商业模式",
-            "expected_source_types": [],
             "guiding_questions": [],
         }
         evidence = [
@@ -584,15 +578,49 @@ class CollectionReviewTest(unittest.TestCase):
             evidence_review=evidence_review,
         )
 
-        self.assertIn("pricing_page", assessment["missing_source_types"])
-        self.assertIn("official_site", assessment["missing_source_types"])
+        self.assertTrue(assessment["missing_questions"])
         self.assertTrue(
             any(
-                spec["generated_from_gap"] == "missing_source_type:pricing_page"
-                and spec["target_source_types"] == ["pricing_page"]
+                spec["generated_from_gap"] == "missing_guiding_question"
                 for spec in assessment["follow_up_task_specs"]
             )
         )
+
+    def test_coverage_review_does_not_treat_source_hints_as_required_sources(self):
+        branch = {
+            "id": "collect_acme_direction_pricing_packaging",
+            "depth": 0,
+            "competitor": "Acme",
+            "dimension_id": "direction_pricing_packaging",
+            "dimension_name": "定价与套餐分层",
+            "topic": "定价与套餐分层",
+            "source_hints": ["pricing_page", "official_site"],
+            "guiding_questions": [],
+        }
+        evidence = [
+            {
+                "id": "ev_1",
+                "collection_task_id": branch["id"],
+                "competitor": "Acme",
+                "dimension_id": "direction_pricing_packaging",
+                "title": "Acme market note",
+                "url": "https://news.example/acme-pricing",
+                "source_type": "news",
+                "excerpt": "Acme pricing is mentioned in a market note.",
+            }
+        ]
+        evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            branch,
+            evidence,
+        )
+
+        assessment = CoverageReviewer().review(
+            branch=branch,
+            evidence_items=evidence,
+            evidence_review=evidence_review,
+        )
+
+        self.assertEqual(assessment["next_action"], "ready_for_analysis")
 
     def test_coverage_review_generates_guiding_question_follow_up(self):
         branch = {
@@ -602,7 +630,6 @@ class CollectionReviewTest(unittest.TestCase):
             "dimension_id": "customer_proof",
             "dimension_name": "客户证明",
             "topic": "客户证明",
-            "expected_source_types": ["official_site"],
             "guiding_questions": ["What reviews mention onboarding pain?"],
         }
         evidence = [

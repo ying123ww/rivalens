@@ -26,15 +26,6 @@ class CoverageReviewer:
         ]
         found_source_types = self._found_source_types(branch, accepted_evidence)
         dimension_policy = self._dimension_policy(branch)
-        expected_source_types = (
-            branch.get("expected_source_types", [])
-            or dimension_policy.get("expected_source_types", [])
-        )
-        missing_source_types = [
-            source_type
-            for source_type in expected_source_types
-            if source_type not in found_source_types
-        ]
         guiding_questions = (
             branch.get("guiding_questions", [])
             or dimension_policy.get("guiding_questions", [])
@@ -46,14 +37,12 @@ class CoverageReviewer:
         )
         next_action = self._next_action(
             accepted_count=len(accepted_evidence),
-            missing_source_types=missing_source_types,
             missing_questions=missing_questions,
             evidence_review=evidence_review,
         )
         follow_up_specs = (
             self._follow_up_task_specs(
                 branch,
-                missing_source_types,
                 missing_questions,
                 evidence_review,
             )
@@ -63,13 +52,11 @@ class CoverageReviewer:
         routing = self._routing_from_review(
             branch=branch,
             evidence_review=evidence_review,
-            missing_source_types=missing_source_types,
             missing_questions=missing_questions,
             next_action=next_action,
             follow_up_specs=follow_up_specs,
             confidence=self._confidence(
                 len(accepted_evidence),
-                missing_source_types,
                 missing_questions,
             ),
         )
@@ -83,7 +70,6 @@ class CoverageReviewer:
             "accepted_evidence_ids": list(accepted_ids),
             "rejected_evidence_ids": rejected_ids,
             "found_source_types": found_source_types,
-            "missing_source_types": missing_source_types,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
             "contradictions": [],
@@ -153,15 +139,12 @@ class CoverageReviewer:
     def _next_action(
         self,
         accepted_count: int,
-        missing_source_types: list[str],
         missing_questions: list[str],
         evidence_review: EvidenceReviewResult,
     ) -> str:
         if accepted_count == 0:
             if evidence_review.get("required_action") == "retry":
                 return "refine_query"
-            return "collect_more"
-        if missing_source_types:
             return "collect_more"
         if missing_questions:
             return "collect_more"
@@ -170,21 +153,15 @@ class CoverageReviewer:
     def _follow_up_task_specs(
         self,
         branch: ResearchBranch,
-        missing_source_types: list[str],
         missing_questions: list[str],
         evidence_review: EvidenceReviewResult,
     ) -> list[dict[str, Any]]:
         specs = []
-        target_source_types = (
-            branch.get("expected_source_types", [])
-            or self._dimension_policy(branch).get("expected_source_types", [])
-        )
         if evidence_review.get("required_action") == "retry":
             specs.append(
                 {
                     "objective": f"Retry {branch.get('dimension_name', branch.get('dimension_id', 'research'))} collection for {branch.get('competitor', 'the competitor')}",
                     "query": self._base_query(branch, "official source URL"),
-                    "target_source_types": target_source_types,
                     "generated_from_gap": "retry_source_quality",
                     "decision_action": "scope_refinement",
                     "decision_subtype": "query_refinement",
@@ -198,30 +175,12 @@ class CoverageReviewer:
             )
             return specs[:2]
 
-        for source_type in missing_source_types[:2]:
-            specs.append(
-                {
-                    "objective": f"Find {source_type} evidence for {branch.get('dimension_name', branch.get('dimension_id', 'research'))}",
-                    "query": self._query_for_source_type(branch, source_type),
-                    "target_source_types": [source_type],
-                    "generated_from_gap": f"missing_source_type:{source_type}",
-                    "decision_action": "source_discovery",
-                    "decision_subtype": "coverage_gap_search",
-                    "reason": f"Coverage review found no accepted {source_type} source.",
-                    "search_stage": "focused",
-                    "dimension_id": branch.get("dimension_id", ""),
-                    "dimension_name": branch.get("dimension_name", ""),
-                    "dimension_type": branch.get("dimension_type", ""),
-                    "parent_dimension_id": branch.get("parent_dimension_id", ""),
-                }
-            )
         if missing_questions:
             question = missing_questions[0]
             specs.append(
                 {
                     "objective": f"Answer uncovered guiding question: {question}",
                     "query": self._question_query(branch, question),
-                    "target_source_types": target_source_types,
                     "generated_from_gap": "missing_guiding_question",
                     "decision_action": "source_discovery",
                     "decision_subtype": "coverage_gap_search",
@@ -239,7 +198,6 @@ class CoverageReviewer:
         self,
         branch: ResearchBranch,
         evidence_review: EvidenceReviewResult,
-        missing_source_types: list[str],
         missing_questions: list[str],
         next_action: str,
         follow_up_specs: list[dict[str, Any]],
@@ -248,7 +206,6 @@ class CoverageReviewer:
         candidates = self._decision_candidates(
             branch=branch,
             evidence_review=evidence_review,
-            missing_source_types=missing_source_types,
             missing_questions=missing_questions,
             next_action=next_action,
             follow_up_specs=follow_up_specs,
@@ -283,7 +240,6 @@ class CoverageReviewer:
         self,
         branch: ResearchBranch,
         evidence_review: EvidenceReviewResult,
-        missing_source_types: list[str],
         missing_questions: list[str],
         next_action: str,
         follow_up_specs: list[dict[str, Any]],
@@ -293,7 +249,6 @@ class CoverageReviewer:
             self._entity_resolution_candidate(branch, evidence_review),
             self._query_refinement_candidate(evidence_review, follow_up_specs),
             self._source_discovery_candidate(
-                missing_source_types,
                 missing_questions,
                 follow_up_specs,
             ),
@@ -360,7 +315,6 @@ class CoverageReviewer:
 
     def _source_discovery_candidate(
         self,
-        missing_source_types: list[str],
         missing_questions: list[str],
         follow_up_specs: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -373,13 +327,6 @@ class CoverageReviewer:
             return self._candidate("source_discovery", "coverage_gap_search", 0.0, [], [])
         reasons = []
         score = 0.68
-        if missing_source_types:
-            score += min(0.16, 0.06 * len(missing_source_types))
-            reasons.append(
-                "Focused coverage is missing source types: "
-                + ", ".join(missing_source_types)
-                + "."
-            )
         if missing_questions:
             score += 0.08
             reasons.append("Focused coverage has unanswered guiding questions.")
@@ -472,11 +419,9 @@ class CoverageReviewer:
     def _confidence(
         self,
         accepted_count: int,
-        missing_source_types: list[str],
         missing_questions: list[str],
     ) -> float:
         score = 0.35 + min(0.4, 0.15 * accepted_count)
-        score -= 0.08 * len(missing_source_types)
         score -= 0.05 * len(missing_questions)
         return round(max(0.0, min(1.0, score)), 2)
 
@@ -491,7 +436,6 @@ class CoverageReviewer:
         dimension_id = self._normalize_dimension(branch.get("dimension_id", ""))
         policies: dict[str, dict[str, Any]] = {
             "strategic_positioning": {
-                "expected_source_types": ["official_site", "blog", "news"],
                 "guiding_questions": [
                     "What positioning does the competitor use on official pages?",
                     "Which market segment or buyer does the competitor emphasize?",
@@ -499,7 +443,6 @@ class CoverageReviewer:
                 "coverage_terms": ["positioning", "segment", "market", "buyer", "official"],
             },
             "target_users": {
-                "expected_source_types": ["review", "official_site", "marketplace"],
                 "guiding_questions": [
                     "Which users or customer segments appear in public sources?",
                     "What use cases or jobs-to-be-done are supported by reviews or customer proof?",
@@ -507,7 +450,6 @@ class CoverageReviewer:
                 "coverage_terms": ["user", "customer", "review", "segment", "use", "persona"],
             },
             "user_personas": {
-                "expected_source_types": ["review", "official_site", "marketplace"],
                 "guiding_questions": [
                     "Which users or customer segments appear in public sources?",
                     "What use cases or jobs-to-be-done are supported by reviews or customer proof?",
@@ -515,7 +457,6 @@ class CoverageReviewer:
                 "coverage_terms": ["user", "customer", "review", "segment", "use", "persona"],
             },
             "product_capabilities": {
-                "expected_source_types": ["official_site", "docs", "marketplace"],
                 "guiding_questions": [
                     "Which capabilities are stated on official product or documentation pages?",
                     "Which integrations or marketplace listings demonstrate capability breadth?",
@@ -523,7 +464,6 @@ class CoverageReviewer:
                 "coverage_terms": ["feature", "capability", "docs", "integration", "marketplace", "product"],
             },
             "feature_tree": {
-                "expected_source_types": ["official_site", "docs", "marketplace"],
                 "guiding_questions": [
                     "Which capabilities are stated on official product or documentation pages?",
                     "Which integrations or marketplace listings demonstrate capability breadth?",
@@ -531,7 +471,6 @@ class CoverageReviewer:
                 "coverage_terms": ["feature", "capability", "docs", "integration", "marketplace", "product"],
             },
             "pricing_business_model": {
-                "expected_source_types": ["pricing_page", "official_site", "docs"],
                 "guiding_questions": [
                     "What public pricing, packaging, plans, or billing units are available?",
                     "Is there evidence of free tier, enterprise sales, or monetization model?",
@@ -539,7 +478,6 @@ class CoverageReviewer:
                 "coverage_terms": ["pricing", "price", "plan", "billing", "package", "enterprise", "free"],
             },
             "pricing_model": {
-                "expected_source_types": ["pricing_page", "official_site", "docs"],
                 "guiding_questions": [
                     "What public pricing, packaging, plans, or billing units are available?",
                     "Is there evidence of free tier, enterprise sales, or monetization model?",
@@ -547,7 +485,6 @@ class CoverageReviewer:
                 "coverage_terms": ["pricing", "price", "plan", "billing", "package", "enterprise", "free"],
             },
             "market_growth": {
-                "expected_source_types": ["news", "blog", "official_site"],
                 "guiding_questions": [
                     "What dated public signals show growth, traction, customers, funding, or expansion?",
                     "Which regions, verticals, or market opportunities are publicly evidenced?",
@@ -555,7 +492,6 @@ class CoverageReviewer:
                 "coverage_terms": ["growth", "customer", "funding", "launch", "market", "region", "expansion"],
             },
             "distribution_channels": {
-                "expected_source_types": ["official_site", "marketplace", "docs"],
                 "guiding_questions": [
                     "Which channels, marketplaces, partner programs, or integrations distribute the product?",
                     "What evidence shows ecosystem or go-to-market distribution?",
@@ -563,7 +499,6 @@ class CoverageReviewer:
                 "coverage_terms": ["marketplace", "partner", "channel", "integration", "ecosystem", "distribution"],
             },
             "customer_proof": {
-                "expected_source_types": ["review", "official_site", "news"],
                 "guiding_questions": [
                     "What reviews, testimonials, case studies, or customer logos support customer proof?",
                     "Are customer proof sources independent or only official?",
@@ -571,7 +506,6 @@ class CoverageReviewer:
                 "coverage_terms": ["review", "customer", "case", "testimonial", "logo", "rating"],
             },
             "technology_integrations": {
-                "expected_source_types": ["docs", "marketplace", "official_site"],
                 "guiding_questions": [
                     "What docs, APIs, SDKs, integrations, or platform capabilities are public?",
                     "Which integration sources demonstrate technical maturity?",
@@ -579,7 +513,6 @@ class CoverageReviewer:
                 "coverage_terms": ["docs", "api", "sdk", "integration", "developer", "security", "platform"],
             },
             "compliance_risk": {
-                "expected_source_types": ["docs", "official_site", "news"],
                 "guiding_questions": [
                     "What trust, security, privacy, compliance, reliability, or risk evidence is public?",
                     "Are there public risk signals from news or policy documents?",
@@ -587,7 +520,6 @@ class CoverageReviewer:
                 "coverage_terms": ["security", "privacy", "compliance", "trust", "policy", "risk", "reliability"],
             },
             "competitive_moat": {
-                "expected_source_types": ["official_site", "review", "news"],
                 "guiding_questions": [
                     "What evidence supports differentiation, switching costs, ecosystem lock-in, or proprietary advantage?",
                     "What public sources show substitution risk or defensibility?",
@@ -598,7 +530,6 @@ class CoverageReviewer:
         return policies.get(
             dimension_id,
             {
-                "expected_source_types": ["official_site", "news", "other"],
                 "guiding_questions": [],
                 "coverage_terms": [],
             },

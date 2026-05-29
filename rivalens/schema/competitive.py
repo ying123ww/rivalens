@@ -122,7 +122,7 @@ class EvidenceCollectionTask(TypedDict, total=False):
     generated_from_gap: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
-    expected_source_types: list[str]
+    source_hints: list[str]
     topic: str
     expansion_reason: str
     competitor: str
@@ -203,7 +203,7 @@ class ResearchBranch(TypedDict, total=False):
     generated_from_gap: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
-    expected_source_types: list[str]
+    source_hints: list[str]
     minimum_coverage: list[str]
     guiding_questions: list[str]
     evidence_ids: list[str]
@@ -227,7 +227,7 @@ class ResearchBrief(TypedDict, total=False):
     dimension_name: str
     objective: str
     guiding_questions: list[str]
-    expected_source_types: list[str]
+    source_hints: list[str]
     minimum_coverage: list[str]
     effort_level: Literal["low", "medium", "high"]
     source_policy: str
@@ -247,7 +247,7 @@ class ResearchTask(TypedDict, total=False):
     objective: str
     query: str
     target_urls: list[str]
-    expected_source_types: list[str]
+    source_hints: list[str]
     generated_from_gap: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
@@ -305,7 +305,6 @@ class CoverageAssessment(TypedDict, total=False):
     accepted_evidence_ids: list[str]
     rejected_evidence_ids: list[str]
     found_source_types: list[str]
-    missing_source_types: list[str]
     covered_questions: list[str]
     missing_questions: list[str]
     contradictions: list[str]
@@ -471,7 +470,6 @@ class AnalysisDimension(TypedDict, total=False):
     priority: str
     guiding_questions: list[str]
     search_intent: str
-    expected_source_types: list[str]
     minimum_coverage: list[str]
     risk_level: str
     expected_claim_types: list[str]

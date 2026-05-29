@@ -348,7 +348,7 @@ class CollectionAgent:
                         "target_urls": [],
                         "search_stage": self._initial_search_stage_from_dimension(dimension),
                         "generated_from_gap": "",
-                        "expected_source_types": dimension.get("expected_source_types", []),
+                        "source_hints": dimension.get("source_hints", []),
                         "minimum_coverage": dimension.get("minimum_coverage", []),
                         "guiding_questions": dimension.get("guiding_questions", []),
                         "evidence_ids": [],
@@ -392,10 +392,7 @@ class CollectionAgent:
                     "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
                     "decision_action": task_spec.get("decision_action", "claim_verification"),
                     "decision_subtype": task_spec.get("decision_subtype", "evidence_check"),
-                    "expected_source_types": task_spec.get(
-                        "target_source_types",
-                        dimension.get("expected_source_types", []),
-                    ),
+                    "source_hints": dimension.get("source_hints", []),
                     "minimum_coverage": ["Direct public evidence for or against the target claim."],
                     "guiding_questions": [task_spec.get("objective", "Verify the target claim.")],
                     "evidence_ids": [],
@@ -420,7 +417,7 @@ class CollectionAgent:
             lookup[dimension_id] = {
                 "id": dimension_id,
                 "name": branch.get("dimension_name", dimension_id.replace("_", " ")),
-                "expected_source_types": branch.get("expected_source_types", []),
+                "source_hints": branch.get("source_hints", []),
             }
         active_schema = state.get("active_knowledge_schema", {})
         for dimension in self._schema_dimensions(active_schema):
@@ -449,7 +446,7 @@ class CollectionAgent:
                         f"for the {dimension_name} dimension."
                     ),
                     "guiding_questions": branch.get("guiding_questions", []),
-                    "expected_source_types": branch.get("expected_source_types", []),
+                    "source_hints": branch.get("source_hints", []),
                     "minimum_coverage": branch.get("minimum_coverage", []),
                     "effort_level": self._effort_level(branch),
                     "source_policy": (
@@ -490,7 +487,7 @@ class CollectionAgent:
             "objective": brief.get("objective", branch.get("topic", "")),
             "query": branch.get("query", ""),
             "target_urls": branch.get("target_urls", []),
-            "expected_source_types": branch.get("expected_source_types", []),
+            "source_hints": branch.get("source_hints", []),
             "generated_from_gap": generated_from_gap,
             "decision_action": branch.get("decision_action", ""),
             "decision_subtype": branch.get("decision_subtype", ""),
@@ -515,7 +512,7 @@ class CollectionAgent:
             "generated_from_gap": research_task.get("generated_from_gap", branch.get("generated_from_gap", "")),
             "decision_action": research_task.get("decision_action", branch.get("decision_action", "")),
             "decision_subtype": research_task.get("decision_subtype", branch.get("decision_subtype", "")),
-            "expected_source_types": research_task.get("expected_source_types", branch.get("expected_source_types", [])),
+            "source_hints": research_task.get("source_hints", branch.get("source_hints", [])),
             "topic": branch.get("topic", ""),
             "expansion_reason": branch.get("expansion_reason", ""),
             "competitor": branch.get("competitor", ""),
@@ -568,10 +565,7 @@ class CollectionAgent:
                     ),
                     "decision_action": follow_up_spec.get("decision_action", ""),
                     "decision_subtype": follow_up_spec.get("decision_subtype", ""),
-                    "expected_source_types": follow_up_spec.get(
-                        "target_source_types",
-                        parent.get("expected_source_types", []),
-                    ),
+                    "source_hints": parent.get("source_hints", []),
                     "minimum_coverage": parent.get("minimum_coverage", []),
                     "guiding_questions": parent.get("guiding_questions", []),
                     "evidence_ids": [],
@@ -621,10 +615,8 @@ class CollectionAgent:
                     "source_hints": self._ranked_source_hints(
                         extension.get("source_hints", []),
                     ),
-                    "expected_source_types": extension.get(
-                        "source_hints",
-                        ["official_site", "news", "other"],
-                    ),
+                    "guiding_questions": extension.get("guiding_questions", []),
+                    "search_intent": extension.get("search_intent", ""),
                     "minimum_coverage": ["At least two source-backed public evidence items."],
                     "risk_level": "medium",
                     "expected_claim_types": ["industry_specific_signal"],
@@ -660,7 +652,6 @@ class CollectionAgent:
             f"Focus definition: {dimension['description']}",
             self._guiding_questions_line(dimension),
             dimension.get("search_intent", ""),
-            self._expected_sources_line(dimension),
         ]
         source_hints = dimension.get("source_hints", [])
         if source_hints:
@@ -681,12 +672,6 @@ class CollectionAgent:
         if not guiding_questions:
             return ""
         return "Guiding questions: " + " | ".join(str(question) for question in guiding_questions)
-
-    def _expected_sources_line(self, dimension: dict[str, Any]) -> str:
-        expected_source_types = dimension.get("expected_source_types", [])
-        if not expected_source_types:
-            return ""
-        return "Expected source types: " + ", ".join(str(source) for source in expected_source_types)
 
     def _initial_search_stage_from_dimension(self, dimension: dict[str, Any]) -> str:
         return "focused"
