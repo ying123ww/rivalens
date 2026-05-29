@@ -23,9 +23,13 @@ Docker Compose provisions two persistence services:
 
 The application receives these endpoints through `DATABASE_URL` and `REDIS_URL`.
 PostgreSQL data is stored in the `rivalens-postgres-data` Docker volume, and
-Redis data is stored in `rivalens-redis-data`. No application tables are created
-yet; `backend/server/persistence.py` only centralizes endpoint configuration for
-future schema and repository wiring.
+Redis data is stored in `rivalens-redis-data`. `backend/server/persistence.py`
+defines the traceability tables for run scope, confirmed directions, collection
+DAG nodes, evidence, coverage and evidence review gates, structured knowledge,
+analysis claims, claim-support reviews, and compact Agent events. Automatic
+table creation is disabled by default; set `RIVALENS_AUTO_CREATE_TABLES=true`
+to enable SQLAlchemy `create_all()` on backend startup, or run the SQL scripts
+under `backend/server/sql_table_create` manually.
 
 ## Architecture
 

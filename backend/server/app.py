@@ -36,7 +36,7 @@ from rivalens.agents.industry_direction import IndustryDirectionSkill
 from rivalens.schema import IndustryDirectionPlanPayload
 
 from server.report_store import ReportStore
-from server.persistence import get_persistence_config, redact_url
+from server.persistence import get_persistence_config, initialize_database, redact_url
 
 # Database services are available through Docker, but no tables are created yet.
 
@@ -101,6 +101,17 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Frontend directory not found: {frontend_path}")
     
     persistence_config = get_persistence_config()
+    if persistence_config.auto_create_tables:
+        try:
+            initialize_database()
+            logger.info("Rivalens persistence tables are ready")
+        except Exception as exc:
+            logger.warning("Rivalens persistence initialization failed: %s", exc)
+    else:
+        logger.info(
+            "Rivalens automatic table creation is disabled; set "
+            "RIVALENS_AUTO_CREATE_TABLES=true to enable it."
+        )
     logger.info(
         "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
         redact_url(persistence_config.database_url),
