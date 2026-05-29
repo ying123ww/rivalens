@@ -24,28 +24,28 @@ def pricing_branch():
 
 
 class CollectionReviewTest(unittest.TestCase):
-    def test_collection_root_branches_use_confirmed_analysis_dimensions(self):
+    def test_collection_root_branches_use_planned_industry_extensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",
             competitors=[{"name": "Acme"}],
-            active_schema={"selected_industry": {"name": "Productivity SaaS"}},
-            analysis_dimensions=[
-                {
-                    "id": "strategic_positioning",
-                    "name": "战略定位",
-                    "description": "品牌定位和市场细分。",
-                    "guiding_questions": ["各竞品官方的产品定位是什么？"],
-                    "search_intent": "搜索战略定位公开证据。",
-                    "priority": "P0",
-                }
-            ],
+            active_schema={
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "direction_strategic_positioning",
+                        "name": "战略定位",
+                        "description": "品牌定位和市场细分。",
+                        "source_hints": ["official_site", "news"],
+                    }
+                ],
+            },
         )
 
         self.assertEqual(len(branches), 1)
-        self.assertEqual(branches[0]["dimension_id"], "strategic_positioning")
+        self.assertEqual(branches[0]["dimension_id"], "direction_strategic_positioning")
         self.assertEqual(branches[0]["dimension_name"], "战略定位")
-        self.assertIn("各竞品官方的产品定位是什么？", branches[0]["query"])
-        self.assertIn("搜索战略定位公开证据", branches[0]["query"])
+        self.assertIn("品牌定位和市场细分", branches[0]["query"])
+        self.assertIn("Expected source types: official_site, news", branches[0]["query"])
         self.assertEqual(branches[0]["search_stage"], "focused")
 
     def test_collection_generates_gap_driven_follow_up_tasks(self):
@@ -101,21 +101,15 @@ class CollectionReviewTest(unittest.TestCase):
             "active_knowledge_schema": {
                 "id": "schema_productivity",
                 "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "pricing_business_model",
+                        "name": "定价与商业模式",
+                        "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
+                        "source_hints": ["pricing_page", "official_site"],
+                    }
+                ],
             },
-            "analysis_dimensions": [
-                {
-                    "id": "pricing_business_model",
-                    "name": "定价与商业模式",
-                    "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
-                    "priority": "P0",
-                    "guiding_questions": ["公开定价和套餐结构是什么？"],
-                    "search_intent": "搜索官方定价证据。",
-                    "expected_source_types": ["pricing_page", "official_site"],
-                    "minimum_coverage": ["Official pricing source required."],
-                    "risk_level": "high",
-                    "expected_claim_types": ["pricing"],
-                }
-            ],
             "messages": [],
         }
 
@@ -175,27 +169,27 @@ class CollectionReviewTest(unittest.TestCase):
             )
         )
 
-    def test_collection_uses_focused_for_all_confirmed_dimensions(self):
+    def test_collection_uses_focused_for_all_planned_industry_extensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme",
             competitors=[{"name": "Acme"}],
-            active_schema={"selected_industry": {"name": "Productivity SaaS"}},
-            analysis_dimensions=[
-                {
-                    "id": "market_growth",
-                    "name": "市场增长",
-                    "description": "市场规模、增长速度、需求变化和商业机会。",
-                    "expected_source_types": ["official_site", "news"],
-                    "risk_level": "high",
-                },
-                {
-                    "id": "competitive_moat",
-                    "name": "竞争壁垒",
-                    "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
-                    "expected_source_types": ["official_site", "review"],
-                    "risk_level": "high",
-                },
-            ],
+            active_schema={
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "market_growth",
+                        "name": "市场增长",
+                        "description": "市场规模、增长速度、需求变化和商业机会。",
+                        "source_hints": ["official_site", "news"],
+                    },
+                    {
+                        "id": "competitive_moat",
+                        "name": "竞争壁垒",
+                        "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
+                        "source_hints": ["official_site", "review"],
+                    },
+                ],
+            },
         )
 
         self.assertEqual(
@@ -281,14 +275,16 @@ class CollectionReviewTest(unittest.TestCase):
                 "competitors": [{"name": "Acme"}],
                 "verbose": False,
             },
-            "analysis_dimensions": [
-                {
-                    "id": "pricing_business_model",
-                    "name": "定价与商业模式",
-                    "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
-                    "expected_source_types": ["pricing_page"],
-                }
-            ],
+            "active_knowledge_schema": {
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "pricing_business_model",
+                        "name": "定价与商业模式",
+                        "source_hints": ["pricing_page"],
+                    }
+                ],
+            },
             "verification_task_queue": [
                 {
                     "objective": "Verify claim: Acme enterprise pricing",

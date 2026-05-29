@@ -884,7 +884,6 @@ class CompetitorAnalysisState(TypedDict, total=False):
     claim_support_reviews: list[ClaimSupportReview]
     verification_task_queue: list[dict[str, Any]]
     verification_rounds: int
-    analysis_dimensions: list[AnalysisDimension]
     research_artifacts: list[ResearchArtifact]
     report: str
     published_artifacts: dict[str, str]

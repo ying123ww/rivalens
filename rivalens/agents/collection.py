@@ -75,7 +75,6 @@ class CollectionAgent:
                 query,
                 competitors,
                 active_schema,
-                state.get("analysis_dimensions", []),
             )
             root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
             if root_branch_limit_exceeded:
@@ -319,10 +318,9 @@ class CollectionAgent:
         query: str,
         competitors: list[Any],
         active_schema: dict[str, Any],
-        analysis_dimensions: list[dict[str, Any]] | None = None,
     ) -> list[ResearchBranch]:
         normalized_competitors = self._normalize_competitors(competitors)
-        dimensions = self._collection_dimensions(active_schema, analysis_dimensions or [])
+        dimensions = self._schema_dimensions(active_schema)
         branches = []
 
         for competitor in normalized_competitors:
@@ -355,11 +353,7 @@ class CollectionAgent:
                         "guiding_questions": dimension.get("guiding_questions", []),
                         "evidence_ids": [],
                         "status": "active",
-                        "expansion_reason": (
-                            "Root branch generated from confirmed analysis dimension."
-                            if dimension["type"] == "analysis_dimension"
-                            else "Root branch generated from active schema dimension."
-                        ),
+                        "expansion_reason": "Root branch generated from active schema industry extension.",
                     }
                 )
 
@@ -370,11 +364,7 @@ class CollectionAgent:
         verification_tasks: list[dict[str, Any]],
         state: CompetitorAnalysisState,
     ) -> list[ResearchBranch]:
-        dimensions_by_id = {
-            dimension.get("id", ""): dimension
-            for dimension in state.get("analysis_dimensions", [])
-            if dimension.get("id")
-        }
+        dimensions_by_id = self._dimension_lookup(state)
         branches: list[ResearchBranch] = []
         for index, task_spec in enumerate(verification_tasks, start=1):
             query = task_spec.get("query", "")
@@ -417,6 +407,27 @@ class CollectionAgent:
                 }
             )
         return branches
+
+    def _dimension_lookup(
+        self,
+        state: CompetitorAnalysisState,
+    ) -> dict[str, dict[str, Any]]:
+        lookup: dict[str, dict[str, Any]] = {}
+        for branch in state.get("research_branches", []):
+            dimension_id = branch.get("dimension_id", "")
+            if not dimension_id:
+                continue
+            lookup[dimension_id] = {
+                "id": dimension_id,
+                "name": branch.get("dimension_name", dimension_id.replace("_", " ")),
+                "expected_source_types": branch.get("expected_source_types", []),
+            }
+        active_schema = state.get("active_knowledge_schema", {})
+        for dimension in self._schema_dimensions(active_schema):
+            dimension_id = dimension.get("id", "")
+            if dimension_id and dimension_id not in lookup:
+                lookup[dimension_id] = dimension
+        return lookup
 
     def _build_research_briefs(
         self,
@@ -588,34 +599,6 @@ class CollectionAgent:
             normalized.append(name)
         return [name for name in normalized if name] or [""]
 
-    def _collection_dimensions(
-        self,
-        active_schema: dict[str, Any],
-        analysis_dimensions: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        if analysis_dimensions:
-            return [
-                {
-                    "id": dimension.get("id", ""),
-                    "name": dimension.get("name", dimension.get("id", "")),
-                    "type": "analysis_dimension",
-                    "description": dimension.get("description", ""),
-                    "guiding_questions": dimension.get("guiding_questions", []),
-                    "search_intent": dimension.get("search_intent", ""),
-                    "expected_source_types": dimension.get("expected_source_types", []),
-                    "minimum_coverage": dimension.get("minimum_coverage", []),
-                    "risk_level": dimension.get("risk_level", "medium"),
-                    "expected_claim_types": dimension.get("expected_claim_types", []),
-                    "priority": dimension.get("priority", "P1"),
-                    "source_hints": self._ranked_source_hints(
-                        dimension.get("source_hints", []),
-                    ),
-                }
-                for dimension in analysis_dimensions
-                if dimension.get("id")
-            ]
-        return self._schema_dimensions(active_schema)
-
     def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, Any]]:
         core_descriptions = {
             "feature_tree": (
@@ -632,25 +615,6 @@ class CollectionAgent:
             ),
         }
         dimensions = []
-
-        for field in active_schema.get("core_fields", []) or [
-            "feature_tree",
-            "pricing_model",
-            "user_personas",
-        ]:
-            dimensions.append(
-                {
-                    "id": field,
-                    "name": field.replace("_", " ").title(),
-                    "type": "core",
-                    "description": core_descriptions.get(field, field.replace("_", " ")),
-                    "source_hints": [],
-                    "expected_source_types": self._fallback_expected_source_types(field),
-                    "minimum_coverage": ["At least two source-backed public evidence items."],
-                    "risk_level": "medium",
-                    "expected_claim_types": ["evidence_backed_signal"],
-                }
-            )
 
         for extension in active_schema.get("industry_extensions", []):
             extension_id = extension.get("id", "")
@@ -680,6 +644,26 @@ class CollectionAgent:
                     "expected_claim_types": ["industry_specific_signal"],
                 }
             )
+
+        if not dimensions:
+            for field in active_schema.get("core_fields", []) or [
+                "feature_tree",
+                "pricing_model",
+                "user_personas",
+            ]:
+                dimensions.append(
+                    {
+                        "id": field,
+                        "name": field.replace("_", " ").title(),
+                        "type": "core",
+                        "description": core_descriptions.get(field, field.replace("_", " ")),
+                        "source_hints": [],
+                        "expected_source_types": self._fallback_expected_source_types(field),
+                        "minimum_coverage": ["At least two source-backed public evidence items."],
+                        "risk_level": "medium",
+                        "expected_claim_types": ["evidence_backed_signal"],
+                    }
+                )
 
         deduped: dict[str, dict[str, Any]] = {}
         for dimension in dimensions:
