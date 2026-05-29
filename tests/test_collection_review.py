@@ -539,6 +539,93 @@ class CollectionReviewTest(unittest.TestCase):
             "competitor_disambiguation",
         )
 
+    def test_coverage_review_uses_dimension_policy_when_planner_policy_is_absent(self):
+        branch = {
+            "id": "collect_acme_pricing_business_model",
+            "depth": 0,
+            "competitor": "Acme",
+            "dimension_id": "pricing_business_model",
+            "dimension_name": "定价与商业模式",
+            "topic": "定价与商业模式",
+            "expected_source_types": [],
+            "guiding_questions": [],
+        }
+        evidence = [
+            {
+                "id": "ev_1",
+                "collection_task_id": branch["id"],
+                "competitor": "Acme",
+                "dimension_id": "pricing_business_model",
+                "title": "Acme funding news",
+                "url": "https://news.example/acme-funding",
+                "source_type": "news",
+                "excerpt": "Acme announced new funding but did not discuss public pricing.",
+            }
+        ]
+        evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            branch,
+            evidence,
+        )
+
+        assessment = CoverageReviewer().review(
+            branch=branch,
+            evidence_items=evidence,
+            evidence_review=evidence_review,
+        )
+
+        self.assertIn("pricing_page", assessment["missing_source_types"])
+        self.assertIn("official_site", assessment["missing_source_types"])
+        self.assertTrue(
+            any(
+                spec["generated_from_gap"] == "missing_source_type:pricing_page"
+                and spec["target_source_types"] == ["pricing_page"]
+                for spec in assessment["follow_up_task_specs"]
+            )
+        )
+
+    def test_coverage_review_generates_guiding_question_follow_up(self):
+        branch = {
+            "id": "collect_acme_customer_proof",
+            "depth": 0,
+            "competitor": "Acme",
+            "dimension_id": "customer_proof",
+            "dimension_name": "客户证明",
+            "topic": "客户证明",
+            "expected_source_types": ["official_site"],
+            "guiding_questions": ["What reviews mention onboarding pain?"],
+        }
+        evidence = [
+            {
+                "id": "ev_1",
+                "collection_task_id": branch["id"],
+                "competitor": "Acme",
+                "dimension_id": "customer_proof",
+                "title": "Acme customers",
+                "url": "https://acme.example/customers",
+                "source_type": "official_site",
+                "excerpt": "Acme lists customer logos and enterprise adoption.",
+            }
+        ]
+        evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            branch,
+            evidence,
+        )
+
+        assessment = CoverageReviewer().review(
+            branch=branch,
+            evidence_items=evidence,
+            evidence_review=evidence_review,
+        )
+
+        self.assertIn("What reviews mention onboarding pain?", assessment["missing_questions"])
+        self.assertTrue(
+            any(
+                spec["generated_from_gap"] == "missing_guiding_question"
+                and "Guiding question to answer" in spec["query"]
+                for spec in assessment["follow_up_task_specs"]
+            )
+        )
+
     def test_knowledge_structuring_uses_only_accepted_evidence(self):
         state = {
             "active_knowledge_schema": {"id": "schema_1"},

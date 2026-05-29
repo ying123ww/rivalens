@@ -1,5 +1,6 @@
 """Coverage review for collection-stage research tasks."""
 
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,17 +25,24 @@ class CoverageReviewer:
             if item.get("id", "") in accepted_ids
         ]
         found_source_types = self._found_source_types(branch, accepted_evidence)
-        expected_source_types = branch.get("expected_source_types", []) or []
+        dimension_policy = self._dimension_policy(branch)
+        expected_source_types = (
+            branch.get("expected_source_types", [])
+            or dimension_policy.get("expected_source_types", [])
+        )
         missing_source_types = [
             source_type
             for source_type in expected_source_types
             if source_type not in found_source_types
         ]
-        guiding_questions = branch.get("guiding_questions", []) or []
+        guiding_questions = (
+            branch.get("guiding_questions", [])
+            or dimension_policy.get("guiding_questions", [])
+        )
         covered_questions, missing_questions = self._question_coverage(
             guiding_questions,
             accepted_evidence,
-            missing_source_types,
+            dimension_policy,
         )
         next_action = self._next_action(
             accepted_count=len(accepted_evidence),
@@ -121,15 +129,26 @@ class CoverageReviewer:
         self,
         guiding_questions: list[str],
         accepted_evidence: list[dict[str, Any]],
-        missing_source_types: list[str],
+        dimension_policy: dict[str, Any],
     ) -> tuple[list[str], list[str]]:
         if not guiding_questions:
             return [], []
         if not accepted_evidence:
             return [], guiding_questions[:3]
-        if missing_source_types:
-            return guiding_questions[:1], guiding_questions[1:3]
-        return guiding_questions, []
+        corpus = self._evidence_corpus(accepted_evidence)
+        covered = []
+        missing = []
+        policy_terms = set(dimension_policy.get("coverage_terms", []))
+        for question in guiding_questions:
+            question_terms = self._question_terms(question)
+            if not question_terms:
+                question_terms = policy_terms
+            overlap = [term for term in question_terms if term in corpus]
+            if overlap or self._source_type_answers_question(question, accepted_evidence):
+                covered.append(question)
+            else:
+                missing.append(question)
+        return covered, missing[:3]
 
     def _next_action(
         self,
@@ -156,17 +175,25 @@ class CoverageReviewer:
         evidence_review: EvidenceReviewResult,
     ) -> list[dict[str, Any]]:
         specs = []
+        target_source_types = (
+            branch.get("expected_source_types", [])
+            or self._dimension_policy(branch).get("expected_source_types", [])
+        )
         if evidence_review.get("required_action") == "retry":
             specs.append(
                 {
                     "objective": f"Retry {branch.get('dimension_name', branch.get('dimension_id', 'research'))} collection for {branch.get('competitor', 'the competitor')}",
                     "query": self._base_query(branch, "official source URL"),
-                    "target_source_types": branch.get("expected_source_types", []),
+                    "target_source_types": target_source_types,
                     "generated_from_gap": "retry_source_quality",
                     "decision_action": "scope_refinement",
                     "decision_subtype": "query_refinement",
                     "reason": "Source-level review rejected all usable evidence.",
                     "search_stage": "focused",
+                    "dimension_id": branch.get("dimension_id", ""),
+                    "dimension_name": branch.get("dimension_name", ""),
+                    "dimension_type": branch.get("dimension_type", ""),
+                    "parent_dimension_id": branch.get("parent_dimension_id", ""),
                 }
             )
             return specs[:2]
@@ -182,23 +209,31 @@ class CoverageReviewer:
                     "decision_subtype": "coverage_gap_search",
                     "reason": f"Coverage review found no accepted {source_type} source.",
                     "search_stage": "focused",
+                    "dimension_id": branch.get("dimension_id", ""),
+                    "dimension_name": branch.get("dimension_name", ""),
+                    "dimension_type": branch.get("dimension_type", ""),
+                    "parent_dimension_id": branch.get("parent_dimension_id", ""),
                 }
             )
-        if not specs and missing_questions:
+        if missing_questions:
             question = missing_questions[0]
             specs.append(
                 {
                     "objective": f"Answer uncovered guiding question: {question}",
-                    "query": self._base_query(branch, question),
-                    "target_source_types": branch.get("expected_source_types", []),
+                    "query": self._question_query(branch, question),
+                    "target_source_types": target_source_types,
                     "generated_from_gap": "missing_guiding_question",
                     "decision_action": "source_discovery",
                     "decision_subtype": "coverage_gap_search",
                     "reason": "Coverage review found an unanswered guiding question.",
                     "search_stage": "focused",
+                    "dimension_id": branch.get("dimension_id", ""),
+                    "dimension_name": branch.get("dimension_name", ""),
+                    "dimension_type": branch.get("dimension_type", ""),
+                    "parent_dimension_id": branch.get("parent_dimension_id", ""),
                 }
             )
-        return specs[:2]
+        return specs[:3]
 
     def _routing_from_review(
         self,
@@ -415,6 +450,15 @@ class CoverageReviewer:
         }
         return self._base_query(branch, source_terms.get(source_type, source_type.replace("_", " ")))
 
+    def _question_query(self, branch: ResearchBranch, question: str) -> str:
+        return "\n".join(
+            [
+                self._base_query(branch, question),
+                f"Guiding question to answer: {question}",
+                "Return evidence that directly answers this question, not general company background.",
+            ]
+        )
+
     def _base_query(self, branch: ResearchBranch, focus: str) -> str:
         return "\n".join(
             [
@@ -442,3 +486,171 @@ class CoverageReviewer:
         hostname = urlparse(url).netloc.lower()
         tokens = [token for token in competitor.lower().replace("-", " ").split() if token]
         return any(token in hostname for token in tokens)
+
+    def _dimension_policy(self, branch: ResearchBranch) -> dict[str, Any]:
+        dimension_id = self._normalize_dimension(branch.get("dimension_id", ""))
+        policies: dict[str, dict[str, Any]] = {
+            "strategic_positioning": {
+                "expected_source_types": ["official_site", "blog", "news"],
+                "guiding_questions": [
+                    "What positioning does the competitor use on official pages?",
+                    "Which market segment or buyer does the competitor emphasize?",
+                ],
+                "coverage_terms": ["positioning", "segment", "market", "buyer", "official"],
+            },
+            "target_users": {
+                "expected_source_types": ["review", "official_site", "marketplace"],
+                "guiding_questions": [
+                    "Which users or customer segments appear in public sources?",
+                    "What use cases or jobs-to-be-done are supported by reviews or customer proof?",
+                ],
+                "coverage_terms": ["user", "customer", "review", "segment", "use", "persona"],
+            },
+            "user_personas": {
+                "expected_source_types": ["review", "official_site", "marketplace"],
+                "guiding_questions": [
+                    "Which users or customer segments appear in public sources?",
+                    "What use cases or jobs-to-be-done are supported by reviews or customer proof?",
+                ],
+                "coverage_terms": ["user", "customer", "review", "segment", "use", "persona"],
+            },
+            "product_capabilities": {
+                "expected_source_types": ["official_site", "docs", "marketplace"],
+                "guiding_questions": [
+                    "Which capabilities are stated on official product or documentation pages?",
+                    "Which integrations or marketplace listings demonstrate capability breadth?",
+                ],
+                "coverage_terms": ["feature", "capability", "docs", "integration", "marketplace", "product"],
+            },
+            "feature_tree": {
+                "expected_source_types": ["official_site", "docs", "marketplace"],
+                "guiding_questions": [
+                    "Which capabilities are stated on official product or documentation pages?",
+                    "Which integrations or marketplace listings demonstrate capability breadth?",
+                ],
+                "coverage_terms": ["feature", "capability", "docs", "integration", "marketplace", "product"],
+            },
+            "pricing_business_model": {
+                "expected_source_types": ["pricing_page", "official_site", "docs"],
+                "guiding_questions": [
+                    "What public pricing, packaging, plans, or billing units are available?",
+                    "Is there evidence of free tier, enterprise sales, or monetization model?",
+                ],
+                "coverage_terms": ["pricing", "price", "plan", "billing", "package", "enterprise", "free"],
+            },
+            "pricing_model": {
+                "expected_source_types": ["pricing_page", "official_site", "docs"],
+                "guiding_questions": [
+                    "What public pricing, packaging, plans, or billing units are available?",
+                    "Is there evidence of free tier, enterprise sales, or monetization model?",
+                ],
+                "coverage_terms": ["pricing", "price", "plan", "billing", "package", "enterprise", "free"],
+            },
+            "market_growth": {
+                "expected_source_types": ["news", "blog", "official_site"],
+                "guiding_questions": [
+                    "What dated public signals show growth, traction, customers, funding, or expansion?",
+                    "Which regions, verticals, or market opportunities are publicly evidenced?",
+                ],
+                "coverage_terms": ["growth", "customer", "funding", "launch", "market", "region", "expansion"],
+            },
+            "distribution_channels": {
+                "expected_source_types": ["official_site", "marketplace", "docs"],
+                "guiding_questions": [
+                    "Which channels, marketplaces, partner programs, or integrations distribute the product?",
+                    "What evidence shows ecosystem or go-to-market distribution?",
+                ],
+                "coverage_terms": ["marketplace", "partner", "channel", "integration", "ecosystem", "distribution"],
+            },
+            "customer_proof": {
+                "expected_source_types": ["review", "official_site", "news"],
+                "guiding_questions": [
+                    "What reviews, testimonials, case studies, or customer logos support customer proof?",
+                    "Are customer proof sources independent or only official?",
+                ],
+                "coverage_terms": ["review", "customer", "case", "testimonial", "logo", "rating"],
+            },
+            "technology_integrations": {
+                "expected_source_types": ["docs", "marketplace", "official_site"],
+                "guiding_questions": [
+                    "What docs, APIs, SDKs, integrations, or platform capabilities are public?",
+                    "Which integration sources demonstrate technical maturity?",
+                ],
+                "coverage_terms": ["docs", "api", "sdk", "integration", "developer", "security", "platform"],
+            },
+            "compliance_risk": {
+                "expected_source_types": ["docs", "official_site", "news"],
+                "guiding_questions": [
+                    "What trust, security, privacy, compliance, reliability, or risk evidence is public?",
+                    "Are there public risk signals from news or policy documents?",
+                ],
+                "coverage_terms": ["security", "privacy", "compliance", "trust", "policy", "risk", "reliability"],
+            },
+            "competitive_moat": {
+                "expected_source_types": ["official_site", "review", "news"],
+                "guiding_questions": [
+                    "What evidence supports differentiation, switching costs, ecosystem lock-in, or proprietary advantage?",
+                    "What public sources show substitution risk or defensibility?",
+                ],
+                "coverage_terms": ["differentiation", "switching", "ecosystem", "advantage", "moat", "risk", "defensible"],
+            },
+        }
+        return policies.get(
+            dimension_id,
+            {
+                "expected_source_types": ["official_site", "news", "other"],
+                "guiding_questions": [],
+                "coverage_terms": [],
+            },
+        )
+
+    def _evidence_corpus(self, evidence_items: list[dict[str, Any]]) -> set[str]:
+        text = " ".join(
+            str(item.get(field, ""))
+            for item in evidence_items
+            for field in ("title", "excerpt", "summary", "url", "source_type")
+        )
+        return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+    def _question_terms(self, question: str) -> set[str]:
+        stopwords = {
+            "and",
+            "are",
+            "does",
+            "from",
+            "how",
+            "is",
+            "of",
+            "or",
+            "the",
+            "there",
+            "to",
+            "what",
+            "which",
+            "with",
+        }
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", question.lower())
+            if len(token) > 2 and token not in stopwords
+        }
+
+    def _source_type_answers_question(
+        self,
+        question: str,
+        accepted_evidence: list[dict[str, Any]],
+    ) -> bool:
+        normalized_question = question.lower()
+        source_types = {item.get("source_type", "other") for item in accepted_evidence}
+        if any(term in normalized_question for term in ["pricing", "price", "billing"]):
+            return "pricing_page" in source_types
+        if any(term in normalized_question for term in ["review", "customer", "testimonial"]):
+            return "review" in source_types or "news" in source_types
+        if any(term in normalized_question for term in ["docs", "api", "security", "compliance"]):
+            return "docs" in source_types
+        if any(term in normalized_question for term in ["marketplace", "integration"]):
+            return "marketplace" in source_types or "docs" in source_types
+        return False
+
+    def _normalize_dimension(self, value: str) -> str:
+        return str(value or "").strip().lower().replace("-", "_")
