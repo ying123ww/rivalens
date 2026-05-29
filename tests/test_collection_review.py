@@ -48,6 +48,19 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Expected source types: official_site, news", branches[0]["query"])
         self.assertEqual(branches[0]["search_stage"], "focused")
 
+    def test_collection_does_not_fallback_to_core_fields(self):
+        branches = CollectionAgent()._build_root_branches(
+            query="Compare Acme and Beta",
+            competitors=[{"name": "Acme"}],
+            active_schema={
+                "selected_industry": {"name": "Productivity SaaS"},
+                "core_fields": ["feature_tree", "pricing_model", "user_personas"],
+                "industry_extensions": [],
+            },
+        )
+
+        self.assertEqual(branches, [])
+
     def test_collection_generates_gap_driven_follow_up_tasks(self):
         class FakeEvidenceCollector:
             async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):

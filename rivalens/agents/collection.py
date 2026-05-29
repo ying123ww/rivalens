@@ -600,20 +600,6 @@ class CollectionAgent:
         return [name for name in normalized if name] or [""]
 
     def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, Any]]:
-        core_descriptions = {
-            "feature_tree": (
-                "product capabilities, feature availability, feature maturity, "
-                "and product packaging"
-            ),
-            "pricing_model": (
-                "pricing pages, plans, billing units, packaging, enterprise "
-                "pricing, and free tiers"
-            ),
-            "user_personas": (
-                "target users, buyer personas, use cases, jobs to be done, "
-                "and customer segments"
-            ),
-        }
         dimensions = []
 
         for extension in active_schema.get("industry_extensions", []):
@@ -644,26 +630,6 @@ class CollectionAgent:
                     "expected_claim_types": ["industry_specific_signal"],
                 }
             )
-
-        if not dimensions:
-            for field in active_schema.get("core_fields", []) or [
-                "feature_tree",
-                "pricing_model",
-                "user_personas",
-            ]:
-                dimensions.append(
-                    {
-                        "id": field,
-                        "name": field.replace("_", " ").title(),
-                        "type": "core",
-                        "description": core_descriptions.get(field, field.replace("_", " ")),
-                        "source_hints": [],
-                        "expected_source_types": self._fallback_expected_source_types(field),
-                        "minimum_coverage": ["At least two source-backed public evidence items."],
-                        "risk_level": "medium",
-                        "expected_claim_types": ["evidence_backed_signal"],
-                    }
-                )
 
         deduped: dict[str, dict[str, Any]] = {}
         for dimension in dimensions:
@@ -739,13 +705,6 @@ class CollectionAgent:
         if branch.get("dimension_id") in {"market_growth", "customer_proof"}:
             return "medium"
         return "low"
-
-    def _fallback_expected_source_types(self, field: str) -> list[str]:
-        if field == "pricing_model":
-            return ["pricing_page", "official_site", "docs"]
-        if field == "user_personas":
-            return ["review", "official_site", "marketplace"]
-        return ["official_site", "docs", "other"]
 
     def _ranked_source_hints(self, source_hints: list[str]) -> list[str]:
         return sorted(
