@@ -53,7 +53,7 @@ export interface AnalysisDirection {
   search_focus: string;
   source_hints: string[];
   required: boolean;
-  origin: "industry_template" | "user_requested";
+  origin: "industry_template" | "planner_suggested" | "user_requested";
 }
 
 export interface IndustryDirectionPlan {
@@ -63,6 +63,7 @@ export interface IndustryDirectionPlan {
   candidate_industries: IndustryCandidate[];
   suggested_directions?: AnalysisDirection[];
   default_directions: AnalysisDirection[];
+  planner_added_directions?: AnalysisDirection[];
   user_added_directions: AnalysisDirection[];
   final_directions: AnalysisDirection[];
   final_analysis_plan: Record<string, any>;

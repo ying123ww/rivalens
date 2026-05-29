@@ -940,9 +940,11 @@ function IndustryDirectionDialog({
   onConfirm,
   onCancel,
 }: IndustryDirectionDialogProps) {
-  const directions = plan.suggested_directions?.length
+  const baseDirections = plan.suggested_directions?.length
     ? plan.suggested_directions
     : plan.default_directions;
+  const plannerAddedDirections = plan.planner_added_directions || [];
+  const directions = [...baseDirections, ...plannerAddedDirections];
   const [isEditingDirections, setIsEditingDirections] = useState(false);
   const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>(
     directions.map((direction) => direction.direction_id)
@@ -970,6 +972,63 @@ function IndustryDirectionDialog({
     );
   };
 
+  const renderDirectionCards = (
+    items: AnalysisDirection[],
+    title: string,
+    description?: string
+  ) => (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-100">{title}</h3>
+        {description && (
+          <p className="mt-1 text-xs leading-5 text-gray-400">{description}</p>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {items.map((direction: AnalysisDirection) => (
+          <div
+            key={direction.direction_id}
+            className="rounded-md border border-gray-800 bg-gray-950/40 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <label className="flex min-w-0 items-start gap-2">
+                {isEditingDirections && (
+                  <input
+                    type="checkbox"
+                    checked={selectedDirectionIds.includes(
+                      direction.direction_id
+                    )}
+                    disabled={direction.required}
+                    onChange={() =>
+                      toggleDirection(direction.direction_id)
+                    }
+                    className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-950 text-teal-500 disabled:opacity-50"
+                  />
+                )}
+                <span className="text-sm font-semibold text-gray-100">
+                  {direction.name}
+                </span>
+              </label>
+              <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
+                {direction.direction_id}
+              </span>
+              <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
+                {direction.origin === "planner_suggested"
+                  ? "Planner补充"
+                  : direction.required
+                    ? "必选"
+                    : "可选"}
+              </span>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-gray-300">
+              {direction.reason || direction.description}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/80 px-4 py-6 backdrop-blur-sm">
       <div className="w-full max-w-3xl rounded-lg border border-gray-700 bg-gray-900 shadow-2xl shadow-black/40">
@@ -992,45 +1051,15 @@ function IndustryDirectionDialog({
           </div>
         </div>
 
-        <div className="max-h-[64vh] overflow-y-auto px-5 py-4 sm:px-6">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {directions.map((direction: AnalysisDirection) => (
-              <div
-                key={direction.direction_id}
-                className="rounded-md border border-gray-800 bg-gray-950/40 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <label className="flex min-w-0 items-start gap-2">
-                    {isEditingDirections && (
-                      <input
-                        type="checkbox"
-                        checked={selectedDirectionIds.includes(
-                          direction.direction_id
-                        )}
-                        disabled={direction.required}
-                        onChange={() =>
-                          toggleDirection(direction.direction_id)
-                        }
-                        className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-950 text-teal-500 disabled:opacity-50"
-                      />
-                    )}
-                    <span className="text-sm font-semibold text-gray-100">
-                      {direction.name}
-                    </span>
-                  </label>
-                  <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
-                    {direction.direction_id}
-                  </span>
-                  <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
-                    {direction.required ? "必选" : "可选"}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm leading-6 text-gray-300">
-                  {direction.reason || direction.description}
-                </p>
-              </div>
-            ))}
-          </div>
+        <div className="max-h-[64vh] space-y-5 overflow-y-auto px-5 py-4 sm:px-6">
+          {renderDirectionCards(baseDirections, "行业原有方向")}
+
+          {plannerAddedDirections.length > 0 &&
+            renderDirectionCards(
+              plannerAddedDirections,
+              "PlanningAgent 补充方向",
+              "基于十个通用大方向对行业必备方向做覆盖检查，仅作为本次任务的补充建议。"
+            )}
 
           {showCustomDirections && (
             <label className="mt-4 block">

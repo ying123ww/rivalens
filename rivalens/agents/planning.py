@@ -111,6 +111,12 @@ class PlanningAgent:
                         "default_direction_count": len(
                             industry_direction_plan.get("default_directions", []),
                         ),
+                        "planner_added_direction_count": len(
+                            industry_direction_plan.get(
+                                "planner_added_directions",
+                                [],
+                            ),
+                        ),
                         "user_added_direction_count": len(
                             industry_direction_plan.get("user_added_directions", []),
                         ),

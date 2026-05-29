@@ -348,7 +348,7 @@ class AnalysisDirection(TypedDict, total=False):
     search_focus: str
     source_hints: list[str]
     required: bool
-    origin: Literal["industry_template", "user_requested"]
+    origin: Literal["industry_template", "planner_suggested", "user_requested"]
 
 
 class IndustryDirectionPlan(TypedDict, total=False):
@@ -358,6 +358,7 @@ class IndustryDirectionPlan(TypedDict, total=False):
     candidate_industries: list[IndustryCandidate]
     suggested_directions: list[AnalysisDirection]
     default_directions: list[AnalysisDirection]
+    planner_added_directions: list[AnalysisDirection]
     user_added_directions: list[AnalysisDirection]
     final_directions: list[AnalysisDirection]
     final_analysis_plan: dict[str, Any]
@@ -544,7 +545,7 @@ class AnalysisDirectionPayload(StrictPayloadModel):
     search_focus: str = ""
     source_hints: list[str] = Field(default_factory=list)
     required: bool = True
-    origin: Literal["industry_template", "user_requested"]
+    origin: Literal["industry_template", "planner_suggested", "user_requested"]
 
 
 class IndustryDirectionPlanPayload(StrictPayloadModel):
@@ -554,6 +555,9 @@ class IndustryDirectionPlanPayload(StrictPayloadModel):
     candidate_industries: list[IndustryCandidatePayload] = Field(default_factory=list)
     suggested_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     default_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
+    planner_added_directions: list[AnalysisDirectionPayload] = Field(
+        default_factory=list,
+    )
     user_added_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     final_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     final_analysis_plan: dict[str, Any] = Field(default_factory=dict)

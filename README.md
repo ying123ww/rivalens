@@ -97,10 +97,12 @@ flowchart LR
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
 inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
-builds a fixed 10-dimension competitor-analysis plan for user review, then
-emits one `schema_selection` handoff to `source_collection`. The dimension plan
-is stored in `CompetitorAnalysisState.analysis_dimensions` and mirrored as a
-planning artifact named `dimension_confirmation`, so the search scope can be
+keeps the industry template directions separate from PlanningAgent supplement
+directions, then emits one `schema_selection` handoff to `source_collection`.
+The planner uses the ten general product-analysis directions only as a coverage
+check for missing task-level `planner_added_directions`; they are not written
+back as original industry defaults. The confirmed direction plan is stored in
+`CompetitorAnalysisState.industry_direction_plan`, so the search scope can be
 reviewed before evidence collection. `source_collection` expands the confirmed
 analysis dimensions into competitor-by-dimension collection tasks and runs them
 concurrently through

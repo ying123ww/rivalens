@@ -237,6 +237,50 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             ["pricing_page", "official_site", "review", "news"],
         )
 
+    def test_planner_additions_do_not_change_industry_default_directions(self):
+        plan = IndustryDirectionSkill().build_plan(
+            query="对比 Notion 和飞书的 SaaS 协作能力",
+            competitors=[{"name": "Notion"}, {"name": "飞书"}],
+        )
+        default_ids = [
+            direction["direction_id"] for direction in plan["default_directions"]
+        ]
+        planner_added_ids = [
+            direction["direction_id"]
+            for direction in plan["planner_added_directions"]
+        ]
+
+        self.assertEqual(
+            default_ids,
+            [
+                "pricing_packaging",
+                "collaboration_workflows",
+                "integrations_ecosystem",
+                "ai_assistance",
+                "security_admin_controls",
+                "reliability_status_sla",
+                "templates_use_cases",
+                "user_sentiment_reviews",
+                "mobile_offline_experience",
+                "data_portability_migration",
+            ],
+        )
+        self.assertIn("strategic_positioning", planner_added_ids)
+        self.assertTrue(set(default_ids).isdisjoint(planner_added_ids))
+        self.assertTrue(
+            all(
+                direction["origin"] == "planner_suggested"
+                for direction in plan["planner_added_directions"]
+            )
+        )
+        self.assertEqual(
+            [
+                direction["direction_id"]
+                for direction in plan["suggested_directions"]
+            ],
+            default_ids,
+        )
+
     def test_identifies_ai_tools_and_merges_user_directions(self):
         plan = IndustryDirectionSkill().build_plan(
             query="对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品竞争格局",
@@ -282,6 +326,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             plan["final_analysis_plan"]["direction_count"],
             len(plan["final_directions"]),
         )
+        self.assertIn("planner_added_directions", plan["final_analysis_plan"])
 
     def test_can_remove_optional_default_directions_before_collection(self):
         plan = IndustryDirectionSkill().build_plan(
@@ -305,6 +350,10 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         )
         self.assertNotIn(
             "templates_use_cases",
+            plan["final_analysis_plan"]["final_directions"],
+        )
+        self.assertNotIn(
+            "strategic_positioning",
             plan["final_analysis_plan"]["final_directions"],
         )
 
