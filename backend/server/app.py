@@ -522,14 +522,3 @@ async def research_report_chat(research_id: str, request: Request):
         logger.error(f"Error in research report chat: {str(e)}", exc_info=True)
         return {"error": str(e)}
 
-@app.put("/api/reports/{research_id}")
-async def update_report(research_id: str, request: Request):
-    """Update a specific research report by ID - no database configured."""
-    logger.debug(f"Update requested for report {research_id} - no database configured, not persisted")
-    return {"success": True, "id": research_id}
-
-@app.delete("/api/reports/{research_id}")
-async def delete_report(research_id: str):
-    """Delete a specific research report by ID - no database configured."""
-    logger.debug(f"Delete requested for report {research_id} - no database configured, nothing to delete")
-    return {"success": True, "id": research_id}
