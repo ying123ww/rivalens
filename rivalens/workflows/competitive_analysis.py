@@ -86,7 +86,6 @@ async def run_competitive_analysis_task(
         "competitors": kwargs.get("competitors", []),
         "files": kwargs.get("files", kwargs.get("file_paths", [])),
         "attachments": kwargs.get("attachments", []),
-        "deep_research": kwargs.get("deep_research", False),
         "verbose": kwargs.get("verbose", True),
     }
     graph = build_competitive_analysis_graph(websocket, stream_output, tone, headers).compile()

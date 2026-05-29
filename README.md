@@ -57,7 +57,7 @@ flowchart TB
     Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
     ClaimSupport --> VerificationQueue["verification_task_queue\nclaim-driven follow-up"]
     VerificationQueue --> Collector
-    EvidenceCollector --> Modes["ResearchMode\nstandard/deep evidence"]
+    EvidenceCollector --> Modes["ResearchMode\nsource discovery / standard evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
 
@@ -157,16 +157,18 @@ CollectionAgent
   -> ResearchBranch frontier
   -> ResearchBrief / ResearchTask queue
   -> landscape / focused / verification search_stage control
-  -> ResearchEngineEvidenceCollector (standard evidence)
+  -> ResearchEngineEvidenceCollector (explicit ResearchMode)
   -> ResearchEngine
   -> EvidenceItem[]
   -> EvidenceQualityReviewer (source-level accepted/rejected evidence)
   -> CoverageReviewer (coverage gaps and follow-up task specs)
 ```
 
-The collection path uses standard evidence collection for each branch. Deep
-research recursion is not used as a black box inside `ResearchEngine`; instead,
-Rivalens keeps branch lineage, research briefs, research tasks, evidence
+The collection path uses explicit research modes for each branch. Landscape
+tasks use source discovery; focused and verification tasks use standard
+evidence collection. Deep research recursion is not used as a black box inside
+`ResearchEngine`; instead, Rivalens keeps branch lineage, research briefs,
+research tasks, evidence
 reviews, coverage assessments, depth, and budget in
 `CompetitorAnalysisState.research_branches`,
 `CompetitorAnalysisState.research_briefs`,

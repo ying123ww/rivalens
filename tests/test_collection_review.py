@@ -77,7 +77,7 @@ class CollectionReviewTest(unittest.TestCase):
 
     def test_collection_generates_gap_driven_follow_up_tasks(self):
         class FakeEvidenceCollector:
-            async def collect(self, collection_task, deep=False, verbose=True, source_urls=None):
+            async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 gap = collection_task.get("generated_from_gap", "")
                 if "pricing_page" in gap:
                     source = {
@@ -190,11 +190,11 @@ class CollectionReviewTest(unittest.TestCase):
         seen_calls = []
 
         class FakeLandscapeCollector:
-            async def collect(self, collection_task, deep=False, verbose=True, source_urls=None):
+            async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 seen_calls.append(
                     {
                         "task": dict(collection_task),
-                        "deep": deep,
+                        "mode": getattr(mode, "value", mode),
                         "source_urls": source_urls or [],
                     }
                 )
@@ -279,15 +279,22 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertTrue(
             any(
                 call["task"].get("search_stage") == "focused"
-                and not call["deep"]
+                and call["mode"] == "standard_evidence"
                 and call["source_urls"] == ["https://acme.example/product"]
+                for call in seen_calls
+            )
+        )
+        self.assertTrue(
+            any(
+                call["task"].get("search_stage") == "landscape"
+                and call["mode"] == "source_discovery"
                 for call in seen_calls
             )
         )
 
     def test_landscape_budget_stop_is_recorded_when_depth_budget_blocks_follow_up(self):
         class FakeLandscapeCollector:
-            async def collect(self, collection_task, deep=False, verbose=True, source_urls=None):
+            async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 return {
                     "task": dict(collection_task),
                     "mode": "standard_evidence",
@@ -414,7 +421,7 @@ class CollectionReviewTest(unittest.TestCase):
 
     def test_landscape_dimension_split_creates_child_dimension_tasks(self):
         class FakeSplitCollector:
-            async def collect(self, collection_task, deep=False, verbose=True, source_urls=None):
+            async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 sources = []
                 if collection_task.get("search_stage") == "landscape":
                     sources = [
@@ -527,11 +534,11 @@ class CollectionReviewTest(unittest.TestCase):
         seen_tasks = []
 
         class FakeVerificationCollector:
-            async def collect(self, collection_task, deep=False, verbose=True, source_urls=None):
+            async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 seen_tasks.append(
                     {
                         "task": dict(collection_task),
-                        "deep": deep,
+                        "mode": getattr(mode, "value", mode),
                         "source_urls": source_urls or [],
                     }
                 )
@@ -593,7 +600,7 @@ class CollectionReviewTest(unittest.TestCase):
         )
 
         self.assertEqual(seen_tasks[0]["task"]["search_stage"], "verification")
-        self.assertFalse(seen_tasks[0]["deep"])
+        self.assertEqual(seen_tasks[0]["mode"], "standard_evidence")
         self.assertEqual(seen_tasks[0]["source_urls"], [])
         self.assertEqual(result["research_tasks"][0]["search_stage"], "verification")
         self.assertEqual(result["research_tasks"][0]["decision_action"], "claim_verification")

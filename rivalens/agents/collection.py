@@ -8,7 +8,7 @@ from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.landscape_review import LandscapeReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.file_context import format_rag_context
-from rivalens.research import ResearchEngineEvidenceCollector
+from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
 from rivalens.schema import (
     CompetitorAnalysisState,
     EvidenceCollectionResult,
@@ -385,10 +385,18 @@ class CollectionAgent:
     ) -> EvidenceCollectionResult:
         return await self.evidence_collector.collect(
             collection_task=collection_task,
-            deep=False,
+            mode=self._research_mode_for_task(collection_task),
             source_urls=collection_task.get("target_urls", []),
             verbose=verbose,
         )
+
+    def _research_mode_for_task(
+        self,
+        collection_task: EvidenceCollectionTask,
+    ) -> ResearchMode:
+        if collection_task.get("search_stage") == "landscape":
+            return ResearchMode.SOURCE_DISCOVERY
+        return ResearchMode.STANDARD_EVIDENCE
 
     def _landscape_follow_up_specs(
         self,

@@ -31,14 +31,14 @@ class ResearchEngineEvidenceCollector:
     async def collect(
         self,
         collection_task: EvidenceCollectionTask,
-        deep: bool = False,
+        mode: ResearchMode | str = ResearchMode.STANDARD_EVIDENCE,
         verbose: bool = True,
         source: str = ReportSource.Web.value,
         source_urls: list[str] | None = None,
         query_domains: list[str] | None = None,
     ) -> EvidenceCollectionResult:
         """Run evidence collection for one schema-aware collection task."""
-        mode = ResearchMode.DEEP_EVIDENCE if deep else ResearchMode.STANDARD_EVIDENCE
+        mode = ResearchMode(mode)
         researcher = ResearchEngine(
             query=collection_task["query"],
             report_type=REPORT_TYPE_BY_MODE[mode],

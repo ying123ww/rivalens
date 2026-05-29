@@ -38,6 +38,7 @@
 - landscape follow-up allocator 会在固定预算内保留 best candidate URL 和高优先级 missing source type，避免简单 `specs[:3]` 挤掉关键补采。
 - `LandscapeAssessment.decision` 已按 6 类 research control taxonomy 表达：`scope_refinement`、`entity_resolution`、`source_discovery`、`evidence_extraction`、`claim_verification`、`stop`；follow-up specs 也携带 `decision_action` 和 `decision_subtype`。
 - `coverage_gap_search` 已用于 coverage review 产生的补采 task；landscape depth/branch budget 阻断扩展时会显式记录 `stop / budget_stop`。
+- `ResearchEngineEvidenceCollector` 不再暴露 `deep=True/False`；调用方显式传入 `ResearchMode`。landscape 使用 `SOURCE_DISCOVERY`，focused 和 verification 使用 `STANDARD_EVIDENCE`。
 
 原始问题是：
 
