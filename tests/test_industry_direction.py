@@ -5,6 +5,7 @@ from rivalens.agents.industry_direction import IndustryDirectionSkill
 from rivalens.agents.planning import PlanningAgent
 from rivalens.industry_templates import INDUSTRY_DIRECTION_TEMPLATES
 from rivalens.schema.competitive import EvidenceType, SOURCE_TYPE_PRIORITY
+from rivalens.schema_registry.registry import SchemaRegistry
 
 
 class IndustryDirectionSkillTest(unittest.TestCase):
@@ -72,6 +73,41 @@ class IndustryDirectionSkillTest(unittest.TestCase):
                     "interoperability_ehr_fhir",
                 ],
             ),
+            (
+                "对比 OpenAI API、Claude API 和 Gemini API 的模型平台能力",
+                "ai_model_platform",
+                [
+                    "model_capabilities",
+                    "benchmarks_evaluations",
+                    "context_window_long_context",
+                    "inference_speed_latency",
+                    "multimodal_capabilities",
+                    "developer_experience",
+                    "finetuning_rag_customization",
+                    "deployment_options",
+                    "reliability_rate_limits",
+                ],
+            ),
+            (
+                "对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品体验",
+                "ai_product_application",
+                [
+                    "strategic_positioning",
+                    "target_users_personas",
+                    "core_feature_matrix",
+                    "signature_features",
+                    "product_flow_experience",
+                    "ai_output_quality",
+                    "pricing_business_model",
+                    "data_privacy_trust",
+                    "ecosystem_integrations",
+                    "user_sentiment_pain_points",
+                    "platform_device_coverage",
+                    "safety_content_limits",
+                    "growth_retention_strategy",
+                    "team_funding_momentum",
+                ],
+            ),
         ]
 
         skill = IndustryDirectionSkill()
@@ -91,7 +127,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
                 )
 
     def test_templates_define_source_hints_and_required_flags(self):
-        self.assertEqual(len(INDUSTRY_DIRECTION_TEMPLATES), 14)
+        self.assertEqual(len(INDUSTRY_DIRECTION_TEMPLATES), 15)
         valid_source_hints = set(EvidenceType.__args__)
 
         for template in INDUSTRY_DIRECTION_TEMPLATES:
@@ -109,6 +145,56 @@ class IndustryDirectionSkillTest(unittest.TestCase):
                             valid_source_hints
                         )
                     )
+
+    def test_schema_registry_uses_industry_direction_template_ids(self):
+        template_ids = {
+            template["industry_id"] for template in INDUSTRY_DIRECTION_TEMPLATES
+        }
+        registry = SchemaRegistry()
+        registry_ids = {
+            definition.industry_id for definition in registry.industries
+        }
+
+        self.assertTrue(template_ids.issubset(registry_ids))
+        self.assertIn(
+            "security_compliance",
+            [
+                extension["id"]
+                for extension in registry.get_extensions("saas_collaboration")
+            ],
+        )
+        self.assertIn(
+            "regulatory_compliance",
+            [
+                extension["id"]
+                for extension in registry.get_extensions("financial_services")
+            ],
+        )
+
+    def test_builds_flat_direction_review_rows(self):
+        from rivalens.industry_templates.review import build_direction_review_rows
+
+        rows = build_direction_review_rows(INDUSTRY_DIRECTION_TEMPLATES)
+        expected_count = sum(
+            len(template.get("directions", []))
+            for template in INDUSTRY_DIRECTION_TEMPLATES
+        )
+        sample = next(
+            row
+            for row in rows
+            if row["industry_id"] == "ai_product_application"
+            and row["direction_id"] == "pricing_business_model"
+        )
+
+        self.assertEqual(len(rows), expected_count)
+        self.assertEqual(sample["industry_name"], "AI 产品 / 智能应用")
+        self.assertEqual(sample["required"], "是")
+        self.assertEqual(
+            sample["source_hints"],
+            "pricing_page, official_site, review, news",
+        )
+        self.assertIn("人工备注", sample)
+        self.assertIn("动作", sample)
 
     def test_schema_supports_priority_evidence_sources(self):
         expected_sources = {
@@ -137,45 +223,47 @@ class IndustryDirectionSkillTest(unittest.TestCase):
 
     def test_template_source_hints_are_preserved_in_plan(self):
         plan = IndustryDirectionSkill().build_plan(
-            query="对比 ChatGPT、Claude 和 Kimi 的大模型产品竞争格局",
-            competitors=[{"name": "ChatGPT"}, {"name": "Claude"}],
+            query="对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品竞争格局",
+            competitors=[{"name": "ChatGPT"}, {"name": "Kimi"}],
         )
 
         pricing_direction = next(
             direction
             for direction in plan["default_directions"]
-            if direction["direction_id"] == "pricing_usage_limits"
+            if direction["direction_id"] == "pricing_business_model"
         )
         self.assertEqual(
             pricing_direction["source_hints"],
-            ["pricing_page", "docs", "official_site"],
+            ["pricing_page", "official_site", "review", "news"],
         )
 
     def test_identifies_ai_tools_and_merges_user_directions(self):
         plan = IndustryDirectionSkill().build_plan(
-            query="对比 ChatGPT、Claude 和 Kimi 的大模型产品竞争格局",
-            competitors=[{"name": "ChatGPT"}, {"name": "Claude"}],
+            query="对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品竞争格局",
+            competitors=[{"name": "ChatGPT"}, {"name": "Kimi"}],
             user_directions=["我还想重点看 AI 写作能力和私有化部署能力。"],
             user_confirmed=True,
         )
 
-        self.assertEqual(plan["industry"]["industry_id"], "ai_tools_llm")
+        self.assertEqual(plan["industry"]["industry_id"], "ai_product_application")
         self.assertTrue(plan["user_confirmed"])
         self.assertEqual(
             [direction["direction_id"] for direction in plan["default_directions"]],
             [
-                "model_capabilities",
-                "pricing_usage_limits",
-                "benchmarks_evaluations",
-                "developer_experience",
-                "safety_compliance",
-                "data_usage_training_policy",
-                "deployment_options",
-                "ecosystem_adoption",
-                "context_window_long_context",
-                "inference_speed_latency",
-                "multimodal_capabilities",
-                "finetuning_rag_customization",
+                "strategic_positioning",
+                "target_users_personas",
+                "core_feature_matrix",
+                "signature_features",
+                "product_flow_experience",
+                "ai_output_quality",
+                "pricing_business_model",
+                "data_privacy_trust",
+                "ecosystem_integrations",
+                "user_sentiment_pain_points",
+                "platform_device_coverage",
+                "safety_content_limits",
+                "growth_retention_strategy",
+                "team_funding_momentum",
             ],
         )
         self.assertEqual(
@@ -282,8 +370,18 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             "food_safety_labeling_claims",
             "fair_housing_advertising_compliance",
             "technology_visibility",
-            "deployment_options",
-            "data_usage_training_policy",
+            "context_window_long_context",
+            "inference_speed_latency",
+            "reliability_rate_limits",
+            "strategic_positioning",
+            "target_users_personas",
+            "core_feature_matrix",
+            "signature_features",
+            "product_flow_experience",
+            "ai_output_quality",
+            "pricing_business_model",
+            "data_privacy_trust",
+            "user_sentiment_pain_points",
         }
         direction_index = {
             direction["direction_id"]: direction
@@ -322,9 +420,14 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             "merchant_marketing_tools",
             "smart_cockpit_system",
             "sales_volume_market_share",
-            "context_window_long_context",
-            "inference_speed_latency",
             "multimodal_capabilities",
+            "developer_experience",
+            "finetuning_rag_customization",
+            "deployment_options",
+            "platform_device_coverage",
+            "safety_content_limits",
+            "growth_retention_strategy",
+            "team_funding_momentum",
         }
         direction_index = {
             direction["direction_id"]: direction

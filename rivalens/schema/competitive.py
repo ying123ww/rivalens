@@ -549,6 +549,126 @@ class FileContext(TypedDict, total=False):
     search_hints: list[str]
 
 
+# ── Direction-level research result (universal) ──
+
+DirectionResultStatus = Literal["pending", "partial", "complete", "failed"]
+
+
+class DirectionFinding(TypedDict, total=False):
+    """A single factual finding within a direction."""
+
+    id: str
+    summary: str
+    detail: str
+    data_point: str | None
+    source_url: str | None
+    source_type: EvidenceType
+    evidence_ids: list[str]
+    confidence: float
+
+
+class DirectionResult(TypedDict, total=False):
+    """Universal structure for storing the research result of one direction
+    for one competitor.  Every direction (pricing, safety, UX, ...) produces
+    the same shape so downstream agents can consume results uniformly."""
+
+    id: str
+    direction_id: str
+    direction_name: str
+    competitor: str
+    status: DirectionResultStatus
+    findings: list[DirectionFinding]
+    summary: str
+    gaps: list[str]
+    evidence_ids: list[str]
+    evidence_count: int
+    confidence: float
+    collected_at: str
+    collector_task_ids: list[str]
+
+
+class DirectionFindingPayload(StrictPayloadModel):
+    """Pydantic-validated version of DirectionFinding."""
+
+    id: str
+    summary: str
+    detail: str = ""
+    data_point: str | None = None
+    source_url: str | None = None
+    source_type: EvidenceType = "other"
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+
+
+class DirectionResultPayload(StrictPayloadModel):
+    """Pydantic-validated version of DirectionResult.
+
+    Used for agent-to-agent handoff: the CollectorAgent produces this
+    after researching a direction, the PlanningAgent/QualityAgent
+    validates it before merging into CompetitorKnowledge."""
+
+    id: str
+    direction_id: str
+    direction_name: str = ""
+    competitor: str
+    status: DirectionResultStatus = "pending"
+    findings: list[DirectionFindingPayload] = Field(default_factory=list)
+    summary: str = ""
+    gaps: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    evidence_count: int = Field(default=0, ge=0)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    collected_at: str = ""
+    collector_task_ids: list[str] = Field(default_factory=list)
+
+
+
+def build_direction_result(
+    *,
+    direction_id: str,
+    competitor: str,
+    findings: list[dict[str, Any]] | None = None,
+    summary: str = "",
+    gaps: list[str] | None = None,
+    evidence_ids: list[str] | None = None,
+    status: DirectionResultStatus = "complete",
+    confidence: float = 0.0,
+    direction_name: str = "",
+    collected_at: str = "",
+    collector_task_ids: list[str] | None = None,
+) -> DirectionResult:
+    """Create and validate a DirectionResult in one call.
+
+    Raises ``pydantic.ValidationError`` if the data is malformed.
+    Returns a plain dict (TypedDict) safe for JSON serialization.
+    """
+    from datetime import datetime, timezone
+
+    _findings = findings or []
+    _evidence_ids = evidence_ids or []
+    _gaps = gaps or []
+    _collector_task_ids = collector_task_ids or []
+    _collected_at = collected_at or datetime.now(timezone.utc).isoformat()
+    _result_id = f"dr_{direction_id}_{competitor}_{_collected_at}"
+
+    payload = DirectionResultPayload(
+        id=_result_id,
+        direction_id=direction_id,
+        direction_name=direction_name,
+        competitor=competitor,
+        status=status,
+        findings=[DirectionFindingPayload(**f) for f in _findings],
+        summary=summary,
+        gaps=_gaps,
+        evidence_ids=_evidence_ids,
+        evidence_count=len(_evidence_ids),
+        confidence=confidence,
+        collected_at=_collected_at,
+        collector_task_ids=_collector_task_ids,
+    )
+    return payload.model_dump()
+
+
 class CompetitorAnalysisState(TypedDict, total=False):
     task: dict[str, Any]
     messages: list[AgentMessage]
@@ -560,6 +680,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext
     evidence_items: list[EvidenceItem]
+    direction_results: list[DirectionResult]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
     research_artifacts: list[ResearchArtifact]
