@@ -283,8 +283,12 @@ class GenericLLMProvider:
 
     async def get_chat_response(self, messages, stream, websocket=None, **kwargs):
         if not stream:
-            # Getting output from the model chain using ainvoke for asynchronous invoking
-            output = await self.llm.ainvoke(messages, **kwargs)
+            # Run in thread pool to avoid anyio TCP connect issues on Windows
+            # when using non-OpenAI endpoints behind istio-envoy proxies.
+            loop = asyncio.get_running_loop()
+            output = await loop.run_in_executor(
+                None, lambda: self.llm.invoke(messages, **kwargs)
+            )
 
             res = output.content
 
