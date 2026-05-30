@@ -26,6 +26,10 @@ logging.getLogger('fontTools.ttLib').setLevel(logging.WARNING)
 # Create logger instance
 logger = logging.getLogger(__name__)
 
+# Ensure project .env's OPENAI_API_KEY takes precedence over any global env var.
+# Only removes OPENAI_API_KEY so partners' other global env vars are unaffected.
+import os as _os
+_os.environ.pop("OPENAI_API_KEY", None)
 load_dotenv()
 
 from backend.server.app import app

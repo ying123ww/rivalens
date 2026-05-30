@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 # Add the backend directory to Python path
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.abspath(os.path.join(backend_dir, ".."))
+import os as _os
+_os.environ.pop("OPENAI_API_KEY", None)
 load_dotenv(os.path.join(repo_root, ".env"))
 sys.path.insert(0, repo_root)
 sys.path.insert(0, backend_dir)

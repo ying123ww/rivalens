@@ -211,6 +211,8 @@ async def main(args):
             print(f"Warning: DOCX generation failed: {e}")
 
 if __name__ == "__main__":
+    import os as _os
+    _os.environ.pop("OPENAI_API_KEY", None)
     load_dotenv()
     args = cli.parse_args()
     asyncio.run(main(args))
