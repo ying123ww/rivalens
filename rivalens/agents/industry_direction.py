@@ -169,15 +169,37 @@ class IndustryDirectionSkill:
             self._template_direction_to_payload(direction, index)
             for index, direction in enumerate(template.default_directions, start=1)
         ]
+        planner_candidate_directions = self._planner_added_directions(default_directions)
+        query_limited_direction_ids = self._query_limited_direction_ids(
+            query,
+            default_directions + planner_candidate_directions,
+        )
+        planner_added_directions = (
+            []
+            if query_limited_direction_ids is not None
+            else planner_candidate_directions
+        )
+        effective_selected_direction_ids = (
+            query_limited_direction_ids
+            if query_limited_direction_ids is not None
+            else selected_direction_ids
+        )
         selected_default_directions = self._select_default_directions(
             default_directions,
-            selected_direction_ids,
+            effective_selected_direction_ids,
+            include_required=query_limited_direction_ids is None,
         )
-        planner_added_directions = self._planner_added_directions(default_directions)
         selected_planner_directions = self._select_planner_directions(
-            planner_added_directions,
-            selected_direction_ids,
+            planner_candidate_directions
+            if query_limited_direction_ids is not None
+            else planner_added_directions,
+            effective_selected_direction_ids,
         )
+        if query_limited_direction_ids is not None:
+            selected_planner_directions = [
+                self._query_limited_direction(direction)
+                for direction in selected_planner_directions
+            ]
         user_added_directions = self._normalize_user_directions(user_directions or [])
         final_directions = self._dedupe_directions(
             selected_default_directions
@@ -209,7 +231,17 @@ class IndustryDirectionSkill:
                 "planner_added_directions": planner_added_directions,
                 "planner_coverage_basis": [
                     direction["name"] for direction in PLANNER_COVERAGE_DIRECTIONS
-                ],
+                ]
+                if query_limited_direction_ids is None
+                else [],
+                "scope_limited_by_query": query_limited_direction_ids is not None,
+                "auto_selected_directions": query_limited_direction_ids or [],
+                "planner_supplement_skipped": query_limited_direction_ids is not None,
+                "planner_supplement_skip_reason": (
+                    "用户查询包含只看/仅看/只关注等限定词，跳过自动补充方向。"
+                    if query_limited_direction_ids is not None
+                    else ""
+                ),
                 "directions": final_directions,
                 "final_directions": [
                     direction.get("direction_id", "")
@@ -406,6 +438,7 @@ class IndustryDirectionSkill:
         self,
         default_directions: list[AnalysisDirection],
         selected_direction_ids: list[str] | None,
+        include_required: bool = True,
     ) -> list[AnalysisDirection]:
         if selected_direction_ids is None:
             return default_directions
@@ -413,7 +446,7 @@ class IndustryDirectionSkill:
         required_ids = {
             direction.get("direction_id")
             for direction in default_directions
-            if direction.get("required", True)
+            if include_required and direction.get("required", True)
         }
         selected = set(selected_direction_ids) | required_ids
         return [
@@ -476,6 +509,114 @@ class IndustryDirectionSkill:
             for direction in planner_added_directions
             if direction.get("direction_id") in selected
         ]
+
+    def _query_has_limited_scope(self, query: str) -> bool:
+        lowered = query.lower()
+        return any(term in lowered for term in self._limit_terms())
+
+    def _limit_terms(self) -> tuple[str, ...]:
+        return (
+            "只看",
+            "仅看",
+            "只关注",
+            "仅关注",
+            "只分析",
+            "仅分析",
+            "限定",
+            "聚焦",
+        )
+
+    def _query_limited_direction(
+        self,
+        direction: AnalysisDirection,
+    ) -> AnalysisDirection:
+        limited_direction = dict(direction)
+        limited_direction["origin"] = "user_requested"
+        limited_direction["required"] = True
+        limited_direction["reason"] = (
+            "用户限定语义匹配的分析方向，未进行自动 Planner 补充。"
+        )
+        limited_direction["description"] = (
+            limited_direction.get("description")
+            or limited_direction.get("reason", "")
+        )
+        return limited_direction
+
+    def _query_limited_direction_ids(
+        self,
+        query: str,
+        directions: list[AnalysisDirection],
+    ) -> list[str] | None:
+        lowered = query.lower()
+        if not self._query_has_limited_scope(query):
+            return None
+
+        direction_aliases = {
+            "pricing": (
+                "定价",
+                "价格",
+                "套餐",
+                "收费",
+                "费用",
+                "pricing",
+                "price",
+                "plan",
+                "package",
+            ),
+            "positioning": (
+                "定位",
+                "产品定位",
+                "战略定位",
+                "市场卡位",
+                "差异化",
+                "positioning",
+                "strategy",
+            ),
+        }
+        requested_aliases = {
+            group
+            for group, aliases in direction_aliases.items()
+            if any(alias in lowered for alias in aliases)
+        }
+        if not requested_aliases:
+            return None
+
+        selected_ids = []
+        for direction in directions:
+            primary_searchable = " ".join(
+                str(direction.get(field, ""))
+                for field in ("direction_id", "name", "search_focus")
+            ).lower()
+            searchable = " ".join(
+                str(direction.get(field, ""))
+                for field in ("direction_id", "name", "reason", "description", "search_focus")
+            ).lower()
+            if (
+                "pricing" in requested_aliases
+                and (
+                    "pricing" in searchable
+                    or "定价" in searchable
+                    or "价格" in searchable
+                    or "套餐" in searchable
+                    or "收费" in searchable
+                    or "费用" in searchable
+                    or "商业模式" in searchable
+                )
+            ):
+                selected_ids.append(direction["direction_id"])
+                continue
+            if (
+                "positioning" in requested_aliases
+                and (
+                    "positioning" in primary_searchable
+                    or "战略定位" in primary_searchable
+                    or "定位" in primary_searchable
+                    or "市场卡位" in primary_searchable
+                )
+            ):
+                selected_ids.append(direction["direction_id"])
+
+        return selected_ids or None
 
     def _custom_direction_id(self, text: str, index: int) -> str:
         lowered = text.lower()

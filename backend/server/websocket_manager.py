@@ -116,8 +116,13 @@ class WebSocketManager:
 
 async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None):
     """Run the agent."""    
-    # Create logs handler for this research task
-    logs_handler = CustomLogsHandler(websocket, task)
+    # Reuse the request-scoped log handler when the WebSocket entrypoint already
+    # created one, otherwise create one for direct/backend-only calls.
+    logs_handler = (
+        websocket
+        if isinstance(websocket, CustomLogsHandler)
+        else CustomLogsHandler(websocket, task)
+    )
 
     # Set up MCP configuration if enabled
     if mcp_enabled and mcp_configs:

@@ -585,6 +585,7 @@ const ResearchEngine = (() => {
           ${links.pdf ? `<a href="${links.pdf}" class="history-entry-action" target="_blank" title="Open PDF Report"><i class="fas fa-file-pdf"></i> PDF</a>` : ''}
           ${links.docx ? `<a href="${links.docx}" class="history-entry-action" target="_blank" title="Open Word Document"><i class="fas fa-file-word"></i> Word</a>` : ''}
           ${links.md ? `<a href="${links.md}" class="history-entry-action" target="_blank" title="Open Markdown File"><i class="fas fa-file-lines"></i> MD</a>` : ''}
+          ${links.html ? `<a href="${links.html}" class="history-entry-action" target="_blank" title="Open HTML File"><i class="fas fa-file-code"></i> HTML</a>` : ''}
           ${links.json ? `<a href="${links.json}" class="history-entry-action" target="_blank" title="Open JSON Data"><i class="fas fa-file-code"></i> JSON</a>` : ''}
         </div>
         <div class="history-entry-actions">
@@ -734,7 +735,8 @@ const ResearchEngine = (() => {
       pdf: downloadLinks.pdf || '',
       docx: downloadLinks.docx || '',
       md: downloadLinks.md || '',
-      json: downloadLinks.json || ''
+      json: downloadLinks.json || '',
+      html: downloadLinks.html || ''
     };
 
     console.debug('Saving history with links:', links);
@@ -1102,11 +1104,11 @@ const ResearchEngine = (() => {
       return;
     }
 
-    const { pdf, docx, md, json } = data.output;
-    console.log('Received paths:', { pdf, docx, md, json });
+    const { pdf, docx, md, json, html } = data.output;
+    console.log('Received paths:', { pdf, docx, md, json, html });
 
     // Store these links for history
-    const currentLinks = { pdf, docx, md, json };
+    const currentLinks = { pdf, docx, md, json, html };
 
     // Helper function to safely update link
     const updateLink = (id, path) => {
@@ -1125,12 +1127,14 @@ const ResearchEngine = (() => {
     updateLink('downloadLinkWord', docx);
     updateLink('downloadLinkMd', md);
     updateLink('downloadLinkJson', json);
+    updateLink('downloadLinkHtml', html);
 
     // Update duplicate buttons above the report
     updateLink('downloadLinkTop', pdf);
     updateLink('downloadLinkWordTop', docx);
     updateLink('downloadLinkMdTop', md);
     updateLink('downloadLinkJsonTop', json);
+    updateLink('downloadLinkHtmlTop', html);
 
     // Make sure download buttons are visible when download links are ready
     showDownloadPanels();

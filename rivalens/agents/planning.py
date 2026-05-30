@@ -131,6 +131,22 @@ class PlanningAgent:
                         "final_direction_count": len(
                             industry_direction_plan.get("final_directions", []),
                         ),
+                        "scope_limited_by_query": bool(
+                            (
+                                industry_direction_plan.get(
+                                    "final_analysis_plan",
+                                )
+                                or {}
+                            ).get("scope_limited_by_query"),
+                        ),
+                        "registry_extensions_skipped": bool(
+                            (
+                                industry_direction_plan.get(
+                                    "final_analysis_plan",
+                                )
+                                or {}
+                            ).get("scope_limited_by_query"),
+                        ),
                         "confidence": active_schema.get("selected_industry", {}).get(
                             "confidence",
                         ),
@@ -173,8 +189,17 @@ class PlanningAgent:
             selected_industry,
             candidate_industries,
         )
-        industry_extensions = self.schema_registry.get_extensions(
-            selected_industry["industry_id"],
+        scope_limited_by_query = bool(
+            (industry_direction_plan.get("final_analysis_plan") or {}).get(
+                "scope_limited_by_query",
+            )
+        )
+        industry_extensions = (
+            []
+            if scope_limited_by_query
+            else self.schema_registry.get_extensions(
+                selected_industry["industry_id"],
+            )
         )
         industry_extensions = self._dedupe_extensions(
             industry_extensions
@@ -195,6 +220,12 @@ class PlanningAgent:
                 "alias, example-query, known-competitor, and local file-context signals."
                 " IndustryDirectionSkill runs first to turn the selected industry "
                 "and any user-confirmed additions into collection dimensions."
+                + (
+                    " Query-limited scope is active, so registry extensions were "
+                    "skipped and only the confirmed directions are collected."
+                    if scope_limited_by_query
+                    else ""
+                )
             ),
         }
 
