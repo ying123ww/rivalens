@@ -386,6 +386,49 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             plan["final_analysis_plan"]["final_directions"],
         )
 
+    def test_limited_scope_query_auto_selects_matching_directions(self):
+        plan = IndustryDirectionSkill().build_plan(
+            query="帮我对比钉钉和飞书，只看产品定位和定价，给出带来源的简短结论",
+        )
+
+        self.assertEqual(plan["industry"]["industry_id"], "saas_collaboration")
+        self.assertEqual(
+            plan["final_analysis_plan"]["final_directions"],
+            ["pricing_packaging", "strategic_positioning"],
+        )
+        self.assertTrue(plan["final_analysis_plan"]["scope_limited_by_query"])
+        self.assertNotIn(
+            "security_admin_controls",
+            plan["final_analysis_plan"]["final_directions"],
+        )
+
+    def test_limited_scope_query_overrides_frontend_default_all_selection(self):
+        preview_plan = IndustryDirectionSkill().build_plan(
+            query="帮我对比钉钉和飞书，只关注产品定位和定价",
+        )
+        frontend_default_ids = [
+            direction["direction_id"]
+            for direction in (
+                preview_plan["suggested_directions"]
+                + preview_plan["planner_added_directions"]
+            )
+        ]
+
+        confirmed_plan = IndustryDirectionSkill().build_plan(
+            query="帮我对比钉钉和飞书，只关注产品定位和定价",
+            selected_direction_ids=frontend_default_ids,
+            user_confirmed=True,
+        )
+
+        self.assertEqual(
+            confirmed_plan["final_analysis_plan"]["final_directions"],
+            ["pricing_packaging", "strategic_positioning"],
+        )
+        self.assertEqual(
+            confirmed_plan["final_analysis_plan"]["auto_selected_directions"],
+            ["pricing_packaging", "strategic_positioning"],
+        )
+
     def test_planning_agent_injects_directions_into_schema_selection(self):
         plan = IndustryDirectionSkill().build_plan(
             query="分析 Shopify 和 Amazon 在电商零售行业的竞品差异",

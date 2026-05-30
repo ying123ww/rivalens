@@ -169,7 +169,7 @@ async def handle_start_command(websocket, data: str, manager):
         source_urls,
         document_urls,
         tone,
-        websocket,
+        logs_handler,
         headers,
         query_domains,
         mcp_enabled,
