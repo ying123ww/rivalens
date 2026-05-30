@@ -169,10 +169,15 @@ class IndustryDirectionSkill:
             self._template_direction_to_payload(direction, index)
             for index, direction in enumerate(template.default_directions, start=1)
         ]
-        planner_added_directions = self._planner_added_directions(default_directions)
+        planner_candidate_directions = self._planner_added_directions(default_directions)
         query_limited_direction_ids = self._query_limited_direction_ids(
             query,
-            default_directions + planner_added_directions,
+            default_directions + planner_candidate_directions,
+        )
+        planner_added_directions = (
+            []
+            if query_limited_direction_ids is not None
+            else planner_candidate_directions
         )
         effective_selected_direction_ids = (
             query_limited_direction_ids
@@ -185,9 +190,16 @@ class IndustryDirectionSkill:
             include_required=query_limited_direction_ids is None,
         )
         selected_planner_directions = self._select_planner_directions(
-            planner_added_directions,
+            planner_candidate_directions
+            if query_limited_direction_ids is not None
+            else planner_added_directions,
             effective_selected_direction_ids,
         )
+        if query_limited_direction_ids is not None:
+            selected_planner_directions = [
+                self._query_limited_direction(direction)
+                for direction in selected_planner_directions
+            ]
         user_added_directions = self._normalize_user_directions(user_directions or [])
         final_directions = self._dedupe_directions(
             selected_default_directions
@@ -219,9 +231,17 @@ class IndustryDirectionSkill:
                 "planner_added_directions": planner_added_directions,
                 "planner_coverage_basis": [
                     direction["name"] for direction in PLANNER_COVERAGE_DIRECTIONS
-                ],
+                ]
+                if query_limited_direction_ids is None
+                else [],
                 "scope_limited_by_query": query_limited_direction_ids is not None,
                 "auto_selected_directions": query_limited_direction_ids or [],
+                "planner_supplement_skipped": query_limited_direction_ids is not None,
+                "planner_supplement_skip_reason": (
+                    "用户查询包含只看/仅看/只关注等限定词，跳过自动补充方向。"
+                    if query_limited_direction_ids is not None
+                    else ""
+                ),
                 "directions": final_directions,
                 "final_directions": [
                     direction.get("direction_id", "")
@@ -490,13 +510,12 @@ class IndustryDirectionSkill:
             if direction.get("direction_id") in selected
         ]
 
-    def _query_limited_direction_ids(
-        self,
-        query: str,
-        directions: list[AnalysisDirection],
-    ) -> list[str] | None:
+    def _query_has_limited_scope(self, query: str) -> bool:
         lowered = query.lower()
-        limit_terms = (
+        return any(term in lowered for term in self._limit_terms())
+
+    def _limit_terms(self) -> tuple[str, ...]:
+        return (
             "只看",
             "仅看",
             "只关注",
@@ -506,7 +525,30 @@ class IndustryDirectionSkill:
             "限定",
             "聚焦",
         )
-        if not any(term in lowered for term in limit_terms):
+
+    def _query_limited_direction(
+        self,
+        direction: AnalysisDirection,
+    ) -> AnalysisDirection:
+        limited_direction = dict(direction)
+        limited_direction["origin"] = "user_requested"
+        limited_direction["required"] = True
+        limited_direction["reason"] = (
+            "用户限定语义匹配的分析方向，未进行自动 Planner 补充。"
+        )
+        limited_direction["description"] = (
+            limited_direction.get("description")
+            or limited_direction.get("reason", "")
+        )
+        return limited_direction
+
+    def _query_limited_direction_ids(
+        self,
+        query: str,
+        directions: list[AnalysisDirection],
+    ) -> list[str] | None:
+        lowered = query.lower()
+        if not self._query_has_limited_scope(query):
             return None
 
         direction_aliases = {

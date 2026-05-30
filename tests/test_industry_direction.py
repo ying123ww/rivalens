@@ -397,6 +397,8 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             ["pricing_packaging", "strategic_positioning"],
         )
         self.assertTrue(plan["final_analysis_plan"]["scope_limited_by_query"])
+        self.assertTrue(plan["final_analysis_plan"]["planner_supplement_skipped"])
+        self.assertEqual(plan["planner_added_directions"], [])
         self.assertNotIn(
             "security_admin_controls",
             plan["final_analysis_plan"]["final_directions"],
@@ -428,6 +430,29 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             confirmed_plan["final_analysis_plan"]["auto_selected_directions"],
             ["pricing_packaging", "strategic_positioning"],
         )
+        self.assertEqual(confirmed_plan["planner_added_directions"], [])
+
+    def test_planning_agent_skips_registry_extensions_for_limited_scope_query(self):
+        state = {
+            "task": {
+                "query": "帮我对比钉钉和飞书，只看产品定位和定价，给出带来源的简短结论",
+                "competitors": ["钉钉", "飞书"],
+            },
+            "messages": [],
+        }
+
+        result = asyncio.run(PlanningAgent().run(state))
+        extension_ids = [
+            extension["id"]
+            for extension in result["active_knowledge_schema"]["industry_extensions"]
+        ]
+
+        self.assertEqual(
+            extension_ids,
+            ["direction_pricing_packaging", "direction_strategic_positioning"],
+        )
+        self.assertNotIn("security_compliance", extension_ids)
+        self.assertNotIn("direction_target_users", extension_ids)
 
     def test_planning_agent_injects_directions_into_schema_selection(self):
         plan = IndustryDirectionSkill().build_plan(

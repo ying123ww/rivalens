@@ -940,11 +940,19 @@ function IndustryDirectionDialog({
   onConfirm,
   onCancel,
 }: IndustryDirectionDialogProps) {
+  const scopeLimitedByQuery = Boolean(
+    plan.final_analysis_plan?.scope_limited_by_query
+  );
   const baseDirections = plan.suggested_directions?.length
     ? plan.suggested_directions
     : plan.default_directions;
-  const plannerAddedDirections = plan.planner_added_directions || [];
-  const directions = [...baseDirections, ...plannerAddedDirections];
+  const visibleBaseDirections = scopeLimitedByQuery
+    ? plan.final_directions
+    : baseDirections;
+  const plannerAddedDirections = scopeLimitedByQuery
+    ? []
+    : plan.planner_added_directions || [];
+  const directions = [...visibleBaseDirections, ...plannerAddedDirections];
   const [isEditingDirections, setIsEditingDirections] = useState(false);
   const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>(
     directions.map((direction) => direction.direction_id)
@@ -961,7 +969,7 @@ function IndustryDirectionDialog({
   const detectedCompetitors = plan.detected_competitors || [];
   const suggestedCompetitors = plan.suggested_competitors || [];
   const shouldSuggestCompetitors = detectedCompetitors.length < 2;
-  const requiredDirectionIds = baseDirections
+  const requiredDirectionIds = visibleBaseDirections
     .filter((direction) => direction.required)
     .map((direction) => direction.direction_id);
   const plannerAddedDirectionIds = plannerAddedDirections.map(
@@ -1093,7 +1101,21 @@ function IndustryDirectionDialog({
             </div>
           </section>
 
-          {renderDirectionCards(baseDirections, "行业原有方向")}
+          {scopeLimitedByQuery && (
+            <section className="rounded-md border border-teal-500/30 bg-teal-500/10 p-4">
+              <h3 className="text-sm font-semibold text-teal-100">
+                已按用户限定收窄
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-teal-50/90">
+                检测到只看/仅看/只关注等限定词，本次不会再自动补充其他方向。
+              </p>
+            </section>
+          )}
+
+          {renderDirectionCards(
+            visibleBaseDirections,
+            scopeLimitedByQuery ? "本次限定方向" : "行业原有方向"
+          )}
 
           {plannerAddedDirections.length > 0 &&
             renderDirectionCards(
