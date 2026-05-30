@@ -113,9 +113,15 @@ class Config:
             elif embedding_provider == "custom":
                 self.embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "custom")
             elif embedding_provider == "openai":
-                self.embedding_model = "text-embedding-3-large"
+                self.embedding_model = os.getenv(
+                    "OPENAI_EMBEDDING_MODEL",
+                    "text-embedding-v4",
+                )
             elif embedding_provider == "azure_openai":
-                self.embedding_model = "text-embedding-3-large"
+                self.embedding_model = os.getenv(
+                    "OPENAI_EMBEDDING_MODEL",
+                    "text-embedding-v4",
+                )
             elif embedding_provider == "huggingface":
                 self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
             elif embedding_provider == "gigachat":
@@ -246,7 +252,7 @@ class Config:
         except ValueError:
             raise ValueError(
                 "Set EMBEDDING = '<embedding_provider>:<embedding_model>' "
-                "Eg 'openai:text-embedding-3-large'"
+                "Eg 'openai:text-embedding-v4'"
             )
 
     def validate_doc_path(self):

@@ -26,8 +26,25 @@ import os
 from typing import Any
 
 OPENAI_EMBEDDING_MODEL = os.environ.get(
-    "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
+    "OPENAI_EMBEDDING_MODEL", "text-embedding-v4"
 )
+
+
+def _openai_embedding_api_key(default: str | None = None) -> str | None:
+    return (
+        os.getenv("OPENAI_EMBEDDING_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or default
+    )
+
+
+def _openai_embedding_api_base(default: str | None = None) -> str | None:
+    return (
+        os.getenv("OPENAI_EMBEDDING_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or default
+    )
+
 
 _SUPPORTED_PROVIDERS = {
     "openai",
@@ -65,7 +82,7 @@ class Memory:
 
     Example:
         ```python
-        memory = Memory("openai", "text-embedding-3-small")
+        memory = Memory("openai", "text-embedding-v4")
         embeddings = memory.get_embeddings()
         ```
     """
@@ -90,9 +107,9 @@ class Memory:
 
                 _embeddings = OpenAIEmbeddings(
                     model=model,
-                    openai_api_key=os.getenv("OPENAI_API_KEY", "custom"),
-                    openai_api_base=os.getenv(
-                        "OPENAI_BASE_URL", "http://localhost:1234/v1"
+                    openai_api_key=_openai_embedding_api_key("custom"),
+                    openai_api_base=_openai_embedding_api_base(
+                        "http://localhost:1234/v1"
                     ),  # default for lmstudio
                     check_embedding_ctx_length=False,
                     **embedding_kwargs,
@@ -100,9 +117,13 @@ class Memory:
             case "openai":
                 from langchain_openai import OpenAIEmbeddings
 
-                # Support custom OpenAI-compatible APIs via OPENAI_BASE_URL
-                if "openai_api_base" not in embedding_kwargs and os.environ.get("OPENAI_BASE_URL"):
-                    embedding_kwargs["openai_api_base"] = os.environ["OPENAI_BASE_URL"]
+                # Prefer embedding-specific credentials, then fall back to shared OpenAI settings.
+                embedding_api_key = _openai_embedding_api_key()
+                embedding_api_base = _openai_embedding_api_base()
+                if "openai_api_key" not in embedding_kwargs and embedding_api_key:
+                    embedding_kwargs["openai_api_key"] = embedding_api_key
+                if "openai_api_base" not in embedding_kwargs and embedding_api_base:
+                    embedding_kwargs["openai_api_base"] = embedding_api_base
 
                 _embeddings = OpenAIEmbeddings(model=model, **embedding_kwargs)
             case "azure_openai":
