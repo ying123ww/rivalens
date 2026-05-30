@@ -15,6 +15,7 @@ interface OutputData {
   pdf?: string;
   docx?: string;
   json?: string;
+  html?: string;
 }
 
 interface WebSocketMessage {
