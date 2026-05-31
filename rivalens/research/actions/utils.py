@@ -4,6 +4,15 @@ from ..utils.logger import get_formatted_logger
 logger = get_formatted_logger()
 
 
+def _is_websocket_closed_error(error_msg: str) -> bool:
+    normalized = error_msg.lower()
+    return (
+        "close message has been sent" in normalized
+        or "closed" in normalized
+        or "connection" in normalized
+    )
+
+
 async def stream_output(
     type, content, output, websocket=None, output_log=True, metadata=None
 ):
@@ -26,7 +35,8 @@ async def stream_output(
                 'cp1252', errors='replace').decode('cp1252'))
 
     if websocket:
-        await websocket.send_json(
+        await safe_send_json(
+            websocket,
             {"type": type, "content": content,
                 "output": output, "metadata": metadata}
         )
@@ -48,14 +58,15 @@ async def safe_send_json(websocket: Any, data: Dict[str, Any]) -> None:
     except Exception as e:
         error_type = type(e).__name__
         error_msg = str(e)
+        if _is_websocket_closed_error(error_msg):
+            logger.warning("WebSocket connection appears to be closed. Client may have disconnected.")
+            return
         logger.error(
             f"Error sending JSON through WebSocket: {error_type}: {error_msg}",
             exc_info=True
         )
         # Check for common WebSocket errors and provide helpful context
-        if "closed" in error_msg.lower() or "connection" in error_msg.lower():
-            logger.warning("WebSocket connection appears to be closed. Client may have disconnected.")
-        elif "timeout" in error_msg.lower():
+        if "timeout" in error_msg.lower():
             logger.warning("WebSocket send operation timed out. The client may be unresponsive.")
 
 
