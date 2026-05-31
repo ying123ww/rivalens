@@ -5,6 +5,7 @@ from unittest.mock import patch
 from rivalens.research.config.config import Config
 from rivalens.research.config.variables.default import DEFAULT_CONFIG
 from rivalens.research.memory.embeddings import (
+    Memory,
     _openai_embedding_api_base,
     _openai_embedding_api_key,
 )
@@ -68,6 +69,23 @@ class EmbeddingConfigTest(unittest.TestCase):
 
         self.assertEqual(cfg.embedding_provider, "openai")
         self.assertEqual(cfg.embedding_model, "text-embedding-v4")
+
+    def test_openai_embedding_disables_internal_context_length_check(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            embeddings = Memory("openai", "text-embedding-v4").get_embeddings()
+
+        self.assertEqual(embeddings.model, "text-embedding-v4")
+        self.assertFalse(embeddings.check_embedding_ctx_length)
+
+    def test_explicit_embedding_context_length_check_is_preserved(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            embeddings = Memory(
+                "openai",
+                "text-embedding-v4",
+                check_embedding_ctx_length=True,
+            ).get_embeddings()
+
+        self.assertTrue(embeddings.check_embedding_ctx_length)
 
 
 if __name__ == "__main__":
