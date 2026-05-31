@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rivalens 项目技术报告</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d8dee9;
+      --soft: #f5f7fb;
+      --brand: #0b6bcb;
+      --brand-dark: #074f96;
+      --ok: #0f766e;
+      --warn: #b45309;
+      --risk: #b42318;
+      --panel: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef2f7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.72;
+    }
+    header {
+      background: #102033;
+      color: #fff;
+      padding: 48px 32px 38px;
+    }
+    header .wrap, main {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 14px;
+      font-size: 34px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 40px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--line);
+      font-size: 24px;
+    }
+    h3 {
+      margin: 28px 0 12px;
+      font-size: 18px;
+    }
+    p { margin: 10px 0; }
+    main {
+      padding: 28px 24px 72px;
+      background: var(--panel);
+    }
+    .subtitle {
+      max-width: 900px;
+      margin: 0;
+      color: #d8e6f5;
+      font-size: 16px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .pill {
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 999px;
+      padding: 5px 12px;
+      color: #edf6ff;
+      font-size: 13px;
+    }
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 10px;
+      margin: 18px 0 8px;
+    }
+    .toc a {
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: var(--soft);
+      color: var(--brand-dark);
+      text-decoration: none;
+      font-weight: 650;
+    }
+    .notice {
+      border-left: 4px solid var(--brand);
+      background: #eef6ff;
+      padding: 12px 16px;
+      margin: 16px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px 16px;
+    }
+    .card h3 {
+      margin-top: 0;
+      color: var(--brand-dark);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 22px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+    }
+    th {
+      background: #f0f4f8;
+      text-align: left;
+      font-weight: 700;
+    }
+    code {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+    .flow {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0 24px;
+    }
+    .flow-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+    .node {
+      min-height: 86px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px;
+      background: #f8fafc;
+    }
+    .node strong {
+      display: block;
+      color: #0f3f72;
+      margin-bottom: 4px;
+    }
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-weight: 700;
+      margin: -4px 0;
+    }
+    .status-ok { color: var(--ok); font-weight: 700; }
+    .status-mid { color: var(--warn); font-weight: 700; }
+    .status-risk { color: var(--risk); font-weight: 700; }
+    .small { color: var(--muted); font-size: 13px; }
+    ul { padding-left: 22px; }
+    li { margin: 5px 0; }
+    @media print {
+      body { background: #fff; }
+      header { padding: 28px 24px; }
+      main { padding: 18px 0; }
+      .toc a { break-inside: avoid; }
+      .card, .node, table { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Rivalens 项目技术报告</h1>
+      <p class="subtitle">面向甲方的端到端技术说明：系统如何从用户需求出发，完成竞品范围确认、公开证据采集、证据审查、知识结构化、分析结论生成、质量复核、报告发布与前端展示。</p>
+      <div class="meta">
+        <span class="pill">版本日期：2026-05-31</span>
+        <span class="pill">代码库：/home/ying/projects/rivalens</span>
+        <span class="pill">核心目标：可追溯多 Agent 竞品分析</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary">
+      <h2>1. 执行摘要</h2>
+      <p>Rivalens 是一个可追溯的多 Agent 竞品分析系统。它的产品目标不是简单生成一篇“看起来像调研”的文本，而是建立一条可以被复核的证据链：公开网页或本地文件形成 <code>EvidenceItem</code>，证据经过质量审查后进入结构化竞品知识，再生成带 <code>evidence_ids</code> 的分析结论，最后输出带信息索引附录的报告。</p>
+      <p>当前系统已经具备清晰的 LangGraph DAG 骨架、结构化消息协议、证据质量门、覆盖审查、claim 支持度审查、一次验证回流、报告导出和数据库持久化模型。需要如实说明的是，部分审查逻辑目前仍是规则式启发判断，还不是强语义验证；前端与后端对 Rivalens 专用流程的集成也仍有缺口。</p>
+      <div class="notice">
+        <strong>对甲方最重要的价值：</strong>Rivalens 可以把“报告结论”回连到“证据 ID、来源 URL、采集任务、分析维度、审查记录”，这使竞品分析具备可解释、可复核、可迭代的工程基础。
+      </div>
+
+      <div class="toc">
+        <a href="#positioning">项目定位</a>
+        <a href="#architecture">总体架构</a>
+        <a href="#workflow">主流程</a>
+        <a href="#agents">Agent 职责</a>
+        <a href="#schema">数据结构</a>
+        <a href="#traceability">证据追溯</a>
+        <a href="#backend">后端与前端</a>
+        <a href="#observability">可观测性</a>
+        <a href="#delivery">交付与演示</a>
+      </div>
+    </section>
+
+    <section id="positioning">
+      <h2>2. 项目定位与业务目标</h2>
+      <p>Rivalens 面向企业产品、战略、市场和投研团队，帮助用户在较短时间内形成结构化竞品分析。系统强调“可信调研链路”，因此核心能力分为四层：</p>
+      <table>
+        <thead>
+          <tr><th>层级</th><th>面向甲方的解释</th><th>工程实现载体</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>范围层</td><td>明确要比较哪些竞品、行业、分析维度，避免跑题。</td><td><code>PlanningAgent</code>、行业方向模板、<code>ActiveKnowledgeSchema</code></td></tr>
+          <tr><td>证据层</td><td>只使用可定位来源的公开证据，保留 URL、摘要、来源类型和采集时间。</td><td><code>ResearchEngineEvidenceCollector</code>、<code>EvidenceItem</code></td></tr>
+          <tr><td>分析层</td><td>把证据沉淀为功能、定价、用户画像、行业扩展字段，再形成结论。</td><td><code>KnowledgeStructuringAgent</code>、<code>AnalysisAgent</code></td></tr>
+          <tr><td>质检层</td><td>检查证据质量、覆盖缺口和 claim 是否被证据支持，必要时触发补采。</td><td><code>EvidenceQualityReviewer</code>、<code>CoverageReviewer</code>、<code>ClaimSupportReviewer</code></td></tr>
+          <tr><td>交付层</td><td>生成可下载报告，并在附录里列出信息索引，便于甲方复核来源。</td><td><code>ReportWriterAgent</code>、<code>PublisherAgent</code>、<code>report_export.py</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="architecture">
+      <h2>3. 总体架构</h2>
+      <p>系统由 Python 后端、多 Agent 工作流、研究检索引擎、结构化 schema、持久化层和前端界面组成。核心工程边界如下：</p>
+      <div class="grid">
+        <div class="card">
+          <h3>工作流编排</h3>
+          <p>主入口是 <code>rivalens/workflows/competitive_analysis.py</code>。它使用 LangGraph <code>StateGraph</code> 定义节点和条件边，保证多 Agent 流程不是散乱调用，而是可解释 DAG。</p>
+        </div>
+        <div class="card">
+          <h3>结构化协议</h3>
+          <p><code>rivalens/schema/competitive.py</code> 定义 <code>EvidenceItem</code>、<code>CompetitorKnowledge</code>、<code>AnalysisClaim</code>、<code>AgentMessage</code> 等核心协议。</p>
+        </div>
+        <div class="card">
+          <h3>研究引擎适配</h3>
+          <p><code>ResearchEngineEvidenceCollector</code> 封装底层检索和网页抓取，把外部结果标准化为证据项，避免其他 Agent 直接调用搜索。</p>
+        </div>
+        <div class="card">
+          <h3>报告与导出</h3>
+          <p><code>ReportWriterAgent</code> 组合 claims、knowledge 和 evidence，<code>PublisherAgent</code> 通过公共导出模块生成 Markdown、HTML、PDF、DOCX。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <h2>4. 端到端主流程</h2>
+      <p>当前 LangGraph 主流程如下。注意其中 <code>claim_support_review</code> 存在条件边：如果发现弱支持 claim，且还没有验证过，会回到 <code>source_collection</code> 做一次 claim-driven verification。</p>
+      <div class="flow">
+        <div class="flow-row">
+          <div class="node"><strong>1. 用户输入</strong>用户提交任务、竞品、文件、行业方向。</div>
+          <div class="node"><strong>2. scope_planner</strong>识别行业和竞品，生成或冻结分析维度。</div>
+          <div class="node"><strong>3. source_collection</strong>按竞品 x 维度并行采集公开证据。</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="flow-row">
+          <div class="node"><strong>4. evidence_review</strong>检查 URL、竞品匹配、维度匹配、最低来源数、官方来源。</div>
+          <div class="node"><strong>5. coverage_review</strong>判断指导问题是否覆盖，生成补采任务。</div>
+          <div class="node"><strong>6. knowledge_structuring</strong>把 accepted evidence 组织为竞品知识。</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="flow-row">
+          <div class="node"><strong>7. dimension_analysis</strong>生成带 evidence_ids 的分析 claim。</div>
+          <div class="node"><strong>8. claim_support_review</strong>检查 claim 是否被证据支持，必要时进入验证回流。</div>
+          <div class="node"><strong>9. report_writer</strong>撰写四章报告并自动追加信息索引。</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="flow-row">
+          <div class="node"><strong>10. publisher</strong>导出 Markdown、HTML、PDF、DOCX 文件。</div>
+          <div class="node"><strong>11. persistence</strong>后端尝试落库保存 run、evidence、claims、reviews、events。</div>
+          <div class="node"><strong>12. frontend</strong>展示报告、下载路径、运行日志和聊天交互。</div>
+        </div>
+      </div>
+
+      <h3>4.1 流程节点与代码依据</h3>
+      <table>
+        <thead>
+          <tr><th>节点</th><th>代码位置</th><th>当前功能</th><th>输出</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>scope_planner</td><td><code>rivalens/agents/planning.py</code></td><td>标准化竞品、构建文件上下文、生成行业方向计划、选择 active schema。</td><td><code>schema_selection</code> 消息、<code>active_knowledge_schema</code></td></tr>
+          <tr><td>source_collection</td><td><code>rivalens/agents/collection.py</code></td><td>构建 root branch、research brief、research task，并行调用证据采集器。</td><td><code>evidence_items</code>、<code>evidence_reviews</code>、<code>coverage_assessments</code></td></tr>
+          <tr><td>knowledge_structuring</td><td><code>rivalens/agents/knowledge_structuring.py</code></td><td>把通过源级别接收的证据按竞品分组，形成功能、定价、用户画像和行业扩展字段。</td><td><code>CompetitorKnowledge</code></td></tr>
+          <tr><td>dimension_analysis</td><td><code>rivalens/agents/analysis.py</code></td><td>从质量审查接受的证据生成 claim；没有 claim 时从竞品知识兜底生成。</td><td><code>AnalysisClaim</code></td></tr>
+          <tr><td>claim_support_review</td><td><code>rivalens/agents/claim_support.py</code></td><td>按 token overlap 检查 claim 与证据片段是否相互支撑，可生成验证队列。</td><td><code>ClaimSupportReview</code>、<code>verification_task_queue</code></td></tr>
+          <tr><td>report_writer</td><td><code>rivalens/agents/writing.py</code></td><td>使用支持 claim 和证据上下文生成报告，兜底生成固定结构报告。</td><td><code>report</code>、report message</td></tr>
+          <tr><td>publisher</td><td><code>rivalens/agents/publishing.py</code></td><td>通过 <code>generate_report_files</code> 生成多格式报告。</td><td><code>published_artifacts</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="agents">
+      <h2>5. Agent 职责边界</h2>
+      <p>Rivalens 的 Agent 设计强调职责分离：规划 Agent 不采集网页，采集 Agent 不撰写最终观点，分析 Agent 不直接搜索，写作 Agent 不绕过证据链。这样做的好处是每个环节都可以被记录、测试和替换。</p>
+      <table>
+        <thead>
+          <tr><th>Agent / Reviewer</th><th>职责</th><th>不应承担的职责</th><th>甲方可检查的产物</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PlanningAgent</td><td>确认分析范围、行业、竞品和维度。</td><td>不直接进行网页搜索，不生成最终结论。</td><td>行业方向计划、active schema、schema_selection 消息。</td></tr>
+          <tr><td>CollectionAgent</td><td>根据维度和竞品采集 evidence，控制深度和扩展预算。</td><td>不写报告，不直接判断商业结论。</td><td>research branches、research tasks、evidence items。</td></tr>
+          <tr><td>EvidenceQualityReviewer</td><td>判断证据源是否可用，识别缺 URL、竞品错配、维度错配、来源不足等。</td><td>不负责完整分析覆盖度。</td><td>accepted / rejected evidence IDs、findings、score。</td></tr>
+          <tr><td>CoverageReviewer</td><td>判断该维度问题是否覆盖，生成补采任务。</td><td>不负责 claim 级别语义支持判断。</td><td>missing questions、selected follow-up specs、routing decision。</td></tr>
+          <tr><td>KnowledgeStructuringAgent</td><td>把证据结构化为竞品知识。</td><td>不新增外部事实。</td><td>feature_tree、pricing_model、user_personas、industry_extensions。</td></tr>
+          <tr><td>AnalysisAgent</td><td>生成带 evidence_ids 的 claim。</td><td>不直接调用搜索引擎。</td><td>AnalysisClaim 列表。</td></tr>
+          <tr><td>ClaimSupportReviewer</td><td>检查 claim 是否被证据支持，并触发一次验证回流。</td><td>不负责终稿排版。</td><td>ClaimSupportReview、verification queue。</td></tr>
+          <tr><td>ReportWriterAgent</td><td>把支持 claim 和证据写成甲方可读报告。</td><td>不采集新证据，不使用 rejected evidence 支撑重要结论。</td><td>Markdown 报告和信息索引附录。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="schema">
+      <h2>6. 核心数据结构</h2>
+      <p>系统用 <code>rivalens/schema/competitive.py</code> 作为唯一核心协议文件。它不是普通类型声明，而是整条可信链路的合同。</p>
+      <table>
+        <thead>
+          <tr><th>结构</th><th>作用</th><th>关键字段</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>EvidenceItem</code></td><td>表示一条来源明确的公开证据。</td><td><code>id</code>、<code>competitor</code>、<code>branch_id</code>、<code>dimension_id</code>、<code>url</code>、<code>source_type</code>、<code>excerpt</code></td></tr>
+          <tr><td><code>EvidenceReviewResult</code></td><td>记录证据质量审查结果。</td><td><code>accepted</code>、<code>score</code>、<code>findings</code>、<code>accepted_evidence_ids</code>、<code>required_action</code></td></tr>
+          <tr><td><code>CoverageAssessment</code></td><td>记录覆盖度审查和补采决策。</td><td><code>missing_questions</code>、<code>selected_follow_up_specs</code>、<code>decision</code>、<code>confidence</code></td></tr>
+          <tr><td><code>CompetitorKnowledge</code></td><td>按竞品沉淀结构化知识。</td><td><code>feature_tree</code>、<code>pricing_model</code>、<code>user_personas</code>、<code>industry_extensions</code>、<code>evidence_ids</code></td></tr>
+          <tr><td><code>AnalysisClaim</code></td><td>最终分析结论的结构化载体。</td><td><code>claim</code>、<code>competitors</code>、<code>evidence_ids</code>、<code>branch_id</code>、<code>evidence_review_id</code></td></tr>
+          <tr><td><code>AgentMessage</code></td><td>Agent 间结构化交接。</td><td><code>sender</code>、<code>receiver</code>、<code>type</code>、<code>payload</code>、<code>artifact_ids</code>、<code>evidence_ids</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="traceability">
+      <h2>7. 证据追溯链路</h2>
+      <p>甲方最关心的是：报告里的重要判断能不能回到原始材料。Rivalens 的追溯链路如下：</p>
+      <div class="flow">
+        <div class="flow-row">
+          <div class="node"><strong>URL / source</strong>网页、文档、检索结果。</div>
+          <div class="node"><strong>EvidenceItem</strong>保留 URL、标题、摘要、来源类型、维度、竞品。</div>
+          <div class="node"><strong>EvidenceReviewResult</strong>判断接收或拒绝，记录问题。</div>
+          <div class="node"><strong>CompetitorKnowledge</strong>把证据变成结构化字段。</div>
+          <div class="node"><strong>AnalysisClaim</strong>结论保存 evidence_ids。</div>
+          <div class="node"><strong>Report Appendix</strong>信息索引表列出 ID、URL、摘要。</div>
+        </div>
+      </div>
+      <p>这一链路的关键约束是：下游 Agent 不应绕过 <code>EvidenceItem</code>；重要 claim 必须保留 <code>evidence_ids</code>；报告附录必须让甲方看到每条证据的来源 URL。</p>
+    </section>
+
+    <section id="backend">
+      <h2>8. 后端、前端与持久化</h2>
+      <h3>8.1 后端入口</h3>
+      <p>后端通过 FastAPI 提供 HTTP 和 WebSocket。常规报告走 <code>/report/</code>，Rivalens 工作流由 <code>backend/server/rivalens_runner.py</code> 调用 <code>run_competitive_analysis_task</code>，执行后尝试持久化完整状态。</p>
+      <table>
+        <thead>
+          <tr><th>接口 / 模块</th><th>职责</th><th>当前状态</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>/report/</code></td><td>生成报告并导出文件。</td><td>支持 <code>report_type=rivalens</code> 的后端分支，但当前静态前端下拉框没有展示该选项。</td></tr>
+          <tr><td><code>/ws</code></td><td>WebSocket 运行任务、日志流、聊天。</td><td>可以启动任务，但一次连接同时只处理一个长任务。</td></tr>
+          <tr><td><code>/api/industry-directions</code></td><td>预览行业方向计划。</td><td>会使用 Pydantic payload 校验返回结构。</td></tr>
+          <tr><td><code>/api/rivalens</code></td><td>快捷调用 Rivalens。</td><td>目前是硬编码演示问题，不适合正式产品调用。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>8.2 持久化</h3>
+      <p><code>backend/server/persistence.py</code> 定义了从 run、竞品、方向、branch、task、evidence、review、knowledge、claim 到 agent events 的关系表。自动建表默认关闭，需设置 <code>RIVALENS_AUTO_CREATE_TABLES=true</code> 或执行 SQL 脚本。</p>
+
+      <h3>8.3 前端体验</h3>
+      <p>当前仓库同时存在静态前端和 Next.js 前端。静态前端以通用研究助手体验为主，包含状态面板、历史记录、MCP 配置、报告展示和下载。Rivalens 专用的“证据源查看、Agent 决策回放、人工修正”尚未形成完整前端闭环。</p>
+    </section>
+
+    <section id="observability">
+      <h2>9. 可观测性与质量控制</h2>
+      <p>系统已经在各 Agent 返回值中记录 <code>agent_events</code>，并在 collection artifact 中记录检索 query、branch、task、cost 等信息。报告写作阶段也会记录模型、上下文长度、prompt family、fallback 是否启用等信息。</p>
+      <table>
+        <thead>
+          <tr><th>观测对象</th><th>当前记录</th><th>对甲方的价值</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Agent 输入输出</td><td><code>agent_events.input/output</code></td><td>可解释每一步为什么这样做。</td></tr>
+          <tr><td>证据审查</td><td><code>evidence_reviews.findings</code></td><td>可看到哪些来源被拒绝，为什么拒绝。</td></tr>
+          <tr><td>覆盖审查</td><td><code>coverage_assessments</code></td><td>可看到维度是否充分覆盖，下一步是否补采。</td></tr>
+          <tr><td>claim 支持度</td><td><code>claim_support_reviews</code></td><td>可看到哪些结论证据不足，是否触发验证。</td></tr>
+          <tr><td>报告导出</td><td><code>published_artifacts</code></td><td>可定位 Markdown、HTML、PDF、DOCX 输出文件。</td></tr>
+        </tbody>
+      </table>
+      <p><span class="status-mid">需要说明：</span>目前 prompt 全量内容、token 明细、每个检索器耗时、重试轨迹并未完整落库，后续正式交付建议补齐。</p>
+    </section>
+
+    <section id="delivery">
+      <h2>10. 交付演示建议</h2>
+      <p>面向甲方演示时，应优先展示“从证据到结论”的可信链，而不是只展示终稿。</p>
+      <table>
+        <thead>
+          <tr><th>演示步骤</th><th>讲解重点</th><th>推荐展示材料</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>输入竞品分析任务</td><td>说明系统如何识别竞品、行业和分析维度。</td><td>行业方向预览、active schema。</td></tr>
+          <tr><td>查看采集分支</td><td>说明每个竞品 x 维度都有独立 branch 和 task。</td><td>research_branches、research_tasks。</td></tr>
+          <tr><td>查看证据审查</td><td>说明系统如何拒绝无 URL、错竞品、错维度或来源不足的结果。</td><td>evidence_reviews。</td></tr>
+          <tr><td>查看补采和验证</td><td>说明 coverage gap 或 weak claim 会触发回流，而不是只做末端润色。</td><td>coverage_assessments、verification_task_queue。</td></tr>
+          <tr><td>查看最终报告</td><td>说明每个重要判断应能定位 evidence ID，附录有 URL。</td><td>HTML 报告、信息索引表。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>11. 当前成熟度判断</h3>
+      <table>
+        <thead>
+          <tr><th>能力项</th><th>成熟度</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>多 Agent DAG 骨架</td><td><span class="status-ok">已具备</span></td><td>节点和条件边清晰，主流程可解释。</td></tr>
+          <tr><td>结构化消息</td><td><span class="status-ok">已具备</span></td><td>AgentMessage payload 使用 Pydantic 校验。</td></tr>
+          <tr><td>证据追溯</td><td><span class="status-ok">已具备基础</span></td><td>EvidenceItem 到 claim 和报告附录的链路已形成。</td></tr>
+          <tr><td>质量闭环</td><td><span class="status-mid">半自动</span></td><td>有回流，但判断仍偏规则式，语义校验不足。</td></tr>
+          <tr><td>前端源查看</td><td><span class="status-risk">不足</span></td><td>缺少 Rivalens 专用 evidence/source/replay 视图。</td></tr>
+          <tr><td>生产稳定性</td><td><span class="status-mid">需要加固</span></td><td>需要补齐超时、重试、鉴权、文件安全和唯一 artifact 管理。</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

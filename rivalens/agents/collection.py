@@ -26,8 +26,8 @@ class CollectionAgent:
         evidence_reviewer: EvidenceQualityReviewer | None = None,
         coverage_reviewer: CoverageReviewer | None = None,
         max_branch_depth: int = 1,
-        max_expansion_branches: int = 24,
-        max_root_branch_hard_limit: int = 80,
+        max_expansion_branches: int = 10,
+        max_root_branch_hard_limit: int = 20,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()

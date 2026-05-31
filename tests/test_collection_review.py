@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.claim_support import ClaimSupportReviewer
@@ -10,6 +11,7 @@ from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import ReportWriterAgent
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
 from rivalens.schema import SOURCE_TYPE_PRIORITY
+from rivalens.workflows.competitive_analysis import _int_budget
 
 
 def pricing_branch():
@@ -24,6 +26,38 @@ def pricing_branch():
 
 
 class CollectionReviewTest(unittest.TestCase):
+    def test_collection_budget_reads_env_with_safe_defaults(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "RIVALENS_MAX_BRANCH_DEPTH": "0",
+                "RIVALENS_MAX_EXPANSION_BRANCHES": "3",
+                "RIVALENS_MAX_ROOT_BRANCHES": "2",
+            },
+        ):
+            self.assertEqual(
+                _int_budget(None, "RIVALENS_MAX_BRANCH_DEPTH", 1),
+                0,
+            )
+            self.assertEqual(
+                _int_budget(None, "RIVALENS_MAX_EXPANSION_BRANCHES", 24),
+                3,
+            )
+            self.assertEqual(
+                _int_budget(None, "RIVALENS_MAX_ROOT_BRANCHES", 80, minimum=1),
+                2,
+            )
+
+        with patch.dict("os.environ", {"RIVALENS_MAX_EXPANSION_BRANCHES": "bad"}):
+            self.assertEqual(
+                _int_budget(None, "RIVALENS_MAX_EXPANSION_BRANCHES", 24),
+                24,
+            )
+            self.assertEqual(
+                _int_budget(5, "RIVALENS_MAX_EXPANSION_BRANCHES", 24),
+                5,
+            )
+
     def test_collection_root_branches_use_planned_industry_extensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",

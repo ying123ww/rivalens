@@ -1,5 +1,6 @@
 """Main DAG for the Rivalens competitor-analysis workflow."""
 
+import os
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -24,16 +25,53 @@ def route_after_claim_support(state: CompetitorAnalysisState) -> str:
     return "supported_enough"
 
 
+def _int_budget(
+    value: Any,
+    env_name: str,
+    default: int,
+    minimum: int = 0,
+) -> int:
+    raw_value = value if value is not None else os.getenv(env_name)
+    if raw_value in (None, ""):
+        return default
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
 def build_competitive_analysis_graph(
     websocket=None,
     stream_output=None,
     tone=None,
     headers: dict[str, Any] | None = None,
+    max_branch_depth: int | None = None,
+    max_expansion_branches: int | None = None,
+    max_root_branch_hard_limit: int | None = None,
 ) -> Any:
     """Build the traceable multi-agent competitor-analysis DAG."""
     evidence_collector = ResearchEngineEvidenceCollector(websocket, stream_output, tone=tone, headers=headers)
     planner = PlanningAgent()
-    collection = CollectionAgent(evidence_collector)
+    collection = CollectionAgent(
+        evidence_collector,
+        max_branch_depth=_int_budget(
+            max_branch_depth,
+            "RIVALENS_MAX_BRANCH_DEPTH",
+            1,
+        ),
+        max_expansion_branches=_int_budget(
+            max_expansion_branches,
+            "RIVALENS_MAX_EXPANSION_BRANCHES",
+            24,
+        ),
+        max_root_branch_hard_limit=_int_budget(
+            max_root_branch_hard_limit,
+            "RIVALENS_MAX_ROOT_BRANCHES",
+            80,
+            minimum=1,
+        ),
+    )
     knowledge_structuring = KnowledgeStructuringAgent()
     analysis = AnalysisAgent()
     claim_support = ClaimSupportReviewer()
@@ -95,5 +133,13 @@ async def run_competitive_analysis_task(
         "deep_research": kwargs.get("deep_research", False),
         "verbose": kwargs.get("verbose", True),
     }
-    graph = build_competitive_analysis_graph(websocket, stream_output, tone, headers).compile()
+    graph = build_competitive_analysis_graph(
+        websocket,
+        stream_output,
+        tone,
+        headers,
+        max_branch_depth=kwargs.get("max_branch_depth"),
+        max_expansion_branches=kwargs.get("max_expansion_branches"),
+        max_root_branch_hard_limit=kwargs.get("max_root_branch_hard_limit"),
+    ).compile()
     return await graph.ainvoke({"task": task})

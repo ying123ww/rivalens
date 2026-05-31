@@ -233,6 +233,28 @@ The UniFuncs retriever is used for source discovery, not final report writing.
 It returns source URLs and short snippets, then the existing scraper fetches full
 page content before evidence review and downstream analysis.
 
+## Rivalens Collection Limits
+
+For `report_type=rivalens`, the competitor-analysis workflow creates collection
+branches before calling the underlying search retrievers. Use these environment
+variables to reduce or expand that branch budget:
+
+```env
+RIVALENS_MAX_ROOT_BRANCHES=6
+RIVALENS_MAX_BRANCH_DEPTH=0
+RIVALENS_MAX_EXPANSION_BRANCHES=0
+```
+
+- `RIVALENS_MAX_ROOT_BRANCHES` caps the initial competitor x analysis-dimension
+  collection branches.
+- `RIVALENS_MAX_BRANCH_DEPTH=0` disables follow-up collection branches.
+- `RIVALENS_MAX_EXPANSION_BRANCHES` caps follow-up branches created from
+  coverage gaps.
+
+These limits are separate from `MAX_SEARCH_RESULTS_PER_QUERY` and
+`MAX_ITERATIONS`, which control how many search results and sub-queries each
+individual collection branch uses.
+
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
 `ReportWriterAgent` do not run their own research/report modes by default.
 `ReportWriterAgent` does not collect new evidence, but it adapts Rivalens claims,
