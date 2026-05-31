@@ -156,6 +156,7 @@ EvidenceReviewFindingCode = Literal[
     "missing_customer_or_review_source",
     "competitor_mismatch",
     "dimension_mismatch",
+    "low_quality_text",
 ]
 
 

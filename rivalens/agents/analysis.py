@@ -4,6 +4,7 @@ from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
+from rivalens.text_quality import clean_text, is_low_quality_text
 
 
 class AnalysisAgent:
@@ -54,7 +55,14 @@ class AnalysisAgent:
                         "message_id": knowledge_message.get("id") if knowledge_message else None,
                         "evidence_review_count": len(state.get("evidence_reviews", [])),
                     },
-                    "output": {"claim_count": len(claims)},
+                    "output": {
+                        "claim_count": len(claims),
+                        "claim_granularity": (
+                            "accepted_evidence_cluster"
+                            if claim_source == "accepted_evidence_reviews"
+                            else "competitor_knowledge"
+                        ),
+                    },
                 }
             ],
         }
@@ -87,57 +95,153 @@ class AnalysisAgent:
             if not accepted_ids:
                 continue
 
-            evidence_items = [evidence_by_id[evidence_id] for evidence_id in accepted_ids]
             branch = branch_by_id.get(review.get("branch_id", ""), {})
-            competitor = (
-                branch.get("competitor")
-                or evidence_items[0].get("competitor")
-                or "the target competitor"
-            )
-            dimension = (
-                branch.get("dimension_id")
-                or evidence_items[0].get("dimension_id")
-                or "source_evidence"
-            )
-            if dimension == "competitor_profile":
-                continue
-            dimension_name = (
-                branch.get("dimension_name")
-                or evidence_items[0].get("dimension_name")
-                or dimension.replace("_", " ")
-            )
+            claim_candidates = []
+            for evidence_id in accepted_ids:
+                evidence = evidence_by_id[evidence_id]
+                competitor = (
+                    branch.get("competitor")
+                    or evidence.get("competitor")
+                    or "the target competitor"
+                )
+                dimension = (
+                    branch.get("dimension_id")
+                    or evidence.get("dimension_id")
+                    or "source_evidence"
+                )
+                if dimension == "competitor_profile":
+                    continue
+                evidence_text = self._evidence_excerpt_preview([evidence])
+                if is_low_quality_text(evidence_text):
+                    continue
+                dimension_name = (
+                    branch.get("dimension_name")
+                    or evidence.get("dimension_name")
+                    or dimension.replace("_", " ")
+                )
+                claim_candidates.append(
+                    {
+                        "competitor": str(competitor),
+                        "dimension": dimension,
+                        "dimension_name": str(dimension_name),
+                        "evidence": evidence,
+                        "evidence_id": evidence_id,
+                        "claim": self._evidence_claim_text(
+                            str(competitor),
+                            str(dimension_name),
+                            evidence,
+                        ),
+                    }
+                )
 
-            claims.append(
-                {
-                    "id": f"claim_{len(claims) + 1}",
-                    "dimension": dimension,
-                    "branch_id": review.get("branch_id", ""),
-                    "evidence_review_id": review.get("id", ""),
-                    "claim": self._branch_claim_text(
-                        str(competitor),
-                        str(dimension_name),
-                        evidence_items,
-                    ),
-                    "competitors": [str(competitor)] if competitor else [],
-                    "evidence_ids": accepted_ids,
-                    "reasoning": (
-                        "Derived immediately after EvidenceQualityReviewer accepted "
-                        "the branch evidence for this schema dimension."
-                    ),
-                    "confidence": self._quality_gated_confidence(evidence_items, review),
-                }
-            )
+            for cluster in self._cluster_claim_candidates(claim_candidates):
+                representative = cluster[0]
+                cluster_evidence_items = [candidate["evidence"] for candidate in cluster]
+                cluster_evidence_ids = [candidate["evidence_id"] for candidate in cluster]
+                claims.append(
+                    {
+                        "id": f"claim_{len(claims) + 1}",
+                        "dimension": representative["dimension"],
+                        "branch_id": review.get("branch_id", ""),
+                        "evidence_review_id": review.get("id", ""),
+                        "claim": representative["claim"],
+                        "competitors": [representative["competitor"]]
+                        if representative["competitor"]
+                        else [],
+                        "evidence_ids": cluster_evidence_ids,
+                        "reasoning": (
+                            "Derived immediately after EvidenceQualityReviewer accepted "
+                            f"{len(cluster_evidence_ids)} EvidenceItem(s) supporting the same "
+                            "atomic claim for this schema dimension."
+                        ),
+                        "confidence": self._quality_gated_confidence(
+                            cluster_evidence_items,
+                            review,
+                        ),
+                    }
+                )
 
         return claims
 
-    def _branch_claim_text(
+    def _cluster_claim_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+    ) -> list[list[dict[str, Any]]]:
+        clusters: list[list[dict[str, Any]]] = []
+        for candidate in candidates:
+            for cluster in clusters:
+                if self._same_atomic_claim(candidate, cluster[0]):
+                    cluster.append(candidate)
+                    break
+            else:
+                clusters.append([candidate])
+        return clusters
+
+    def _same_atomic_claim(
+        self,
+        candidate: dict[str, Any],
+        seed: dict[str, Any],
+    ) -> bool:
+        if candidate.get("dimension") != seed.get("dimension"):
+            return False
+        if candidate.get("competitor") != seed.get("competitor"):
+            return False
+
+        candidate_text = self._normalize_claim_text(candidate.get("claim", ""))
+        seed_text = self._normalize_claim_text(seed.get("claim", ""))
+        if not candidate_text or not seed_text:
+            return False
+        if candidate_text == seed_text:
+            return True
+        if len(candidate_text) > 60 and len(seed_text) > 60:
+            if candidate_text in seed_text or seed_text in candidate_text:
+                return True
+
+        candidate_tokens = self._claim_similarity_tokens(candidate_text)
+        seed_tokens = self._claim_similarity_tokens(seed_text)
+        if min(len(candidate_tokens), len(seed_tokens)) < 4:
+            return False
+        overlap = len(candidate_tokens & seed_tokens)
+        return (
+            overlap / min(len(candidate_tokens), len(seed_tokens)) >= 0.7
+            and overlap / max(len(candidate_tokens), len(seed_tokens)) >= 0.45
+        )
+
+    def _normalize_claim_text(self, text: str) -> str:
+        import re
+
+        normalized = " ".join(str(text).lower().split())
+        return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", normalized).strip()
+
+    def _claim_similarity_tokens(self, text: str) -> set[str]:
+        stopwords = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "this",
+            "that",
+            "from",
+            "has",
+            "have",
+            "its",
+            "their",
+            "acme",
+        }
+        return {
+            token
+            for token in text.split()
+            if len(token) >= 3 and token not in stopwords
+        }
+
+    def _evidence_claim_text(
         self,
         competitor: str,
         dimension_name: str,
-        evidence_items: list[dict[str, Any]],
+        evidence: dict[str, Any],
     ) -> str:
-        evidence_preview = self._evidence_excerpt_preview(evidence_items)
-        return f"{competitor} has quality-reviewed {dimension_name} evidence: {evidence_preview}"
+        evidence_preview = self._evidence_excerpt_preview([evidence])
+        return f"{competitor} {dimension_name}: {evidence_preview}"
 
     def _evidence_excerpt_preview(self, evidence_items: list[dict[str, Any]]) -> str:
         snippets = []
@@ -148,7 +252,7 @@ class AnalysisAgent:
                 or evidence.get("url")
                 or ""
             )
-            normalized = " ".join(str(text).split())
+            normalized = " ".join(clean_text(text).split())
             if normalized:
                 snippets.append(normalized[:220])
         return " ".join(snippets)[:420] or "accepted source-backed evidence is available."
@@ -174,7 +278,10 @@ class AnalysisAgent:
         competitor = knowledge.get("competitor", "")
         for feature in knowledge.get("feature_tree", []):
             description = feature.get("description") or feature.get("name") or ""
+            description = clean_text(description)
             if not description:
+                continue
+            if is_low_quality_text(description):
                 continue
             claims.append(
                 {
@@ -200,6 +307,9 @@ class AnalysisAgent:
             for evidence_id in plan.get("evidence_ids", [])
         ]
         plan_names = ", ".join(plan.get("name", "observed plan") for plan in plans[:4])
+        plan_names = clean_text(plan_names)
+        if is_low_quality_text(plan_names):
+            return
         claims.append(
             {
                 "id": f"claim_{len(claims) + 1}",
@@ -215,8 +325,10 @@ class AnalysisAgent:
     def _append_persona_claims(self, claims: list[AnalysisClaim], knowledge: dict) -> None:
         competitor = knowledge.get("competitor", "")
         for persona in knowledge.get("user_personas", []):
-            needs = ", ".join(persona.get("needs", [])[:3])
+            needs = clean_text(", ".join(persona.get("needs", [])[:3]))
             if not needs:
+                continue
+            if is_low_quality_text(needs):
                 continue
             claims.append(
                 {

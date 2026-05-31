@@ -5,6 +5,7 @@ from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge
+from rivalens.text_quality import clean_text, is_low_quality_text
 
 
 class KnowledgeStructuringAgent:
@@ -98,11 +99,16 @@ class KnowledgeStructuringAgent:
                     or evidence.get("title")
                     or ""
                 )
+                text = clean_text(text)
                 if not text:
+                    continue
+                if is_low_quality_text(text):
                     continue
                 source_type = evidence.get("source_type", "other")
                 confidence = evidence.get("confidence", 0.5)
-                title = evidence.get("title", "")
+                title = clean_text(evidence.get("title", ""))
+                if title and is_low_quality_text(title):
+                    title = ""
                 normalized_text = f"{title} {text}".lower()
 
                 if (
@@ -283,6 +289,9 @@ class KnowledgeStructuringAgent:
 
     def _profile_note(self, evidence: dict[str, Any]) -> str:
         text = evidence.get("excerpt") or evidence.get("title") or ""
+        text = clean_text(text)
+        if is_low_quality_text(text):
+            return ""
         return " ".join(str(text).split())[:220]
 
     def _guess_feature_category(self, text: str, active_schema: dict[str, Any]) -> str:

@@ -35,6 +35,7 @@ class CustomLogsHandler:
     def __init__(self, websocket, task: str):
         self.logs = []
         self.websocket = websocket
+        self.websocket_closed = False
         sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
         self.log_file = os.path.join("outputs", f"{sanitized_filename}.json")
         self.timestamp = datetime.now().isoformat()
@@ -54,11 +55,27 @@ class CustomLogsHandler:
             }, f, indent=2)
 
     async def send_json(self, data: Dict[str, Any]) -> None:
-        """Store log data and send to websocket"""
-        # Send to websocket for real-time display
-        if self.websocket:
+        """Store log data and send to websocket when it is still connected."""
+        self._write_log_data(data)
+
+        if not self.websocket or self.websocket_closed:
+            return
+
+        try:
             await self.websocket.send_json(data)
-            
+        except Exception as exc:
+            self.websocket_closed = True
+            self.websocket = None
+            self._record_websocket_disconnect(exc, data)
+            log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+            log_method(
+                "WebSocket send failed; live updates stopped but server-side logging will continue: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=not _is_websocket_disconnect_error(exc),
+            )
+
+    def _write_log_data(self, data: Dict[str, Any]) -> None:
         # Read current log file
         with open(self.log_file, 'r') as f:
             log_data = json.load(f)
@@ -70,6 +87,10 @@ class CustomLogsHandler:
                 "type": "event",
                 "data": data
             })
+        elif data.get('type') == 'report':
+            log_data['content']['report'] = (
+                log_data['content'].get('report', '') + str(data.get('output', ''))
+            )
         else:
             # Update content section for other types of data
             log_data['content'].update(data)
@@ -77,6 +98,58 @@ class CustomLogsHandler:
         # Save updated log file
         with open(self.log_file, 'w') as f:
             json.dump(log_data, f, indent=2)
+
+    def _record_websocket_disconnect(self, exc: Exception, failed_data: Dict[str, Any]) -> None:
+        failed_type = failed_data.get("type")
+        failed_content = failed_data.get("content")
+        self._write_log_data({
+            "type": "logs",
+            "content": "websocket_disconnected",
+            "output": (
+                "WebSocket disconnected while streaming results. "
+                "The browser will not receive further live updates for this run."
+            ),
+            "metadata": {
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "failed_message_type": failed_type,
+                "failed_message_content": failed_content,
+            },
+        })
+
+
+def _is_websocket_disconnect_error(exc: Exception) -> bool:
+    error_type = type(exc).__name__
+    error_msg = str(exc).lower()
+    return (
+        error_type in {
+            "WebSocketDisconnect",
+            "ClientDisconnected",
+            "ConnectionClosed",
+            "ConnectionClosedError",
+            "ConnectionClosedOK",
+        }
+        or "websocketdisconnect" in error_msg
+        or "client disconnected" in error_msg
+        or "connectionclosed" in error_msg
+        or "close message has been sent" in error_msg
+        or "no close frame received" in error_msg
+    )
+
+
+async def _safe_websocket_send_json(websocket, data: Dict[str, Any]) -> bool:
+    try:
+        await websocket.send_json(data)
+        return True
+    except Exception as exc:
+        log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+        log_method(
+            "Unable to send WebSocket message: %s: %s",
+            type(exc).__name__,
+            exc,
+            exc_info=not _is_websocket_disconnect_error(exc),
+        )
+        return False
 
 
 class Researcher:
@@ -128,7 +201,7 @@ def sanitize_filename(filename: str) -> str:
     return re.sub(r"[^\w\s-]", "", sanitized).strip()
 
 
-async def handle_start_command(websocket, data: str, manager):
+async def handle_start_command(websocket, data: str, manager, on_log_handler=None):
     json_data = json.loads(data[6:])
     (
         task,
@@ -152,6 +225,8 @@ async def handle_start_command(websocket, data: str, manager):
 
     # Create logs handler with websocket and task
     logs_handler = CustomLogsHandler(websocket, task)
+    if on_log_handler:
+        on_log_handler(logs_handler)
     # Initialize log content with query
     await logs_handler.send_json({
         "query": task,
@@ -187,7 +262,7 @@ async def handle_start_command(websocket, data: str, manager):
     )
     # Add JSON log path to file_paths
     file_paths["json"] = os.path.relpath(logs_handler.log_file)
-    await send_file_paths(websocket, file_paths)
+    await send_file_paths(logs_handler, file_paths)
 
 
 async def handle_human_feedback(data: str):
@@ -331,6 +406,11 @@ async def execute_rivalens_workflow(manager) -> Any:
 
 async def handle_websocket_communication(websocket, manager):
     running_task: asyncio.Task | None = None
+    active_log_handler: CustomLogsHandler | None = None
+
+    def set_active_log_handler(log_handler: CustomLogsHandler) -> None:
+        nonlocal active_log_handler
+        active_log_handler = log_handler
 
     def run_long_running_task(awaitable: Awaitable) -> asyncio.Task:
         async def safe_run():
@@ -341,7 +421,8 @@ async def handle_websocket_communication(websocket, manager):
                 raise
             except Exception as e:
                 logger.error(f"Error running task: {e}\n{traceback.format_exc()}")
-                await websocket.send_json(
+                await _safe_websocket_send_json(
+                    websocket,
                     {
                         "type": "logs",
                         "content": "error",
@@ -364,7 +445,8 @@ async def handle_websocket_communication(websocket, manager):
                     logger.warning(
                         f"Received request while task is already running. Request data preview: {data[: min(20, len(data))]}..."
                     )
-                    await websocket.send_json(
+                    await _safe_websocket_send_json(
+                        websocket,
                         {
                             "type": "logs",
                             "content": "warning",
@@ -375,7 +457,12 @@ async def handle_websocket_communication(websocket, manager):
                 elif data.strip().startswith("start"):
                     logger.info(f"Processing start command")
                     running_task = run_long_running_task(
-                        handle_start_command(websocket, data, manager)
+                        handle_start_command(
+                            websocket,
+                            data,
+                            manager,
+                            on_log_handler=set_active_log_handler,
+                        )
                     )
                 elif data.strip().startswith("human_feedback"):
                     logger.info(f"Processing human_feedback command")
@@ -387,18 +474,37 @@ async def handle_websocket_communication(websocket, manager):
                     error_msg = f"Error: Unknown command or not enough parameters provided. Received: '{data[:100]}...'" if len(data) > 100 else f"Error: Unknown command or not enough parameters provided. Received: '{data}'"
                     logger.error(error_msg)
                     print(error_msg)
-                    await websocket.send_json({
+                    await _safe_websocket_send_json(websocket, {
                         "type": "error",
                         "content": "error",
                         "output": "Unknown command received by server"
                     })
             except Exception as e:
-                logger.error(f"WebSocket error: {str(e)}\n{traceback.format_exc()}")
+                if _is_websocket_disconnect_error(e):
+                    logger.warning("WebSocket disconnected while handling messages: %s: %s", type(e).__name__, e)
+                else:
+                    logger.error(f"WebSocket error: {str(e)}\n{traceback.format_exc()}")
                 print(f"WebSocket error: {e}")
                 break
     finally:
         if running_task and not running_task.done():
+            if active_log_handler:
+                active_log_handler._write_log_data({
+                    "type": "logs",
+                    "content": "websocket_disconnected",
+                    "output": (
+                        "WebSocket disconnected before this run completed. "
+                        "The active server task was cancelled, so a final report may not be available."
+                    ),
+                    "metadata": {
+                        "running_task_cancelled": True,
+                    },
+                })
             running_task.cancel()
+            try:
+                await running_task
+            except asyncio.CancelledError:
+                pass
 
 def extract_command_data(json_data: Dict) -> tuple:
     return (

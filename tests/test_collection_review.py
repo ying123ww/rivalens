@@ -8,7 +8,12 @@ from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
-from rivalens.agents.writing import ReportWriterAgent
+from rivalens.agents.writing import (
+    OPENING_CONTEXT_CHAR_LIMIT,
+    SECTION_CONTEXT_CHAR_LIMIT,
+    SUMMARY_CONTEXT_CHAR_LIMIT,
+    ReportWriterAgent,
+)
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
 from rivalens.schema import SOURCE_TYPE_PRIORITY
 from rivalens.workflows.competitive_analysis import _int_budget
@@ -298,7 +303,7 @@ class CollectionReviewTest(unittest.TestCase):
             },
         )
 
-    def test_claim_support_review_generates_verification_task_for_unverifiable_claim(self):
+    def test_claim_support_review_does_not_generate_verification_by_default(self):
         state = {
             "analysis_claims": [
                 {
@@ -322,6 +327,35 @@ class CollectionReviewTest(unittest.TestCase):
             result["claim_support_reviews"][0]["support_status"],
             "unverifiable",
         )
+        self.assertEqual(result["verification_task_queue"], [])
+        self.assertFalse(
+            result["agent_events"][-1]["input"]["verification_enabled"],
+        )
+
+    def test_claim_support_review_can_generate_verification_when_enabled(self):
+        state = {
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "pricing_business_model",
+                    "branch_id": "collect_acme_pricing_business_model",
+                    "claim": "Acme publishes enterprise pricing with public packaging.",
+                    "competitors": ["Acme"],
+                    "evidence_ids": [],
+                    "confidence": 0.6,
+                }
+            ],
+            "evidence_items": [],
+            "messages": [],
+            "verification_rounds": 0,
+        }
+
+        result = ClaimSupportReviewer(enable_verification=True).review(state)
+
+        self.assertEqual(
+            result["claim_support_reviews"][0]["support_status"],
+            "unverifiable",
+        )
         self.assertEqual(
             result["verification_task_queue"][0]["search_stage"],
             "verification",
@@ -337,6 +371,9 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(
             result["verification_task_queue"][0]["decision_subtype"],
             "evidence_check",
+        )
+        self.assertTrue(
+            result["agent_events"][-1]["input"]["verification_enabled"],
         )
 
     def test_claim_support_review_supports_chinese_claims_with_chinese_evidence(self):
@@ -526,6 +563,57 @@ class CollectionReviewTest(unittest.TestCase):
             SOURCE_TYPE_PRIORITY["regulator_database"],
         )
         self.assertTrue(evidence["is_primary_source"])
+
+    def test_evidence_collector_repairs_utf8_mojibake(self):
+        collector = ResearchEngineEvidenceCollector()
+        mojibake_title = "淘宝官网".encode("utf-8").decode("latin-1")
+        mojibake_content = "钉钉的钉盘有哪些功能".encode("utf-8").decode("latin-1")
+
+        evidence = collector._to_evidence_items(
+            {
+                "id": "collect_dingtalk_features",
+                "branch_id": "collect_dingtalk_features",
+                "competitor": "钉钉",
+                "dimension_id": "product_features",
+                "dimension_name": "产品功能",
+                "query": "钉钉的钉盘有哪些功能",
+            },
+            [
+                {
+                    "title": mojibake_title,
+                    "url": "https://example.com/dingtalk",
+                    "raw_content": mojibake_content,
+                }
+            ],
+        )[0]
+
+        self.assertEqual(evidence["title"], "淘宝官网")
+        self.assertIn("钉钉的钉盘有哪些功能", evidence["excerpt"])
+
+    def test_evidence_review_rejects_unrecoverable_garbled_text(self):
+        review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            pricing_branch(),
+            [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "url": "https://acme.example/pricing",
+                    "title": "Acme pricing",
+                    "excerpt": "��ࡱ�����������������>���� ������������",
+                    "source_type": "pricing_page",
+                }
+            ],
+        )
+
+        self.assertFalse(review["accepted"])
+        self.assertEqual(review["accepted_evidence_ids"], [])
+        self.assertEqual(review["rejected_evidence_ids"], ["ev_1"])
+        self.assertEqual(review["required_action"], "retry")
+        self.assertIn(
+            "low_quality_text",
+            {finding["code"] for finding in review["findings"]},
+        )
 
     def test_evidence_review_accepts_url_backed_branch_evidence(self):
         review = EvidenceQualityReviewer(min_sources_per_branch=2).review(
@@ -829,6 +917,31 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Acme pricing", serialized)
         self.assertNotIn("Rejected scrape", serialized)
 
+    def test_knowledge_structuring_skips_unreadable_feature_text(self):
+        state = {
+            "active_knowledge_schema": {"id": "schema_1"},
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "product_features",
+                    "dimension_name": "产品功能",
+                    "title": "Broken scrape",
+                    "excerpt": "��ࡱ�����������������>���� ������������",
+                    "source_type": "docs",
+                    "confidence": 0.8,
+                }
+            ],
+            "evidence_reviews": [{"accepted_evidence_ids": ["ev_1"]}],
+            "messages": [],
+        }
+
+        result = asyncio.run(KnowledgeStructuringAgent().run(state))
+        knowledge = result["competitor_knowledge"][0]
+
+        self.assertEqual(knowledge["feature_tree"], [])
+        self.assertNotIn("��ࡱ", str(knowledge))
+
     def test_analysis_uses_quality_accepted_branch_evidence(self):
         state = {
             "evidence_items": [
@@ -872,20 +985,236 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(claim["branch_id"], "collect_acme_pricing_model")
         self.assertEqual(claim["evidence_review_id"], "ev_review_collect_acme_pricing_model")
         self.assertEqual(claim["evidence_ids"], ["ev_1"])
-        self.assertIn("quality-reviewed Pricing Model evidence", claim["claim"])
+        self.assertIn("Acme Pricing Model:", claim["claim"])
         self.assertIn("Acme publishes a starter pricing plan", claim["claim"])
         self.assertNotIn("Rejected scrape", claim["claim"])
+
+    def test_analysis_repairs_mojibake_and_skips_unreadable_claim_text(self):
+        mojibake_excerpt = "飞书核心功能说明".encode("utf-8").decode("latin-1")
+        state = {
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "飞书",
+                    "dimension_id": "product_features",
+                    "dimension_name": "产品功能",
+                    "title": "飞书功能",
+                    "excerpt": mojibake_excerpt,
+                    "confidence": 0.8,
+                },
+                {
+                    "id": "ev_2",
+                    "competitor": "飞书",
+                    "dimension_id": "product_features",
+                    "dimension_name": "产品功能",
+                    "title": "Broken scrape",
+                    "excerpt": "��ࡱ�����������������>���� ������������",
+                    "confidence": 0.8,
+                },
+            ],
+            "research_branches": [
+                {
+                    "id": "collect_feishu_product_features",
+                    "competitor": "飞书",
+                    "dimension_id": "product_features",
+                    "dimension_name": "产品功能",
+                }
+            ],
+            "evidence_reviews": [
+                {
+                    "id": "ev_review_collect_feishu_product_features",
+                    "branch_id": "collect_feishu_product_features",
+                    "accepted": True,
+                    "score": 0.9,
+                    "accepted_evidence_ids": ["ev_1", "ev_2"],
+                    "required_action": "accept",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+        claims = result["analysis_claims"]
+
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(claims[0]["evidence_ids"], ["ev_1"])
+        self.assertIn("飞书核心功能说明", claims[0]["claim"])
+        self.assertNotIn("��ࡱ", claims[0]["claim"])
+
+    def test_analysis_skips_low_quality_feature_claims_from_knowledge(self):
+        state = {
+            "competitor_knowledge": [
+                {
+                    "competitor": "飞书",
+                    "feature_tree": [
+                        {
+                            "category": "core_feature",
+                            "description": "��ࡱ�����������������>���� ������������",
+                            "evidence_ids": ["ev_1"],
+                            "confidence": 0.8,
+                        }
+                    ],
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+
+        self.assertEqual(result["analysis_claims"], [])
+
+    def test_analysis_emits_multiple_atomic_claims_per_dimension(self):
+        state = {
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Starter plan",
+                    "excerpt": "Acme publishes a starter pricing plan.",
+                    "confidence": 0.8,
+                },
+                {
+                    "id": "ev_2",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Enterprise contact",
+                    "excerpt": "Acme directs enterprise pricing inquiries to sales.",
+                    "confidence": 0.7,
+                },
+            ],
+            "research_branches": [pricing_branch()],
+            "evidence_reviews": [
+                {
+                    "id": "ev_review_collect_acme_pricing_model",
+                    "branch_id": "collect_acme_pricing_model",
+                    "accepted": True,
+                    "score": 0.9,
+                    "accepted_evidence_ids": ["ev_1", "ev_2"],
+                    "rejected_evidence_ids": [],
+                    "required_action": "accept",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+        claims = result["analysis_claims"]
+
+        self.assertEqual(len(claims), 2)
+        self.assertEqual([claim["dimension"] for claim in claims], ["pricing_model", "pricing_model"])
+        self.assertEqual([claim["evidence_ids"] for claim in claims], [["ev_1"], ["ev_2"]])
+        self.assertIn("starter pricing plan", claims[0]["claim"])
+        self.assertNotIn("enterprise pricing", claims[0]["claim"])
+        self.assertIn("enterprise pricing inquiries", claims[1]["claim"])
+        self.assertNotIn("starter pricing plan", claims[1]["claim"])
+        self.assertEqual(result["messages"][-1]["evidence_ids"], ["ev_1", "ev_2"])
+        self.assertEqual(
+            result["agent_events"][-1]["output"]["claim_granularity"],
+            "accepted_evidence_cluster",
+        )
+
+    def test_analysis_merges_multiple_evidence_items_for_same_atomic_claim(self):
+        state = {
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Acme pricing page",
+                    "excerpt": "Acme publishes a starter pricing plan.",
+                    "confidence": 0.8,
+                },
+                {
+                    "id": "ev_2",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Acme help center",
+                    "excerpt": "Acme publishes a starter pricing plan on its pricing page.",
+                    "confidence": 0.7,
+                },
+            ],
+            "research_branches": [pricing_branch()],
+            "evidence_reviews": [
+                {
+                    "id": "ev_review_collect_acme_pricing_model",
+                    "branch_id": "collect_acme_pricing_model",
+                    "accepted": True,
+                    "score": 0.9,
+                    "accepted_evidence_ids": ["ev_1", "ev_2"],
+                    "rejected_evidence_ids": [],
+                    "required_action": "accept",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+        claims = result["analysis_claims"]
+
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(claims[0]["dimension"], "pricing_model")
+        self.assertEqual(claims[0]["evidence_ids"], ["ev_1", "ev_2"])
+        self.assertIn("starter pricing plan", claims[0]["claim"])
+        self.assertIn("2 EvidenceItem", claims[0]["reasoning"])
 
     def test_writer_uses_report_generator_with_traceable_evidence_context(self):
         created_researchers = []
 
         class FakeReportGenerator:
             def __init__(self, researcher):
+                self.researcher = researcher
                 created_researchers.append(researcher)
 
             async def write_report(self, **kwargs):
-                created_researchers[0].add_costs(0.25)
-                return "# Generated Report\n\nAcme has a public starter plan."
+                self.researcher.add_costs(0.25)
+                context = self.researcher.context
+                if "Only write chapters one and two" in context:
+                    return "\n".join(
+                        [
+                            "# 竞品分析报告",
+                            "",
+                            "## 第一章：分析目的",
+                            "本次分析围绕 Compare Acme pricing 展开。",
+                            "",
+                            "## 第二章：确定竞品",
+                            "### 竞品信息卡片",
+                            "- **Acme**：公开资料显示其定价信息可复核。[1]",
+                            "",
+                            "### 竞品分类表格",
+                            "| 竞品 | 产品/品牌 | 分类 | 官网 | 备注 | 主要引用 |",
+                            "| --- | --- | --- | --- | --- | --- |",
+                            "| Acme | Acme | 公开资料不足 | https://acme.example/pricing | 定价页 | [1] |",
+                        ]
+                    )
+                if '"id": "business_model"' in context:
+                    return "\n".join(
+                        [
+                            "| 竞品 | 结论 | 引用 |",
+                            "| --- | --- | --- |",
+                            "| Acme | Acme publishes a starter pricing plan. | [1] |",
+                            "",
+                            "分析：Acme publishes a starter pricing plan.",
+                        ]
+                    )
+                if "Only write chapter four" in context:
+                    return "\n".join(
+                        [
+                            "## 第四章：总结",
+                            "### SWOT 分析矩阵",
+                            "| 类型 | 内容 | 引用 |",
+                            "| --- | --- | --- |",
+                            "| Strengths 优势 | Acme 的公开定价页提供可复核入口。 | [1] |",
+                            "",
+                            "### 总结论述",
+                            "Acme pricing 的主要差异需要围绕公开定价页继续复核。",
+                        ]
+                    )
+                return ""
 
         state = {
             "task": {"query": "Compare Acme pricing"},
@@ -933,19 +1262,36 @@ class CollectionReviewTest(unittest.TestCase):
             ReportWriterAgent(report_generator_factory=FakeReportGenerator).run(state)
         )
 
-        researcher = created_researchers[0]
-        self.assertIn("第一章：分析目的", researcher.custom_prompt)
-        self.assertIn("第三章：竞品分析", researcher.custom_prompt)
-        self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", researcher.custom_prompt)
-        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ | 官网首页、公开采访、品牌宣传 |", researcher.custom_prompt)
-        self.assertIn("| 3.10 用户口碑 | 用户怎么评价？好评和差评集中在哪？ | 搜索API可索引的公开评价（尽力而为） |", researcher.custom_prompt)
-        self.assertIn("Acme publishes a starter pricing plan", researcher.context)
-        self.assertIn("https://acme.example/pricing", researcher.context)
-        self.assertIn("product_analysis_checklist", researcher.context)
-        self.assertNotIn("ev_2", researcher.context)
-        self.assertNotIn("https://acme.example/rejected", researcher.context)
-        self.assertIn("# Generated Report", result["report"])
-        self.assertIn("Acme has a public starter plan. [1]", result["report"])
+        self.assertEqual(len(created_researchers), 3)
+        opening_researcher = next(
+            researcher
+            for researcher in created_researchers
+            if "Segment: opening" in researcher.query
+        )
+        pricing_researcher = next(
+            researcher
+            for researcher in created_researchers
+            if "Segment: product_business_model" in researcher.query
+        )
+        summary_researcher = next(
+            researcher
+            for researcher in created_researchers
+            if "Segment: summary" in researcher.query
+        )
+        self.assertIn("第一章：分析目的", opening_researcher.custom_prompt)
+        self.assertIn("3.3 商业模式", pricing_researcher.custom_prompt)
+        self.assertIn("第四章：总结", summary_researcher.custom_prompt)
+        self.assertIn("Acme publishes a starter pricing plan", pricing_researcher.context)
+        self.assertNotIn("https://acme.example/pricing", pricing_researcher.context)
+        self.assertNotIn("evidence_items", pricing_researcher.context)
+        self.assertNotIn("product_analysis_checklist", pricing_researcher.context)
+        for researcher in created_researchers:
+            self.assertNotIn("profile_evidence_items", researcher.context)
+            self.assertNotIn("evidence_items", researcher.context)
+            self.assertNotIn("ev_2", researcher.context)
+            self.assertNotIn("https://acme.example/rejected", researcher.context)
+        self.assertIn("# 竞品分析报告", result["report"])
+        self.assertIn("Acme publishes a starter pricing plan. [1]", result["report"])
         self.assertIn("## 第三章：竞品分析", result["report"])
         self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", result["report"])
         self.assertIn("| 3.3 商业模式 | 这个产品怎么赚钱？定价策略是什么？ | 定价页、公开财务信息 |", result["report"])
@@ -958,7 +1304,82 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("https://acme.example/pricing", result["report"])
         self.assertNotIn("https://acme.example/rejected", result["report"])
         self.assertEqual(result["messages"][-1]["evidence_ids"], ["ev_1"])
-        self.assertEqual(result["agent_events"][-1]["output"]["cost"], 0.25)
+        event = result["agent_events"][-1]
+        self.assertEqual(event["input"]["segment_count"], 3)
+        self.assertEqual(
+            event["input"]["max_segment_context_length"],
+            max(len(researcher.context) for researcher in created_researchers),
+        )
+        self.assertGreater(
+            event["input"]["context_length"],
+            event["input"]["max_segment_context_length"],
+        )
+        self.assertEqual(result["agent_events"][-1]["output"]["cost"], 0.75)
+
+    def test_writer_compresses_segment_contexts_and_keeps_raw_evidence_out(self):
+        created_researchers = []
+
+        class EmptyReportGenerator:
+            def __init__(self, researcher):
+                self.researcher = researcher
+                created_researchers.append(researcher)
+
+            async def write_report(self, **kwargs):
+                return ""
+
+        long_claim = " ".join(["Acme has a pricing signal supported by reviewed claims."] * 900)
+        raw_evidence_text = "RAW_EVIDENCE_SHOULD_NOT_BE_SENT " * 900
+        state = {
+            "task": {"query": "Compare Acme pricing"},
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "pricing_model",
+                    "claim": long_claim,
+                    "evidence_ids": ["ev_1"],
+                    "reasoning": " ".join(["Long reasoning should be compressed."] * 400),
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "title": "Acme pricing",
+                    "url": "https://acme.example/pricing",
+                    "excerpt": raw_evidence_text,
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=EmptyReportGenerator).run(state)
+        )
+
+        opening_researcher = next(
+            researcher
+            for researcher in created_researchers
+            if "Segment: opening" in researcher.query
+        )
+        pricing_researcher = next(
+            researcher
+            for researcher in created_researchers
+            if "Segment: product_business_model" in researcher.query
+        )
+        summary_researcher = next(
+            researcher
+            for researcher in created_researchers
+            if "Segment: summary" in researcher.query
+        )
+        self.assertLessEqual(len(opening_researcher.context), OPENING_CONTEXT_CHAR_LIMIT)
+        self.assertLessEqual(len(pricing_researcher.context), SECTION_CONTEXT_CHAR_LIMIT)
+        self.assertLessEqual(len(summary_researcher.context), SUMMARY_CONTEXT_CHAR_LIMIT)
+        for researcher in created_researchers:
+            self.assertNotIn("evidence_items", researcher.context)
+            self.assertNotIn("RAW_EVIDENCE_SHOULD_NOT_BE_SENT", researcher.context)
+            self.assertNotIn("https://acme.example/pricing", researcher.context)
+        self.assertIn("https://acme.example/pricing", result["report"])
 
     def test_writer_falls_back_to_traceable_markdown_when_generation_is_empty(self):
         class EmptyReportGenerator:

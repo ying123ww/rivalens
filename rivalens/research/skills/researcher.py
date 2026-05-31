@@ -763,7 +763,11 @@ class ResearchConductor:
 
             try:
                 # Instantiate the retriever with the sub-query
-                retriever = retriever_class(query, query_domains=query_domains)
+                retriever = retriever_class(
+                    query,
+                    headers=self.researcher.headers,
+                    query_domains=query_domains,
+                )
 
                 # Perform the search using the current retriever
                 search_results = await asyncio.to_thread(
@@ -771,7 +775,22 @@ class ResearchConductor:
                 )
 
                 if not search_results:
+                    if self.researcher.verbose:
+                        await stream_output(
+                            "logs",
+                            "retriever_no_results",
+                            f"{retriever_class.__name__} found 0 source candidates",
+                            self.researcher.websocket,
+                        )
                     continue
+
+                if self.researcher.verbose:
+                    await stream_output(
+                        "logs",
+                        "retriever_results",
+                        f"{retriever_class.__name__} found {len(search_results)} source candidates",
+                        self.researcher.websocket,
+                    )
 
                 # Separate results that already have content from those needing scraping
                 for result in search_results:
@@ -1007,4 +1026,3 @@ class ResearchConductor:
                     "progress": progress
                 }
             )
-

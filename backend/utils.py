@@ -2,6 +2,7 @@ import aiofiles
 import urllib
 import mistune
 import os
+from pathlib import Path
 
 async def write_to_file(filename: str, text: str) -> None:
     """Asynchronously write text to a file in UTF-8 encoding.
@@ -71,23 +72,13 @@ async def write_md_to_pdf(text: str, filename: str = "") -> str:
     file_path = f"outputs/{filename[:60]}.pdf"
 
     try:
-        # Resolve css path relative to this backend module to avoid
-        # dependency on the current working directory.
+        from rivalens.report_export import _write_pdf
+
         current_dir = os.path.dirname(os.path.abspath(__file__))
         css_path = os.path.join(current_dir, "styles", "pdf_styles.css")
-        
-        # Preprocess image URLs for PDF compatibility
-        processed_text = _preprocess_images_for_pdf(text)
-        
-        # Set base_url to current directory for resolving any remaining relative paths
-        base_url = os.path.abspath(".")
-        from md2pdf.core import md2pdf
-        md2pdf(
-               file_path,
-               raw=processed_text,
-               css=css_path,
-               base_url=base_url,
-            )
+        generated_path = await _write_pdf(Path(file_path), text, css_path=css_path)
+        if not generated_path:
+            return ""
         print(f"Report written to {file_path}")
     except Exception as e:
         print(f"Error in converting Markdown to PDF: {e}")

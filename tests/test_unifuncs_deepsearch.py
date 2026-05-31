@@ -139,6 +139,15 @@ class UniFuncsDeepSearchTest(unittest.TestCase):
         self.assertEqual(scrape_queue, ["https://www.notion.so/pricing"])
         self.assertEqual(prefetched_content, [])
 
+    def test_standard_research_passes_headers_to_non_mcp_retrievers(self):
+        researcher_source = (
+            REPO_ROOT / "rivalens" / "research" / "skills" / "researcher.py"
+        ).read_text()
+
+        self.assertIn("headers=self.researcher.headers", researcher_source)
+        self.assertIn("retriever_results", researcher_source)
+        self.assertIn("retriever_no_results", researcher_source)
+
 
 if __name__ == "__main__":
     unittest.main()

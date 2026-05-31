@@ -11,6 +11,7 @@ export const useWebSocket = (
 ) => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const heartbeatInterval = useRef<number>();
+  const researchActiveRef = useRef(false);
 
   // Cleanup function for heartbeat and socket on unmount
   useEffect(() => {
@@ -23,6 +24,7 @@ export const useWebSocket = (
       // Close socket on unmount if it exists and is open
       if (socket && socket.readyState === WebSocket.OPEN) {
         console.log('Closing WebSocket due to component unmount');
+        researchActiveRef.current = false;
         socket.close(1000, "Component unmounted");
       }
     };
@@ -49,6 +51,7 @@ export const useWebSocket = (
     // Close existing socket if any
     if (socket && socket.readyState === WebSocket.OPEN) {
       console.log('Closing existing WebSocket connection');
+      researchActiveRef.current = false;
       socket.close(1000, "New connection requested");
     }
 
@@ -100,9 +103,11 @@ export const useWebSocket = (
           // Make sure we have a properly formatted command with a space after start
           const message = `start ${JSON.stringify(dataToSend)}`;
           console.log(`Sending start message, length: ${message.length}`);
+          researchActiveRef.current = true;
           newSocket.send(message);
         } catch (error) {
           console.error("Error preparing start message:", error);
+          researchActiveRef.current = false;
         }
         
         startHeartbeat(newSocket);
@@ -133,6 +138,7 @@ export const useWebSocket = (
               console.log('Received complete report with images');
               setAnswer(data.output);
             } else if (data.type === 'path') {
+              researchActiveRef.current = false;
               setLoading(false);
             }
           }
@@ -143,8 +149,27 @@ export const useWebSocket = (
 
       newSocket.onclose = (event) => {
         console.log(`WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
+        const wasResearchActive = researchActiveRef.current;
+        researchActiveRef.current = false;
         if (heartbeatInterval.current) {
           clearInterval(heartbeatInterval.current);
+        }
+        if (wasResearchActive) {
+          const reason = event.reason ? `, reason: ${event.reason}` : '';
+          const output = (
+            `WebSocket disconnected while research was still running ` +
+            `(code: ${event.code || 'unknown'}${reason}). ` +
+            `Live report streaming was interrupted; please restart this run.`
+          );
+          const disconnectData = {
+            type: 'logs',
+            content: 'websocket_disconnected',
+            output,
+            contentAndType: 'websocket_disconnected-logs'
+          } as unknown as Data;
+
+          setOrderedData((prevOrder) => [...prevOrder, disconnectData]);
+          setLoading(false);
         }
         setSocket(null);
       };

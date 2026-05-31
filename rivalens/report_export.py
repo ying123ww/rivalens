@@ -9,7 +9,6 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-import aiofiles
 import mistune
 
 
@@ -35,8 +34,7 @@ async def _write_text(path: Path, text: Any) -> None:
     if not isinstance(text, str):
         text = str(text)
     text_utf8 = text.encode("utf-8", errors="replace").decode("utf-8")
-    async with aiofiles.open(path, "w", encoding="utf-8") as file:
-        await file.write(text_utf8)
+    path.write_text(text_utf8, encoding="utf-8")
 
 
 def markdown_to_html_document(markdown_text: str, title: str = "Rivalens Report") -> str:
@@ -126,17 +124,76 @@ async def _write_html(path: Path, report: str, title: str) -> str:
     return path.as_posix()
 
 
+def _pdf_css(css_path: str | None = None) -> str:
+    css = ""
+    resolved_css_path = css_path or _default_pdf_css_path()
+    if resolved_css_path:
+        path = Path(resolved_css_path)
+        if path.exists():
+            css = path.read_text(encoding="utf-8")
+    cjk_safe_overrides = """
+@page {
+  size: A4;
+  margin: 18mm 16mm;
+}
+body {
+  font-family: sans-serif;
+  font-size: 11pt;
+  line-height: 1.55;
+  color: #172033;
+}
+h1, h2, h3, h4, h5, h6 {
+  font-family: sans-serif;
+  color: #111827;
+  margin: 0.8em 0 0.45em;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 18px;
+  font-size: 9.5pt;
+}
+th, td {
+  border: 0.75pt solid #d8dee9;
+  padding: 5px 6px;
+  vertical-align: top;
+}
+th {
+  background: #f4f6f8;
+  font-weight: 700;
+}
+code, pre {
+  font-family: monospace;
+}
+img {
+  max-width: 100%;
+}
+"""
+    return f"{css}\n{cjk_safe_overrides}"
+
+
 async def _write_pdf(path: Path, report: str, css_path: str | None = None) -> str:
     try:
-        from md2pdf.core import md2pdf
+        import fitz
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        md2pdf(
-            path.as_posix(),
-            raw=_preprocess_images_for_pdf(report),
-            css=css_path or _default_pdf_css_path(),
-            base_url=os.path.abspath("."),
-        )
+        html = mistune.html(_preprocess_images_for_pdf(report))
+        story = fitz.Story(html, user_css=_pdf_css(css_path))
+        writer = fitz.DocumentWriter(path.as_posix())
+        mediabox = fitz.Rect(0, 0, 595, 842)
+        content_box = fitz.Rect(45, 45, 550, 797)
+        page_count = 0
+        while True:
+            device = writer.begin_page(mediabox)
+            more, _filled = story.place(content_box)
+            story.draw(device)
+            writer.end_page()
+            page_count += 1
+            if not more:
+                break
+            if page_count >= 500:
+                raise RuntimeError("PDF generation exceeded 500 pages")
+        writer.close()
         return path.as_posix()
     except Exception:
         return ""

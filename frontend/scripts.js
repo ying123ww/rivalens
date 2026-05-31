@@ -1007,15 +1007,25 @@ const ResearchEngine = (() => {
     }
 
     socket.onclose = (event) => {
+      const wasResearchActive = isResearchActive;
+
       // Update metrics and status when connection closes
       connectionStartTime = null;
       updateWebSocketStatus();
 
       console.log("WebSocket connection closed", event);
 
-      // If research is active, try to automatically reconnect
-      if (isResearchActive) {
-        reconnectWebSocket();
+      if (wasResearchActive) {
+        const reason = event.reason ? `, reason: ${escapeHtml(event.reason)}` : '';
+        updateState('error');
+        addAgentResponse({
+          output: (
+            `⚠️ WebSocket disconnected while research was still running ` +
+            `(code: ${event.code || 'unknown'}${reason}). ` +
+            `Live report streaming was interrupted; please restart this run.`
+          ),
+        });
+        showToast('WebSocket disconnected during research. Please restart the run.', 7000);
       }
     }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -11,6 +12,13 @@ from rivalens.schema import ClaimSupportReview, CompetitorAnalysisState
 
 class ClaimSupportReviewer:
     """Check whether claims are sufficiently supported by accepted evidence."""
+
+    def __init__(self, enable_verification: bool | None = None) -> None:
+        self.enable_verification = (
+            enable_verification
+            if enable_verification is not None
+            else self._env_flag("RIVALENS_ENABLE_CLAIM_VERIFICATION", False)
+        )
 
     def review(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         analysis_message = latest_message_for(
@@ -32,6 +40,7 @@ class ClaimSupportReviewer:
         supported_count = 0
         weak_count = 0
         verification_rounds = int(state.get("verification_rounds", 0) or 0)
+        verification_enabled = self.enable_verification and verification_rounds == 0
         verification_task_queue: list[dict[str, Any]] = []
 
         for claim in claims:
@@ -58,7 +67,7 @@ class ClaimSupportReviewer:
                 status,
                 unsupported_phrases,
                 evidence_items,
-                allow_verification=verification_rounds == 0,
+                allow_verification=verification_enabled,
             )
             verification_task_queue.extend(follow_up_tasks)
             reviews.append(
@@ -107,6 +116,7 @@ class ClaimSupportReviewer:
                         "claim_count": len(claims),
                         "evidence_count": len(evidence_by_id),
                         "verification_rounds": verification_rounds,
+                        "verification_enabled": verification_enabled,
                     },
                     "output": {
                         "review_count": len(reviews),
@@ -117,6 +127,12 @@ class ClaimSupportReviewer:
                 }
             ],
         }
+
+    def _env_flag(self, env_name: str, default: bool) -> bool:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
     def _support_status(
         self,

@@ -94,6 +94,12 @@ PRODUCT_ANALYSIS_SECTIONS: list[dict[str, Any]] = [
     },
 ]
 
+SECTION_CLAIM_LIMIT = 12
+SUMMARY_CLAIM_LIMIT = 30
+OPENING_CONTEXT_CHAR_LIMIT = 6000
+SECTION_CONTEXT_CHAR_LIMIT = 8000
+SUMMARY_CONTEXT_CHAR_LIMIT = 9000
+
 
 class _ReportResearcherAdapter:
     """Small adapter exposing the ResearchEngine fields used by ReportGenerator."""
@@ -178,21 +184,17 @@ class ReportWriterAgent:
         query = self._report_query(state)
         custom_prompt = self._report_format_prompt(analysis_dimensions)
         cfg = self.config or Config()
-        researcher = _ReportResearcherAdapter(
+        generation = await self._generate_segmented_report(
+            state=state,
             query=query,
-            context=context,
             cfg=cfg,
-            role=self._writer_role_prompt(),
-            custom_prompt=custom_prompt,
+            claims=claims,
+            evidence_items=evidence_items,
+            analysis_dimensions=analysis_dimensions,
+            citation_refs_by_evidence_id=citation_refs_by_evidence_id,
         )
-        generator = self.report_generator_factory(researcher)
-
-        generation_error = None
-        try:
-            generated_report = await generator.write_report(custom_prompt=custom_prompt)
-        except Exception as exc:
-            generated_report = ""
-            generation_error = str(exc)
+        generated_report = generation["report"]
+        generation_error = "; ".join(generation["errors"]) or None
         report = (generated_report or "").strip()
         if not report:
             report = self._fallback_report(
@@ -244,11 +246,24 @@ class ReportWriterAgent:
                         "claim_support_review_count": len(claim_support_reviews),
                         "evidence_count": len(evidence_items),
                         "analysis_dimension_count": len(analysis_dimensions),
-                        "report_generator": generator.__class__.__name__,
-                        "report_type": researcher.report_type,
-                        "report_source": researcher.report_source,
-                        "prompt_family": researcher.prompt_family.__class__.__name__,
+                        "report_generator": self._report_generator_name(),
+                        "report_type": ReportType.CustomReport.value,
+                        "report_source": ReportSource.Web.value,
+                        "prompt_family": get_prompt_family(
+                            getattr(cfg, "prompt_family", "default"),
+                            cfg,
+                        ).__class__.__name__,
                         "context_length": len(context),
+                        "max_segment_context_length": max(
+                            generation["segment_context_lengths"],
+                            default=0,
+                        ),
+                        "segment_count": generation["segment_count"],
+                        "segment_context_char_limits": {
+                            "opening": OPENING_CONTEXT_CHAR_LIMIT,
+                            "product_section": SECTION_CONTEXT_CHAR_LIMIT,
+                            "summary": SUMMARY_CONTEXT_CHAR_LIMIT,
+                        },
                         "custom_prompt_length": len(custom_prompt),
                         "model": getattr(cfg, "smart_llm_model", None),
                         "token_limit": getattr(cfg, "smart_token_limit", None),
@@ -256,9 +271,9 @@ class ReportWriterAgent:
                     "output": {
                         "generated_report_length": generated_report_length,
                         "report_length": report_length,
-                        "fallback_used": not bool(generated_report),
-                        "cost": researcher.research_costs,
-                        "step_costs": researcher.step_costs,
+                        "fallback_used": generation["fallback_used"] or not bool(generated_report),
+                        "cost": generation["cost"],
+                        "step_costs": generation["step_costs"],
                         "generation_error": generation_error,
                     },
                 }
@@ -338,6 +353,722 @@ class ReportWriterAgent:
 不要输出附录。附录将由系统基于 EvidenceItem 自动追加。
 所有重要判断必须绑定 citation_ref。不要使用 Context 之外的信息。不要把原始 evidence ID 当作正文引用输出。
 """
+
+    async def _generate_segmented_report(
+        self,
+        state: CompetitorAnalysisState,
+        query: str,
+        cfg: Config,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, Any]:
+        generation = {
+            "report": "",
+            "errors": [],
+            "cost": 0.0,
+            "step_costs": {},
+            "segment_context_lengths": [],
+            "segment_count": 0,
+            "fallback_used": False,
+        }
+
+        opening_context = self._build_opening_context(
+            state,
+            citation_refs_by_evidence_id,
+        )
+        opening = await self._generate_report_segment(
+            segment_id="opening",
+            query=query,
+            context=opening_context,
+            custom_prompt=self._opening_prompt(),
+            cfg=cfg,
+            generation=generation,
+        )
+        opening = self._clean_opening_segment(opening)
+        if not opening:
+            generation["fallback_used"] = True
+            opening = self._fallback_opening_chapters(
+                state,
+                citation_refs_by_evidence_id,
+            )
+
+        product_chapter = await self._generate_product_chapter_segmented(
+            state=state,
+            query=query,
+            cfg=cfg,
+            claims=claims,
+            evidence_items=evidence_items,
+            citation_refs_by_evidence_id=citation_refs_by_evidence_id,
+            generation=generation,
+        )
+
+        summary_context = self._build_summary_context(
+            state,
+            claims,
+            analysis_dimensions,
+            citation_refs_by_evidence_id,
+        )
+        summary = await self._generate_report_segment(
+            segment_id="summary",
+            query=query,
+            context=summary_context,
+            custom_prompt=self._summary_prompt(),
+            cfg=cfg,
+            generation=generation,
+        )
+        summary = self._clean_summary_segment(summary)
+        if not summary:
+            generation["fallback_used"] = True
+            summary = self._fallback_summary_chapter(claims, evidence_items)
+
+        generation["report"] = "\n\n".join(
+            segment.strip()
+            for segment in (opening, product_chapter, summary)
+            if segment.strip()
+        )
+        return generation
+
+    async def _generate_product_chapter_segmented(
+        self,
+        state: CompetitorAnalysisState,
+        query: str,
+        cfg: Config,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        generation: dict[str, Any],
+    ) -> str:
+        lines = [
+            "## 第三章：竞品分析",
+            "",
+            self._product_analysis_checklist_markdown(),
+        ]
+        for section in PRODUCT_ANALYSIS_SECTIONS:
+            section_claims = [
+                claim for claim in claims if self._matches_product_section(claim, section)
+            ][:SECTION_CLAIM_LIMIT]
+            section_context = self._build_product_section_context(
+                state,
+                section,
+                section_claims,
+                citation_refs_by_evidence_id,
+            )
+            section_body = ""
+            if section_claims:
+                generated = await self._generate_report_segment(
+                    segment_id=f"product_{section['id']}",
+                    query=query,
+                    context=section_context,
+                    custom_prompt=self._product_section_prompt(section),
+                    cfg=cfg,
+                    generation=generation,
+                )
+                section_body = self._clean_product_section_body(generated)
+
+            if not section_body:
+                if section_claims:
+                    generation["fallback_used"] = True
+                section_lines = self._product_analysis_section_lines(
+                    section,
+                    section_claims,
+                    [],
+                )
+                lines.extend(["", *section_lines])
+            else:
+                lines.extend(["", f"### {section['number']} {section['title']}", "", section_body])
+        return "\n".join(lines)
+
+    async def _generate_report_segment(
+        self,
+        segment_id: str,
+        query: str,
+        context: str,
+        custom_prompt: str,
+        cfg: Config,
+        generation: dict[str, Any],
+    ) -> str:
+        generation["segment_count"] += 1
+        generation["segment_context_lengths"].append(len(context))
+        researcher = _ReportResearcherAdapter(
+            query=f"{query}\n\nSegment: {segment_id}",
+            context=context,
+            cfg=cfg,
+            role=self._writer_role_prompt(),
+            custom_prompt=custom_prompt,
+        )
+        generator = self.report_generator_factory(researcher)
+        try:
+            report = await generator.write_report(custom_prompt=custom_prompt)
+        except Exception as exc:
+            generation["errors"].append(f"{segment_id}: {exc}")
+            return ""
+
+        generation["cost"] += researcher.research_costs
+        for step, cost in researcher.step_costs.items():
+            generation["step_costs"][step] = generation["step_costs"].get(step, 0.0) + cost
+        return (report or "").strip()
+
+    def _report_generator_name(self) -> str:
+        return getattr(
+            self.report_generator_factory,
+            "__name__",
+            self.report_generator_factory.__class__.__name__,
+        )
+
+    def _opening_prompt(self) -> str:
+        return """
+请只基于 Context 输出以下 Markdown 片段：
+
+# 竞品分析报告
+
+## 第一章：分析目的
+- 写一段完整说明文字，不要写成项目符号。
+
+## 第二章：确定竞品
+### 竞品信息卡片
+- 为每个竞品输出一个简短信息卡片。
+
+### 竞品分类表格
+- 输出 Markdown 表格，推荐列：竞品、产品/品牌、分类、官网、备注、主要引用。
+
+必须保留可用的 citation_ref，例如 [1]。不要输出第三章、第四章或附录。
+"""
+
+    def _product_section_prompt(self, section: dict[str, Any]) -> str:
+        return f"""
+请只基于 Context 输出“{section['number']} {section['title']}”小节正文，不要输出章节标题。
+
+小节必须包含：
+1. 一个正式对比表格。
+2. 一段对应的分析文字。
+3. 表格或段落中保留相关 citation_ref，例如 [1]。
+4. 如果 Context 缺少证据，结论写“公开证据不足”，不要编造。
+
+引导问题：{section['guiding_question']}
+数据来源约束：{section['source_constraints']}
+"""
+
+    def _summary_prompt(self) -> str:
+        return """
+请只基于 Context 输出以下 Markdown 片段：
+
+## 第四章：总结
+### SWOT 分析矩阵
+- 输出 SWOT 分析矩阵表。
+
+### 总结论述
+- 输出一段综合结论，说明主要竞争差异、机会和风险。
+
+必须保留可用的 citation_ref，例如 [1]。不要输出附录。
+"""
+
+    def _clean_opening_segment(self, report: str) -> str:
+        return self._truncate_before_any_heading(
+            (report or "").strip(),
+            ("## 第三章", "## 第四章", "## 附录"),
+        ).strip()
+
+    def _clean_summary_segment(self, report: str) -> str:
+        segment = (report or "").strip()
+        if not segment:
+            return ""
+        summary_start = segment.find("## 第四章")
+        if summary_start >= 0:
+            segment = segment[summary_start:]
+        return self._truncate_before_any_heading(segment, ("## 附录",)).strip()
+
+    def _clean_product_section_body(self, report: str) -> str:
+        body = self._strip_leading_markdown_heading(report)
+        if not body:
+            return ""
+        if any(line.lstrip().startswith("#") for line in body.splitlines()):
+            return ""
+        return body
+
+    def _truncate_before_any_heading(
+        self,
+        text: str,
+        headings: tuple[str, ...],
+    ) -> str:
+        cut_at = len(text)
+        for heading in headings:
+            index = text.find(heading)
+            if index >= 0:
+                cut_at = min(cut_at, index)
+        return text[:cut_at]
+
+    def _build_opening_context(
+        self,
+        state: CompetitorAnalysisState,
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        payload = {
+            "reporting_constraints": [
+                "Only write chapters one and two.",
+                "Use competitor fields and citation_ref values already attached to competitors.",
+                "Do not write product analysis, summary, or appendix.",
+            ],
+            "task": state.get("task", {}),
+            "competitors": self._compact_competitors_for_context(
+                state.get("competitors") or state.get("task", {}).get("competitors", []),
+                citation_refs_by_evidence_id,
+            ),
+        }
+        return self._dump_context_with_budget(payload, OPENING_CONTEXT_CHAR_LIMIT)
+
+    def _build_product_section_context(
+        self,
+        state: CompetitorAnalysisState,
+        section: dict[str, Any],
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        report_evidence_ids = set(citation_refs_by_evidence_id)
+        payload = {
+            "reporting_constraints": [
+                "Only write this product-analysis subsection.",
+                "Use the provided claims as the main claim set.",
+                "Use citation_ref values like [1] for material claims.",
+                "Do not infer new claims from raw evidence.",
+                "If claims are missing, write 公开证据不足.",
+            ],
+            "task_query": state.get("task", {}).get("query", ""),
+            "competitors": self._compact_competitors_for_context(
+                state.get("competitors") or state.get("task", {}).get("competitors", []),
+                citation_refs_by_evidence_id,
+            ),
+            "section": {
+                "number": section["number"],
+                "id": section["id"],
+                "title": section["title"],
+                "guiding_question": section["guiding_question"],
+                "source_constraints": section["source_constraints"],
+            },
+            "analysis_claims": [
+                self._compact_claim(
+                    claim,
+                    report_evidence_ids,
+                    citation_refs_by_evidence_id,
+                )
+                for claim in claims[:SECTION_CLAIM_LIMIT]
+            ],
+        }
+        return self._dump_context_with_budget(payload, SECTION_CONTEXT_CHAR_LIMIT)
+
+    def _build_summary_context(
+        self,
+        state: CompetitorAnalysisState,
+        claims: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        report_evidence_ids = set(citation_refs_by_evidence_id)
+        payload = {
+            "reporting_constraints": [
+                "Only write chapter four.",
+                "Use claims and citation_ref values like [1].",
+                "Do not infer new claims from raw evidence.",
+                "Do not write appendix.",
+            ],
+            "task_query": state.get("task", {}).get("query", ""),
+            "competitors": self._compact_competitors_for_context(
+                state.get("competitors") or state.get("task", {}).get("competitors", []),
+                citation_refs_by_evidence_id,
+            ),
+            "analysis_dimensions": analysis_dimensions[:15],
+            "analysis_claims": [
+                self._compact_claim(
+                    claim,
+                    report_evidence_ids,
+                    citation_refs_by_evidence_id,
+                )
+                for claim in claims[:SUMMARY_CLAIM_LIMIT]
+            ],
+        }
+        return self._dump_context_with_budget(payload, SUMMARY_CONTEXT_CHAR_LIMIT)
+
+    def _fallback_opening_chapters(
+        self,
+        state: CompetitorAnalysisState,
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        task = state.get("task", {})
+        competitors = state.get("competitors") or task.get("competitors", [])
+        lines = [
+            "# 竞品分析报告",
+            "",
+            "## 第一章：分析目的",
+            "",
+            f"本次分析围绕用户提出的问题展开：{task.get('query', '竞品分析')}。报告基于已采集并通过质量检查的公开证据，比较竞品在关键维度上的差异，并保留正文引用编号与附录来源 URL 以便复核。",
+            "",
+            "## 第二章：确定竞品",
+            "",
+            "### 竞品信息卡片",
+            "",
+        ]
+        if competitors:
+            for competitor in competitors:
+                if isinstance(competitor, dict):
+                    evidence_refs = self._citation_refs_for_evidence_ids(
+                        competitor.get("evidence_ids", []),
+                        citation_refs_by_evidence_id,
+                    )
+                    lines.append(f"- **{competitor.get('name', '未知竞品')}**")
+                    lines.append(f"  - 产品/品牌：{competitor.get('product', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 官网：{competitor.get('website', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 分类：{competitor.get('category', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 备注：{competitor.get('notes', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 主要引用：{', '.join(evidence_refs) or '公开资料不足'}")
+                else:
+                    lines.append(f"- **{competitor}**")
+        else:
+            lines.append("- 公开资料不足。")
+
+        lines.extend(
+            [
+                "",
+                "### 竞品分类表格",
+                "",
+                "| 竞品 | 产品/品牌 | 分类 | 官网 | 备注 | 主要引用 |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        if competitors:
+            for competitor in competitors:
+                if isinstance(competitor, dict):
+                    evidence_refs = ", ".join(
+                        self._citation_refs_for_evidence_ids(
+                            competitor.get("evidence_ids", []),
+                            citation_refs_by_evidence_id,
+                        )[:3]
+                    )
+                    lines.append(
+                        self._markdown_table_row(
+                            [
+                                competitor.get("name", "") or "未知竞品",
+                                competitor.get("product", "") or "公开资料不足",
+                                competitor.get("category", "") or "公开资料不足",
+                                competitor.get("website", "") or "公开资料不足",
+                                competitor.get("notes", "") or "公开资料不足",
+                                evidence_refs or "公开资料不足",
+                            ]
+                        )
+                    )
+                else:
+                    lines.append(
+                        self._markdown_table_row(
+                            [
+                                competitor,
+                                "公开资料不足",
+                                "公开资料不足",
+                                "公开资料不足",
+                                "公开资料不足",
+                                "公开资料不足",
+                            ]
+                        )
+                    )
+        else:
+            lines.append("| 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
+        return "\n".join(lines)
+
+    def _fallback_summary_chapter(
+        self,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+    ) -> str:
+        evidence_ids = ", ".join(self._ordered_evidence_ids(claims, evidence_items)) or "无"
+        return "\n".join(
+            [
+                "## 第四章：总结",
+                "",
+                "### SWOT 分析矩阵",
+                "",
+                "| 类型 | 内容 | 引用 |",
+                "| --- | --- | --- |",
+                f"| Strengths 优势 | 基于已接受证据，部分竞品已形成可观察的公开竞争信号。 | {evidence_ids} |",
+                "| Weaknesses 劣势 | 未覆盖或证据不足的维度需要继续补充。 | 无 |",
+                "| Opportunities 机会 | 可围绕证据充分的差异化维度进一步定位产品机会。 | 无 |",
+                f"| Threats 威胁 | 竞品已有公开定位、定价、客户或能力信号，可能形成直接竞争压力。 | {evidence_ids} |",
+                "",
+                "### 总结论述",
+                "",
+                "整体来看，当前报告优先呈现已有证据支持的竞争差异；对公开资料不足的维度，结论保持保守，并在附录中保留信息索引以便复核。",
+            ]
+        )
+
+    def _strip_leading_markdown_heading(self, report: str) -> str:
+        lines = (report or "").strip().splitlines()
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        if lines and lines[0].lstrip().startswith("#"):
+            lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        return "\n".join(lines).strip()
+
+    def _unique_items_by_id(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unique_items: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in items:
+            item_id = item.get("id", "")
+            if item_id:
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+            elif item in unique_items:
+                continue
+            unique_items.append(item)
+        return unique_items
+
+    def _compact_competitors_for_context(
+        self,
+        competitors: list[Any],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> list[Any]:
+        compact_competitors = []
+        for competitor in competitors:
+            if not isinstance(competitor, dict):
+                compact_competitors.append(competitor)
+                continue
+            evidence_ids = competitor.get("evidence_ids", [])
+            compact_competitors.append(
+                {
+                    "name": competitor.get("name", ""),
+                    "product": competitor.get("product", ""),
+                    "website": competitor.get("website", ""),
+                    "category": competitor.get("category", ""),
+                    "notes": competitor.get("notes", ""),
+                    "evidence_ids": evidence_ids,
+                    "citation_refs": self._citation_refs_for_evidence_ids(
+                        evidence_ids,
+                        citation_refs_by_evidence_id,
+                    ),
+                }
+            )
+        return compact_competitors
+
+    def _dump_context_with_budget(
+        self,
+        payload: dict[str, Any],
+        max_chars: int,
+    ) -> str:
+        context = json.dumps(payload, ensure_ascii=False, indent=2)
+        if len(context) <= max_chars:
+            return context
+
+        compression_steps = [
+            {
+                "string_chars": 320,
+                "excerpt_chars": 320,
+                "claim_chars": 320,
+                "evidence_limit": 10,
+                "claim_limit": 10,
+                "competitor_limit": 12,
+                "dimension_limit": 10,
+            },
+            {
+                "string_chars": 180,
+                "excerpt_chars": 180,
+                "claim_chars": 220,
+                "evidence_limit": 8,
+                "claim_limit": 8,
+                "competitor_limit": 8,
+                "dimension_limit": 8,
+            },
+            {
+                "string_chars": 100,
+                "excerpt_chars": 100,
+                "claim_chars": 140,
+                "evidence_limit": 5,
+                "claim_limit": 5,
+                "competitor_limit": 5,
+                "dimension_limit": 5,
+            },
+            {
+                "string_chars": 50,
+                "excerpt_chars": 60,
+                "claim_chars": 80,
+                "evidence_limit": 3,
+                "claim_limit": 3,
+                "competitor_limit": 3,
+                "dimension_limit": 3,
+            },
+        ]
+
+        compressed_payload = payload
+        for step in compression_steps:
+            compressed_payload = self._compress_context_payload(payload, **step)
+            context = json.dumps(compressed_payload, ensure_ascii=False, indent=2)
+            if len(context) <= max_chars:
+                return context
+
+        minimal_payload = self._minimal_context_payload(compressed_payload)
+        return json.dumps(minimal_payload, ensure_ascii=False, indent=2)
+
+    def _compress_context_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        string_chars: int,
+        excerpt_chars: int,
+        claim_chars: int,
+        evidence_limit: int,
+        claim_limit: int,
+        competitor_limit: int,
+        dimension_limit: int,
+    ) -> dict[str, Any]:
+        return self._compress_context_value(
+            payload,
+            "",
+            string_chars=string_chars,
+            excerpt_chars=excerpt_chars,
+            claim_chars=claim_chars,
+            evidence_limit=evidence_limit,
+            claim_limit=claim_limit,
+            competitor_limit=competitor_limit,
+            dimension_limit=dimension_limit,
+        )
+
+    def _compress_context_value(
+        self,
+        value: Any,
+        key: str,
+        *,
+        string_chars: int,
+        excerpt_chars: int,
+        claim_chars: int,
+        evidence_limit: int,
+        claim_limit: int,
+        competitor_limit: int,
+        dimension_limit: int,
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                child_key: self._compress_context_value(
+                    child_value,
+                    child_key,
+                    string_chars=string_chars,
+                    excerpt_chars=excerpt_chars,
+                    claim_chars=claim_chars,
+                    evidence_limit=evidence_limit,
+                    claim_limit=claim_limit,
+                    competitor_limit=competitor_limit,
+                    dimension_limit=dimension_limit,
+                )
+                for child_key, child_value in value.items()
+            }
+        if isinstance(value, list):
+            value = self._limit_context_list(
+                key,
+                value,
+                evidence_limit=evidence_limit,
+                claim_limit=claim_limit,
+                competitor_limit=competitor_limit,
+                dimension_limit=dimension_limit,
+            )
+            return [
+                self._compress_context_value(
+                    item,
+                    key,
+                    string_chars=string_chars,
+                    excerpt_chars=excerpt_chars,
+                    claim_chars=claim_chars,
+                    evidence_limit=evidence_limit,
+                    claim_limit=claim_limit,
+                    competitor_limit=competitor_limit,
+                    dimension_limit=dimension_limit,
+                )
+                for item in value
+            ]
+        if isinstance(value, str):
+            return self._truncate_context_string(
+                key,
+                value,
+                string_chars=string_chars,
+                excerpt_chars=excerpt_chars,
+                claim_chars=claim_chars,
+            )
+        return value
+
+    def _limit_context_list(
+        self,
+        key: str,
+        value: list[Any],
+        *,
+        evidence_limit: int,
+        claim_limit: int,
+        competitor_limit: int,
+        dimension_limit: int,
+    ) -> list[Any]:
+        limits = {
+            "profile_evidence_items": evidence_limit,
+            "evidence_items": evidence_limit,
+            "analysis_claims": claim_limit,
+            "competitors": competitor_limit,
+            "analysis_dimensions": dimension_limit,
+            "guiding_questions": 3,
+            "evidence_ids": evidence_limit,
+            "citation_refs": evidence_limit,
+        }
+        limit = limits.get(key)
+        if limit is None:
+            return value
+        return value[:limit]
+
+    def _truncate_context_string(
+        self,
+        key: str,
+        value: str,
+        *,
+        string_chars: int,
+        excerpt_chars: int,
+        claim_chars: int,
+    ) -> str:
+        preserve_keys = {
+            "id",
+            "citation_ref",
+            "source_type",
+            "dimension_id",
+            "branch_id",
+            "collection_task_id",
+            "evidence_review_id",
+            "support_status",
+            "number",
+        }
+        if key in preserve_keys:
+            return value
+        if key == "url":
+            return self._truncate_text(value, 300)
+        if key == "excerpt":
+            return self._truncate_text(value, excerpt_chars)
+        if key == "claim":
+            return self._truncate_text(value, claim_chars)
+        return self._truncate_text(value, string_chars)
+
+    def _minimal_context_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        minimal = {
+            "reporting_constraints": payload.get("reporting_constraints", [])[:4],
+        }
+        for key in ("task_query", "task", "competitors", "section"):
+            if key in payload:
+                minimal[key] = payload[key]
+        for key in (
+            "analysis_dimensions",
+            "analysis_claims",
+            "profile_evidence_items",
+            "evidence_items",
+        ):
+            if key in payload:
+                minimal[key] = payload[key][:2] if isinstance(payload[key], list) else payload[key]
+        return minimal
+
+    def _truncate_text(self, value: str, max_chars: int) -> str:
+        text = " ".join(value.split())
+        if max_chars <= 0 or len(text) <= max_chars:
+            return text
+        return text[:max_chars].rstrip() + "..."
 
     def _build_report_context(
         self,
@@ -518,6 +1249,7 @@ class ReportWriterAgent:
         self,
         evidence: dict[str, Any],
         citation_refs_by_evidence_id: dict[str, str],
+        excerpt_chars: int = 1200,
     ) -> dict[str, Any]:
         excerpt = " ".join(str(evidence.get("excerpt", "")).split())
         evidence_id = evidence.get("id", "")
@@ -534,7 +1266,7 @@ class ReportWriterAgent:
             "source_type": evidence.get("source_type", ""),
             "published_at": evidence.get("published_at"),
             "retrieved_at": evidence.get("retrieved_at", ""),
-            "excerpt": excerpt[:1200],
+            "excerpt": excerpt[:excerpt_chars],
             "confidence": evidence.get("confidence", 0.5),
         }
 
@@ -717,84 +1449,101 @@ class ReportWriterAgent:
                 for evidence in evidence_items
                 if self._matches_product_section(evidence, section)
             ]
-            lines.extend(
-                [
-                    "",
-                    f"### {section['number']} {section['title']}",
-                    "",
-                    "| 引导问题 | 数据来源约束 | 竞品/对象 | 结论 | 引用 |",
-                    "| --- | --- | --- | --- | --- |",
-                ]
-            )
-            if section_claims:
-                for claim in section_claims:
-                    support_label = (
-                        "（证据较弱，需复核）"
-                        if claim.get("support_status") == "weak"
-                        else ""
-                    )
-                    lines.append(
-                        self._markdown_table_row(
-                            [
-                                section["guiding_question"],
-                                section["source_constraints"],
-                                ", ".join(claim.get("competitors", [])) or "综合",
-                                f"{claim.get('claim', '') or '公开证据不足'}{support_label}",
-                                ", ".join(
-                                    evidence_id
-                                    for evidence_id in claim.get("evidence_ids", [])
-                                    if evidence_id in report_evidence_ids
-                                )
-                                or "无",
-                            ]
-                        )
-                    )
-                lines.append("")
-                lines.append(
-                    "分析："
-                    + " ".join(
-                        claim.get("claim", "")
-                        for claim in section_claims[:3]
-                        if claim.get("claim")
-                    )
+            lines.extend(["", *self._product_analysis_section_lines(section, section_claims, section_evidence)])
+        return "\n".join(lines)
+
+    def _product_analysis_section_lines(
+        self,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+    ) -> list[str]:
+        report_evidence_ids = {
+            evidence.get("id", "")
+            for evidence in section_evidence
+            if evidence.get("id")
+        }
+        report_evidence_ids.update(
+            evidence_id
+            for claim in section_claims
+            for evidence_id in claim.get("evidence_ids", [])
+            if evidence_id
+        )
+        lines = [
+            f"### {section['number']} {section['title']}",
+            "",
+            "| 引导问题 | 数据来源约束 | 竞品/对象 | 结论 | 引用 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        if section_claims:
+            for claim in section_claims:
+                support_label = (
+                    "（证据较弱，需复核）"
+                    if claim.get("support_status") == "weak"
+                    else ""
                 )
-            elif section_evidence:
-                for evidence in section_evidence[:3]:
-                    evidence_text = (
-                        evidence.get("excerpt")
-                        or evidence.get("title")
-                        or "公开证据显示该维度存在可复核信息。"
-                    )
-                    lines.append(
-                        self._markdown_table_row(
-                            [
-                                section["guiding_question"],
-                                section["source_constraints"],
-                                evidence.get("competitor", "") or "综合",
-                                evidence_text,
-                                evidence.get("id", "") or "无",
-                            ]
-                        )
-                    )
-                lines.append("")
-                lines.append(
-                    "分析：该小节仅引用已采集证据中的可观察信息，仍需结合更多公开来源复核竞争差异。"
-                )
-            else:
                 lines.append(
                     self._markdown_table_row(
                         [
                             section["guiding_question"],
                             section["source_constraints"],
-                            "综合",
-                            "公开证据不足",
-                            "无",
+                            ", ".join(claim.get("competitors", [])) or "综合",
+                            f"{claim.get('claim', '') or '公开证据不足'}{support_label}",
+                            ", ".join(
+                                evidence_id
+                                for evidence_id in claim.get("evidence_ids", [])
+                                if evidence_id in report_evidence_ids
+                            )
+                            or "无",
                         ]
                     )
                 )
-                lines.append("")
-                lines.append("分析：该维度目前缺少足够的公开证据，需要补充采集或人工校验。")
-        return "\n".join(lines)
+            lines.append("")
+            lines.append(
+                "分析："
+                + " ".join(
+                    claim.get("claim", "")
+                    for claim in section_claims[:3]
+                    if claim.get("claim")
+                )
+            )
+        elif section_evidence:
+            for evidence in section_evidence[:3]:
+                evidence_text = (
+                    evidence.get("excerpt")
+                    or evidence.get("title")
+                    or "公开证据显示该维度存在可复核信息。"
+                )
+                lines.append(
+                    self._markdown_table_row(
+                        [
+                            section["guiding_question"],
+                            section["source_constraints"],
+                            evidence.get("competitor", "") or "综合",
+                            evidence_text,
+                            evidence.get("id", "") or "无",
+                        ]
+                    )
+                )
+            lines.append("")
+            lines.append(
+                "分析：该小节仅引用已采集证据中的可观察信息，仍需结合更多公开来源复核竞争差异。"
+            )
+        else:
+            lines.append(
+                self._markdown_table_row(
+                    [
+                        section["guiding_question"],
+                        section["source_constraints"],
+                        "综合",
+                        "公开证据不足",
+                        "无",
+                    ]
+                )
+            )
+            lines.append("")
+            lines.append("分析：该维度目前缺少足够的公开证据，需要补充采集或人工校验。")
+        return lines
 
     def _matches_product_section(
         self,

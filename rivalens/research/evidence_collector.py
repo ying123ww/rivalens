@@ -13,6 +13,7 @@ from rivalens.schema import (
     EvidenceItem,
     SOURCE_TYPE_PRIORITY,
 )
+from rivalens.text_quality import clean_text
 
 
 class ResearchEngineEvidenceCollector:
@@ -81,7 +82,7 @@ class ResearchEngineEvidenceCollector:
 
         for source in sources:
             url = source.get("url") or source.get("href") or ""
-            title = source.get("title") or url or "Untitled evidence"
+            title = self._clean_text(source.get("title") or url or "Untitled evidence")
             content = self._source_content(source)
             relevant_chunk = self._most_relevant_chunk(
                 content,
@@ -121,7 +122,10 @@ class ResearchEngineEvidenceCollector:
             or source.get("body")
             or ""
         )
-        return " ".join(str(content).split())
+        return " ".join(self._clean_text(content).split())
+
+    def _clean_text(self, text: Any) -> str:
+        return clean_text(text)
 
     def _most_relevant_chunk(self, content: str, query: str, title: str) -> str:
         if len(content) <= self.excerpt_chars:

@@ -27,10 +27,15 @@ async def get_search_results(query: str, retriever: Any, query_domains: List[str
         search_retriever = retriever(
             query, 
             query_domains=query_domains,
+            headers=getattr(researcher, "headers", None) if researcher else None,
             researcher=researcher  # Pass researcher instance for MCP retrievers
         )
     else:
-        search_retriever = retriever(query, query_domains=query_domains)
+        search_retriever = retriever(
+            query,
+            query_domains=query_domains,
+            headers=getattr(researcher, "headers", None) if researcher else None,
+        )
     
     return search_retriever.search()
 

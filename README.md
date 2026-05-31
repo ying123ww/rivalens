@@ -249,6 +249,7 @@ variables to reduce or expand that branch budget:
 RIVALENS_MAX_ROOT_BRANCHES=40
 RIVALENS_MAX_BRANCH_DEPTH=0
 RIVALENS_MAX_EXPANSION_BRANCHES=0
+RIVALENS_ENABLE_CLAIM_VERIFICATION=false
 ```
 
 - `RIVALENS_MAX_ROOT_BRANCHES` caps the initial competitor x analysis-dimension
@@ -257,6 +258,8 @@ RIVALENS_MAX_EXPANSION_BRANCHES=0
 - `RIVALENS_MAX_BRANCH_DEPTH=0` disables follow-up collection branches.
 - `RIVALENS_MAX_EXPANSION_BRANCHES` caps follow-up branches created from
   coverage gaps.
+- `RIVALENS_ENABLE_CLAIM_VERIFICATION=false` keeps weak/unverifiable claim
+  review from launching a claim-driven verification collection pass.
 
 These limits are separate from `MAX_SEARCH_RESULTS_PER_QUERY` and
 `MAX_ITERATIONS`, which control how many search results and sub-queries each
@@ -283,6 +286,6 @@ specs. `CollectionAgent` owns depth and expansion budget enforcement directly.
 `AnalysisAgent` runs after knowledge structuring and records `branch_id`,
 `evidence_review_id`, and `evidence_ids` on each generated `AnalysisClaim`.
 `ClaimSupportReviewer` marks claims as supported, weak, contradicted, or
-unverifiable; weak or unverifiable claims can trigger a single claim-driven
-verification collection pass, while unsupported claims are withheld from the
-writer context.
+unverifiable; weak or unverifiable claims only trigger the claim-driven
+verification collection pass when `RIVALENS_ENABLE_CLAIM_VERIFICATION=true`,
+while unsupported claims are withheld from the writer context.

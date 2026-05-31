@@ -3,6 +3,7 @@
 from typing import Any
 
 from rivalens.schema import EvidenceReviewFinding, EvidenceReviewResult, ResearchBranch
+from rivalens.text_quality import is_low_quality_text
 
 
 class EvidenceQualityReviewer:
@@ -56,6 +57,18 @@ class EvidenceQualityReviewer:
                         evidence_id=evidence_id,
                         message="Evidence item does not match the branch schema dimension.",
                         recommendation="Use this source only for its matching dimension.",
+                    )
+                )
+                item_rejected = True
+            if self._low_quality_text(evidence):
+                item_findings.append(
+                    self._finding(
+                        branch,
+                        code="low_quality_text",
+                        severity="high",
+                        evidence_id=evidence_id,
+                        message="Evidence text appears garbled or unreadable.",
+                        recommendation="Reject this source and collect a cleaner source.",
                     )
                 )
                 item_rejected = True
@@ -205,6 +218,8 @@ class EvidenceQualityReviewer:
             return "expand"
         if "missing_source_url" in high_codes and accepted_count == 0:
             return "retry"
+        if "low_quality_text" in high_codes and accepted_count == 0:
+            return "retry"
         return "expand"
 
     def _score(self, findings: list[EvidenceReviewFinding]) -> float:
@@ -277,3 +292,13 @@ class EvidenceQualityReviewer:
     def _dimension_matches(self, dimension_id: str, candidates: set[str]) -> bool:
         normalized = self._normalize(dimension_id)
         return normalized in {self._normalize(candidate) for candidate in candidates}
+
+    def _low_quality_text(self, evidence: dict[str, Any]) -> bool:
+        text = " ".join(
+            str(part or "")
+            for part in [
+                evidence.get("title", ""),
+                evidence.get("excerpt", ""),
+            ]
+        ).strip()
+        return bool(text) and is_low_quality_text(text)
