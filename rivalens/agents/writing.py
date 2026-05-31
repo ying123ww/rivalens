@@ -82,12 +82,14 @@ class ReportWriterAgent:
         claims = self._supported_claims(claims, claim_support_reviews)
         evidence_items = self._report_evidence_items(state, claims)
         evidence_ids = self._ordered_evidence_ids(claims, evidence_items)
+        citation_refs_by_evidence_id = self._citation_refs_by_evidence_id(evidence_ids)
         analysis_dimensions = self._analysis_dimensions(state, evidence_items)
         context = self._build_report_context(
             state,
             claims,
             evidence_items,
             analysis_dimensions,
+            citation_refs_by_evidence_id,
         )
         query = self._report_query(state)
         custom_prompt = self._report_format_prompt(analysis_dimensions)
@@ -115,7 +117,17 @@ class ReportWriterAgent:
                 evidence_items,
                 analysis_dimensions,
             )
-        report = self._append_information_index_appendix(report, claims, evidence_items)
+        report = self._apply_inline_citations(
+            report,
+            claims,
+            citation_refs_by_evidence_id,
+        )
+        report = self._append_information_index_appendix(
+            report,
+            claims,
+            evidence_items,
+            citation_refs_by_evidence_id,
+        )
         report_length = len(report)
         generated_report_length = len(generated_report or "")
 
@@ -197,7 +209,8 @@ class ReportWriterAgent:
 ## 第二章：确定竞品
 ### 竞品信息卡片
 - 为每个竞品输出一个简短信息卡片。
-- 卡片字段优先使用 competitors 中的 name、product、website、category、notes。
+- 卡片字段优先使用 competitors 中的 name、product、website、category、notes、evidence_ids。
+- 如果字段由公开证据推导，必须展示对应 citation_ref，例如 [1]；不要无证据扩写。
 
 ### 竞品分类表格
 - 输出 Markdown 表格。
@@ -207,7 +220,7 @@ class ReportWriterAgent:
 必须按以下 10 个小节输出，每个小节都必须包含：
 1. 一个正式对比表格。
 2. 一段对应的分析文字。
-3. 表格或段落中要保留相关 evidence ID。
+3. 表格或段落中要保留相关 citation_ref，例如 [1]。
 
 固定 10 个小节如下：
 {dimension_lines}
@@ -223,7 +236,7 @@ class ReportWriterAgent:
 - 必须说明主要竞争差异、机会和风险。
 
 不要输出附录。附录将由系统基于 EvidenceItem 自动追加。
-所有重要判断必须绑定 evidence ID。不要使用 Context 之外的信息。
+所有重要判断必须绑定 citation_ref。不要使用 Context 之外的信息。不要把原始 evidence ID 当作正文引用输出。
 """
 
     def _build_report_context(
@@ -232,6 +245,7 @@ class ReportWriterAgent:
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
         analysis_dimensions: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         report_evidence_ids = {
             evidence.get("id", "")
@@ -241,9 +255,10 @@ class ReportWriterAgent:
         payload = {
             "reporting_constraints": [
                 "Use analysis_claims as the main claim set.",
-                "Keep evidence_ids visible for material claims.",
+                "Use citation_ref values like [1] for material claims in the report body.",
                 "Use EvidenceItem.url values as source URLs.",
                 "Do not use rejected evidence as support for claims.",
+                "Do not write the appendix; the system appends the information index.",
             ],
             "task": state.get("task", {}),
             "competitors": state.get("competitors")
@@ -251,12 +266,16 @@ class ReportWriterAgent:
             "active_knowledge_schema": state.get("active_knowledge_schema", {}),
             "analysis_dimensions": analysis_dimensions,
             "analysis_claims": [
-                self._compact_claim(claim, report_evidence_ids)
+                self._compact_claim(
+                    claim,
+                    report_evidence_ids,
+                    citation_refs_by_evidence_id,
+                )
                 for claim in claims
             ],
             "competitor_knowledge": state.get("competitor_knowledge", []),
             "evidence_items": [
-                self._compact_evidence_item(evidence)
+                self._compact_evidence_item(evidence, citation_refs_by_evidence_id)
                 for evidence in evidence_items
             ],
             "evidence_reviews": [
@@ -277,16 +296,25 @@ class ReportWriterAgent:
     ) -> list[dict[str, Any]]:
         if not claim_support_reviews:
             return claims
-        supported_ids = {
-            review.get("claim_id", "")
+        review_by_claim = {
+            review.get("claim_id", ""): review
             for review in claim_support_reviews
-            if review.get("support_status") == "supported"
+            if review.get("claim_id")
         }
-        return [
-            claim
-            for claim in claims
-            if claim.get("id", "") in supported_ids
-        ]
+        filtered = []
+        for claim in claims:
+            review = review_by_claim.get(claim.get("id", ""), {})
+            status = review.get("support_status", "")
+            evidence_ids = claim.get("evidence_ids", []) or review.get("evidence_ids", [])
+            if status == "supported" or (status == "weak" and evidence_ids):
+                filtered.append(
+                    {
+                        **claim,
+                        "support_status": status,
+                        "support_reviewer_notes": review.get("reviewer_notes", ""),
+                    }
+                )
+        return filtered
 
     def _analysis_dimensions(
         self,
@@ -300,7 +328,7 @@ class ReportWriterAgent:
         dimension_by_id: dict[str, dict[str, Any]] = {}
         for evidence in evidence_items:
             dimension_id = evidence.get("dimension_id", "")
-            if not dimension_id:
+            if not dimension_id or dimension_id == "competitor_profile":
                 continue
             dimension_by_id[dimension_id] = {
                 "id": dimension_id,
@@ -339,7 +367,13 @@ class ReportWriterAgent:
         self,
         claim: dict[str, Any],
         report_evidence_ids: set[str],
+        citation_refs_by_evidence_id: dict[str, str],
     ) -> dict[str, Any]:
+        evidence_ids = [
+            evidence_id
+            for evidence_id in claim.get("evidence_ids", [])
+            if evidence_id in report_evidence_ids
+        ]
         return {
             "id": claim.get("id", ""),
             "dimension": claim.get("dimension", ""),
@@ -347,19 +381,28 @@ class ReportWriterAgent:
             "evidence_review_id": claim.get("evidence_review_id", ""),
             "claim": claim.get("claim", ""),
             "competitors": claim.get("competitors", []),
-            "evidence_ids": [
-                evidence_id
-                for evidence_id in claim.get("evidence_ids", [])
-                if evidence_id in report_evidence_ids
+            "evidence_ids": evidence_ids,
+            "citation_refs": [
+                citation_refs_by_evidence_id[evidence_id]
+                for evidence_id in evidence_ids
+                if evidence_id in citation_refs_by_evidence_id
             ],
             "reasoning": claim.get("reasoning", ""),
+            "support_status": claim.get("support_status", ""),
+            "support_reviewer_notes": claim.get("support_reviewer_notes", ""),
             "confidence": claim.get("confidence", 0.5),
         }
 
-    def _compact_evidence_item(self, evidence: dict[str, Any]) -> dict[str, Any]:
+    def _compact_evidence_item(
+        self,
+        evidence: dict[str, Any],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, Any]:
         excerpt = " ".join(str(evidence.get("excerpt", "")).split())
+        evidence_id = evidence.get("id", "")
         return {
-            "id": evidence.get("id", ""),
+            "id": evidence_id,
+            "citation_ref": citation_refs_by_evidence_id.get(evidence_id, ""),
             "competitor": evidence.get("competitor", ""),
             "branch_id": evidence.get("branch_id", ""),
             "collection_task_id": evidence.get("collection_task_id", ""),
@@ -475,6 +518,16 @@ class ReportWriterAgent:
         )
         return list(dict.fromkeys(ordered_ids))
 
+    def _citation_refs_by_evidence_id(
+        self,
+        evidence_ids: list[str],
+    ) -> dict[str, str]:
+        return {
+            evidence_id: f"[{index}]"
+            for index, evidence_id in enumerate(evidence_ids, start=1)
+            if evidence_id
+        }
+
     def _fallback_report(
         self,
         state: CompetitorAnalysisState,
@@ -489,7 +542,7 @@ class ReportWriterAgent:
             "",
             "## 第一章：分析目的",
             "",
-            f"本次分析围绕用户提出的问题展开：{task.get('query', '竞品分析')}。报告基于已采集并通过质量检查的公开证据，比较竞品在关键维度上的差异，并保留证据 ID 与来源 URL 以便复核。",
+            f"本次分析围绕用户提出的问题展开：{task.get('query', '竞品分析')}。报告基于已采集并通过质量检查的公开证据，比较竞品在关键维度上的差异，并保留正文引用编号与附录来源 URL 以便复核。",
             "",
             "## 第二章：确定竞品",
             "",
@@ -504,6 +557,7 @@ class ReportWriterAgent:
                     lines.append(f"  - 官网：{competitor.get('website', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 分类：{competitor.get('category', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 备注：{competitor.get('notes', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 主要引用：{', '.join(competitor.get('evidence_ids', [])[:3]) or '公开资料不足'}")
                 else:
                     lines.append(f"- **{competitor}**")
         else:
@@ -514,13 +568,14 @@ class ReportWriterAgent:
                 "",
                 "### 竞品分类表格",
                 "",
-                "| 竞品 | 产品/品牌 | 分类 | 官网 | 备注 |",
-                "| --- | --- | --- | --- | --- |",
+                "| 竞品 | 产品/品牌 | 分类 | 官网 | 备注 | 主要引用 |",
+                "| --- | --- | --- | --- | --- | --- |",
             ]
         )
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
+                    evidence_ids = ", ".join(competitor.get("evidence_ids", [])[:3])
                     lines.append(
                         "| "
                         f"{competitor.get('name', '') or '未知竞品'} | "
@@ -528,11 +583,12 @@ class ReportWriterAgent:
                         f"{competitor.get('category', '') or '公开资料不足'} | "
                         f"{competitor.get('website', '') or '公开资料不足'} | "
                         f"{competitor.get('notes', '') or '公开资料不足'} |"
+                        f"{evidence_ids or '公开资料不足'} |"
                     )
                 else:
-                    lines.append(f"| {competitor} | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
+                    lines.append(f"| {competitor} | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
         else:
-            lines.append("| 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
+            lines.append("| 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
 
         lines.extend(["", "## 第三章：竞品分析"])
         for index, dimension in enumerate(analysis_dimensions[:10], start=1):
@@ -547,17 +603,22 @@ class ReportWriterAgent:
                     "",
                     f"### 3.{index} {dimension.get('name', dimension_id)}",
                     "",
-                    "| 对比项 | 竞品/对象 | 结论 | 证据 ID |",
+                    "| 对比项 | 竞品/对象 | 结论 | 引用 |",
                     "| --- | --- | --- | --- |",
                 ]
             )
             if dimension_claims:
                 for claim in dimension_claims:
+                    support_label = (
+                        "（证据较弱，需复核）"
+                        if claim.get("support_status") == "weak"
+                        else ""
+                    )
                     lines.append(
                         "| "
                         f"{dimension.get('name', dimension_id)} | "
                         f"{', '.join(claim.get('competitors', [])) or '综合'} | "
-                        f"{claim.get('claim', '') or '公开证据不足'} | "
+                        f"{claim.get('claim', '') or '公开证据不足'}{support_label} | "
                         f"{', '.join(claim.get('evidence_ids', [])) or '无'} |"
                     )
                 lines.append("")
@@ -578,7 +639,7 @@ class ReportWriterAgent:
                 "",
                 "### SWOT 分析矩阵",
                 "",
-                "| 类型 | 内容 | 证据 ID |",
+                "| 类型 | 内容 | 引用 |",
                 "| --- | --- | --- |",
                 "| Strengths 优势 | 基于已接受证据，部分竞品已形成可观察的公开竞争信号。 | "
                 f"{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
@@ -599,13 +660,14 @@ class ReportWriterAgent:
         report: str,
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         lines = [
             "",
             "## 附录：信息索引表格",
             "",
-            "| 信息 ID | 关联 Claim ID | 竞品 | 分析维度 | 标题 | 来源类型 | URL | 摘要 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| 引用标号 | 信息 ID | 关联 Claim ID | 竞品 | 分析维度 | 标题 | 来源类型 | URL | 摘要 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
         if evidence_items:
             claim_ids_by_evidence_id = self._claim_ids_by_evidence_id(claims)
@@ -615,19 +677,166 @@ class ReportWriterAgent:
                 title = evidence.get("title") or url or "Untitled source"
                 excerpt = " ".join(str(evidence.get("excerpt", "")).split())[:160]
                 lines.append(
-                    "| "
-                    f"{evidence_id or '无'} | "
-                    f"{', '.join(claim_ids_by_evidence_id.get(evidence_id, [])) or '无'} | "
-                    f"{evidence.get('competitor', '') or '综合'} | "
-                    f"{evidence.get('dimension_name') or evidence.get('dimension_id', '') or '未分类'} | "
-                    f"{title} | "
-                    f"{evidence.get('source_type', '') or 'other'} | "
-                    f"{url or '无'} | "
-                    f"{excerpt or '无'} |"
+                    self._markdown_table_row(
+                        [
+                            citation_refs_by_evidence_id.get(evidence_id, "无"),
+                            evidence_id or "无",
+                            ", ".join(claim_ids_by_evidence_id.get(evidence_id, []))
+                            or "无",
+                            evidence.get("competitor", "") or "综合",
+                            evidence.get("dimension_name")
+                            or evidence.get("dimension_id", "")
+                            or "未分类",
+                            title,
+                            evidence.get("source_type", "") or "other",
+                            url or "无",
+                            excerpt or "无",
+                        ]
+                    )
                 )
         else:
-            lines.append("| 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 |")
+            lines.append("| 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 |")
         return f"{report.rstrip()}\n" + "\n".join(lines)
+
+    def _apply_inline_citations(
+        self,
+        report: str,
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        if not citation_refs_by_evidence_id:
+            return report
+
+        cited_report = report
+        for evidence_id in sorted(citation_refs_by_evidence_id, key=len, reverse=True):
+            citation_ref = citation_refs_by_evidence_id[evidence_id]
+            cited_report = self._replace_evidence_id_with_citation_ref(
+                cited_report,
+                evidence_id,
+                citation_ref,
+            )
+
+        lines = cited_report.splitlines()
+        lines = self._append_claim_citations_to_matching_lines(
+            lines,
+            claims,
+            citation_refs_by_evidence_id,
+        )
+        if not self._contains_any_citation_ref(
+            "\n".join(lines),
+            citation_refs_by_evidence_id,
+        ):
+            lines = self._append_first_available_citation_to_body(
+                lines,
+                citation_refs_by_evidence_id,
+            )
+        return "\n".join(lines)
+
+    def _replace_evidence_id_with_citation_ref(
+        self,
+        report: str,
+        evidence_id: str,
+        citation_ref: str,
+    ) -> str:
+        import re
+
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_-]){re.escape(evidence_id)}(?![A-Za-z0-9_-])"
+        )
+        return pattern.sub(citation_ref, report)
+
+    def _append_claim_citations_to_matching_lines(
+        self,
+        lines: list[str],
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> list[str]:
+        result = list(lines)
+        for claim in claims:
+            claim_text = " ".join(str(claim.get("claim", "")).split())
+            if not claim_text:
+                continue
+            citation_refs = self._citation_refs_for_evidence_ids(
+                claim.get("evidence_ids", []),
+                citation_refs_by_evidence_id,
+            )
+            if not citation_refs:
+                continue
+            for index, line in enumerate(result):
+                compact_line = " ".join(line.split())
+                if claim_text in compact_line and not self._line_has_any_ref(
+                    line,
+                    citation_refs,
+                ):
+                    result[index] = self._append_refs_to_markdown_line(
+                        line,
+                        citation_refs,
+                    )
+        return result
+
+    def _append_first_available_citation_to_body(
+        self,
+        lines: list[str],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> list[str]:
+        result = list(lines)
+        citation_ref = next(iter(citation_refs_by_evidence_id.values()), "")
+        if not citation_ref:
+            return result
+        for index, line in enumerate(result):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("|"):
+                continue
+            result[index] = self._append_refs_to_markdown_line(line, [citation_ref])
+            break
+        return result
+
+    def _citation_refs_for_evidence_ids(
+        self,
+        evidence_ids: list[str],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> list[str]:
+        return [
+            citation_refs_by_evidence_id[evidence_id]
+            for evidence_id in evidence_ids
+            if evidence_id in citation_refs_by_evidence_id
+        ]
+
+    def _contains_any_citation_ref(
+        self,
+        report: str,
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> bool:
+        return any(
+            citation_ref in report
+            for citation_ref in citation_refs_by_evidence_id.values()
+        )
+
+    def _line_has_any_ref(self, line: str, citation_refs: list[str]) -> bool:
+        return any(citation_ref in line for citation_ref in citation_refs)
+
+    def _append_refs_to_markdown_line(
+        self,
+        line: str,
+        citation_refs: list[str],
+    ) -> str:
+        refs = " ".join(citation_refs)
+        if not refs:
+            return line
+        stripped = line.rstrip()
+        if stripped.startswith("|") and stripped.endswith("|"):
+            return f"{stripped[:-1].rstrip()} {refs} |"
+        return f"{stripped} {refs}"
+
+    def _markdown_table_row(self, values: list[Any]) -> str:
+        cells = [self._markdown_table_cell(value) for value in values]
+        return "| " + " | ".join(cells) + " |"
+
+    def _markdown_table_cell(self, value: Any) -> str:
+        text = " ".join(str(value).split())
+        if not text:
+            return "无"
+        return text.replace("|", "\\|")
 
     def _claim_ids_by_evidence_id(
         self,

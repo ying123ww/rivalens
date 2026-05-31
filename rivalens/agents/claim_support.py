@@ -147,11 +147,7 @@ class ClaimSupportReviewer:
             )
             for evidence in evidence_items
         ).lower()
-        claim_tokens = [
-            token
-            for token in re.findall(r"[a-z0-9]+", claim_text.lower())
-            if len(token) > 3 and token not in {"with", "from", "that", "this", "have", "has", "were", "been", "evidence", "public"}
-        ]
+        claim_tokens = self._support_terms(claim_text)
         overlap = [token for token in claim_tokens if token in evidence_text]
 
         if overlap:
@@ -162,7 +158,22 @@ class ClaimSupportReviewer:
                 round(min(1.0, max(0.0, base_score)), 2),
             )
 
-        if any(keyword in evidence_text for keyword in ["no ", "not ", "lack", "missing", "insufficient", "unclear"]):
+        if any(
+            keyword in evidence_text
+            for keyword in [
+                "no ",
+                "not ",
+                "lack",
+                "missing",
+                "insufficient",
+                "unclear",
+                "没有",
+                "缺少",
+                "不足",
+                "不明确",
+                "无法确认",
+            ]
+        ):
             return (
                 "weak",
                 claim_tokens[:3],
@@ -176,6 +187,36 @@ class ClaimSupportReviewer:
             "Evidence is traceable but the claim needs a tighter verification query.",
             round(max(0.0, min(1.0, base_score * 0.8)), 2),
         )
+
+    def _support_terms(self, text: str) -> list[str]:
+        normalized = text.lower()
+        stopwords = {
+            "with",
+            "from",
+            "that",
+            "this",
+            "have",
+            "has",
+            "were",
+            "been",
+            "evidence",
+            "public",
+            "quality",
+            "reviewed",
+        }
+        terms = [
+            token
+            for token in re.findall(r"[a-z0-9]+", normalized)
+            if len(token) > 3 and token not in stopwords
+        ]
+        for segment in re.findall(r"[\u4e00-\u9fff]+", text):
+            if len(segment) <= 4:
+                terms.append(segment)
+            terms.extend(
+                segment[index : index + 2]
+                for index in range(max(0, len(segment) - 1))
+            )
+        return list(dict.fromkeys(terms))
 
     def _follow_up_tasks(
         self,

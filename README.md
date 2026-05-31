@@ -113,6 +113,9 @@ competitors as `suggested_competitors` without automatically treating them as
 selected analysis targets. When known competitors are detected in the user query
 and no explicit competitor list was provided, `PlanningAgent` promotes those
 `detected_competitors` into the workflow competitor scope before collection.
+`source_collection` also creates a `competitor_profile` task for each selected
+competitor, so report information cards are backed by explicit public profile
+evidence instead of writer-only inference.
 `source_collection` expands the confirmed analysis dimensions into
 competitor-by-dimension collection tasks and runs them concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
@@ -240,13 +243,14 @@ branches before calling the underlying search retrievers. Use these environment
 variables to reduce or expand that branch budget:
 
 ```env
-RIVALENS_MAX_ROOT_BRANCHES=6
+RIVALENS_MAX_ROOT_BRANCHES=40
 RIVALENS_MAX_BRANCH_DEPTH=0
 RIVALENS_MAX_EXPANSION_BRANCHES=0
 ```
 
 - `RIVALENS_MAX_ROOT_BRANCHES` caps the initial competitor x analysis-dimension
-  collection branches.
+  collection branches. Budget for `(competitor count) x (selected directions + 1
+  competitor_profile task)`.
 - `RIVALENS_MAX_BRANCH_DEPTH=0` disables follow-up collection branches.
 - `RIVALENS_MAX_EXPANSION_BRANCHES` caps follow-up branches created from
   coverage gaps.
@@ -261,8 +265,8 @@ individual collection branch uses.
 `CompetitorKnowledge`, and accepted `EvidenceItem` records into the shared
 `ReportGenerator` writing path, using a fixed report contract: analysis purpose,
 competitor selection, 10-section competitor analysis, summary, and an
-automatically appended information-index appendix with evidence IDs and source
-URLs. The
+automatically appended information-index appendix that maps paper-style citation
+refs such as `[1]` back to evidence IDs and source URLs. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and

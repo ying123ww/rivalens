@@ -75,17 +75,19 @@ class CollectionReviewTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(len(branches), 1)
-        self.assertEqual(branches[0]["dimension_id"], "direction_strategic_positioning")
-        self.assertEqual(branches[0]["dimension_name"], "战略定位")
-        self.assertIn("品牌定位和市场细分", branches[0]["query"])
-        self.assertNotIn("Expected source types", branches[0]["query"])
+        self.assertEqual(len(branches), 2)
+        self.assertEqual(branches[0]["dimension_id"], "competitor_profile")
+        self.assertEqual(branches[0]["dimension_name"], "竞品基础信息")
+        self.assertEqual(branches[1]["dimension_id"], "direction_strategic_positioning")
+        self.assertEqual(branches[1]["dimension_name"], "战略定位")
+        self.assertIn("品牌定位和市场细分", branches[1]["query"])
+        self.assertNotIn("Expected source types", branches[1]["query"])
         self.assertIn(
             "Preferred evidence sources, in priority order: official_site, news",
-            branches[0]["query"],
+            branches[1]["query"],
         )
-        self.assertEqual(branches[0]["source_hints"], ["official_site", "news"])
-        self.assertEqual(branches[0]["search_stage"], "focused")
+        self.assertEqual(branches[1]["source_hints"], ["official_site", "news"])
+        self.assertEqual(branches[1]["search_stage"], "focused")
 
     def test_collection_does_not_fallback_to_core_fields(self):
         branches = CollectionAgent()._build_root_branches(
@@ -98,7 +100,60 @@ class CollectionReviewTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(branches, [])
+        self.assertEqual(len(branches), 1)
+        self.assertEqual(branches[0]["dimension_id"], "competitor_profile")
+
+    def test_profile_collection_branch_targets_competitor_cards(self):
+        branches = CollectionAgent()._build_root_branches(
+            query="Compare Taobao and JD",
+            competitors=[{"name": "淘宝"}],
+            active_schema={
+                "selected_industry": {"name": "零售 / 电商"},
+                "industry_extensions": [],
+            },
+        )
+
+        profile_branch = branches[0]
+        self.assertEqual(profile_branch["dimension_id"], "competitor_profile")
+        self.assertEqual(profile_branch["dimension_type"], "profile")
+        self.assertIn("竞品基础信息", profile_branch["dimension_name"])
+        self.assertIn("official_site", profile_branch["source_hints"])
+        self.assertIn("report competitor information card", profile_branch["query"])
+
+    def test_knowledge_structuring_enriches_competitor_profiles_from_profile_evidence(self):
+        state = {
+            "task": {"query": "对比淘宝、京东、拼多多"},
+            "competitors": [{"name": "淘宝"}],
+            "active_knowledge_schema": {
+                "id": "active_schema_retail",
+                "selected_industry": {"name": "零售 / 电商"},
+                "industry_extensions": [],
+            },
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "淘宝",
+                    "dimension_id": "competitor_profile",
+                    "dimension_name": "竞品基础信息",
+                    "title": "淘宝官网",
+                    "url": "https://www.taobao.com",
+                    "source_type": "official_site",
+                    "excerpt": "淘宝是面向消费者和商家的综合电商平台。",
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_reviews": [{"accepted_evidence_ids": ["ev_1"]}],
+            "messages": [],
+        }
+
+        result = asyncio.run(KnowledgeStructuringAgent().run(state))
+
+        self.assertEqual(result["competitors"][0]["name"], "淘宝")
+        self.assertEqual(result["competitors"][0]["product"], "淘宝")
+        self.assertEqual(result["competitors"][0]["website"], "https://www.taobao.com")
+        self.assertEqual(result["competitors"][0]["category"], "零售 / 电商")
+        self.assertEqual(result["competitors"][0]["evidence_ids"], ["ev_1"])
+        self.assertIn("综合电商平台", result["competitors"][0]["notes"])
 
     def test_collection_generates_guiding_question_follow_up_tasks(self):
         class FakeEvidenceCollector:
@@ -236,7 +291,11 @@ class CollectionReviewTest(unittest.TestCase):
 
         self.assertEqual(
             {branch["dimension_id"]: branch["search_stage"] for branch in branches},
-            {"market_growth": "focused", "competitive_moat": "focused"},
+            {
+                "competitor_profile": "focused",
+                "market_growth": "focused",
+                "competitive_moat": "focused",
+            },
         )
 
     def test_claim_support_review_generates_verification_task_for_unverifiable_claim(self):
@@ -279,6 +338,40 @@ class CollectionReviewTest(unittest.TestCase):
             result["verification_task_queue"][0]["decision_subtype"],
             "evidence_check",
         )
+
+    def test_claim_support_review_supports_chinese_claims_with_chinese_evidence(self):
+        state = {
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "strategic_positioning",
+                    "branch_id": "collect_taobao_strategic_positioning",
+                    "claim": "淘宝是面向消费者和商家的综合电商平台。",
+                    "competitors": ["淘宝"],
+                    "evidence_ids": ["ev_1"],
+                    "confidence": 0.82,
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "淘宝",
+                    "title": "淘宝官网",
+                    "url": "https://www.taobao.com",
+                    "excerpt": "淘宝是面向消费者和商家的综合电商平台。",
+                }
+            ],
+            "messages": [],
+            "verification_rounds": 0,
+        }
+
+        result = ClaimSupportReviewer().review(state)
+
+        self.assertEqual(
+            result["claim_support_reviews"][0]["support_status"],
+            "supported",
+        )
+        self.assertEqual(result["verification_task_queue"], [])
 
     def test_collection_processes_verification_queue_without_rebuilding_roots(self):
         seen_tasks = []
@@ -848,7 +941,10 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertNotIn("ev_2", researcher.context)
         self.assertNotIn("https://acme.example/rejected", researcher.context)
         self.assertIn("# Generated Report", result["report"])
+        self.assertIn("Acme has a public starter plan. [1]", result["report"])
         self.assertIn("## 附录：信息索引表格", result["report"])
+        self.assertIn("| 引用标号 | 信息 ID |", result["report"])
+        self.assertIn("| [1] | ev_1 | claim_1 |", result["report"])
         self.assertIn("claim_1", result["report"])
         self.assertIn("ev_1", result["report"])
         self.assertNotIn("ev_2", result["report"])
@@ -895,8 +991,148 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("## 第三章：竞品分析", result["report"])
         self.assertIn("## 第四章：总结", result["report"])
         self.assertIn("Acme publishes a starter pricing plan", result["report"])
+        self.assertIn("[1]", result["report"])
         self.assertIn("## 附录：信息索引表格", result["report"])
         self.assertIn("https://acme.example/pricing", result["report"])
+
+    def test_writer_fallback_uses_profile_fields_and_evidence_ids(self):
+        class EmptyReportGenerator:
+            def __init__(self, researcher):
+                self.researcher = researcher
+
+            async def write_report(self, **kwargs):
+                return ""
+
+        state = {
+            "task": {"query": "对比淘宝、京东、拼多多"},
+            "competitors": [
+                {
+                    "name": "淘宝",
+                    "product": "淘宝",
+                    "website": "https://www.taobao.com",
+                    "category": "零售 / 电商",
+                    "notes": "淘宝是面向消费者和商家的综合电商平台。",
+                    "evidence_ids": ["ev_1"],
+                }
+            ],
+            "analysis_claims": [],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "淘宝",
+                    "dimension_id": "competitor_profile",
+                    "dimension_name": "竞品基础信息",
+                    "title": "淘宝官网",
+                    "url": "https://www.taobao.com",
+                    "excerpt": "淘宝是面向消费者和商家的综合电商平台。",
+                    "source_type": "official_site",
+                }
+            ],
+            "evidence_reviews": [{"accepted_evidence_ids": ["ev_1"]}],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=EmptyReportGenerator).run(state)
+        )
+
+        self.assertIn("官网：https://www.taobao.com", result["report"])
+        self.assertIn("主要引用：[1]", result["report"])
+        self.assertIn("| 淘宝 | 淘宝 | 零售 / 电商 | https://www.taobao.com", result["report"])
+        self.assertIn("ev_1", result["report"])
+
+    def test_writer_keeps_weak_claims_with_evidence_bindings(self):
+        class EmptyReportGenerator:
+            def __init__(self, researcher):
+                self.researcher = researcher
+
+            async def write_report(self, **kwargs):
+                return ""
+
+        state = {
+            "task": {"query": "对比淘宝、京东、拼多多"},
+            "competitors": [{"name": "淘宝"}],
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "market_growth",
+                    "claim": "淘宝公开资料显示其平台定位覆盖综合电商场景。",
+                    "competitors": ["淘宝"],
+                    "evidence_ids": ["ev_1"],
+                    "confidence": 0.62,
+                }
+            ],
+            "claim_support_reviews": [
+                {
+                    "claim_id": "claim_1",
+                    "support_status": "weak",
+                    "evidence_ids": ["ev_1"],
+                    "reviewer_notes": "Evidence is traceable but wording needs tightening.",
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "淘宝",
+                    "dimension_id": "market_growth",
+                    "dimension_name": "市场与增长",
+                    "title": "淘宝官网",
+                    "url": "https://www.taobao.com",
+                    "excerpt": "淘宝平台提供综合电商服务。",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=EmptyReportGenerator).run(state)
+        )
+
+        self.assertIn("淘宝公开资料显示其平台定位覆盖综合电商场景", result["report"])
+        self.assertIn("证据较弱，需复核", result["report"])
+        self.assertNotIn("| 市场与增长 | 综合 | 公开证据不足 | 无 |", result["report"])
+
+    def test_writer_escapes_information_index_markdown_table_cells(self):
+        class EmptyReportGenerator:
+            def __init__(self, researcher):
+                self.researcher = researcher
+
+            async def write_report(self, **kwargs):
+                return ""
+
+        state = {
+            "task": {"query": "Compare Acme pricing"},
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "pricing_model",
+                    "claim": "Acme publishes pricing tiers.",
+                    "evidence_ids": ["ev_1"],
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing | Packaging",
+                    "title": "Acme | pricing",
+                    "url": "https://acme.example/pricing?a=1|b=2",
+                    "excerpt": "Starter | Pro\nEnterprise tiers are listed.",
+                    "source_type": "pricing_page",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=EmptyReportGenerator).run(state)
+        )
+
+        self.assertIn("Pricing \\| Packaging", result["report"])
+        self.assertIn("Acme \\| pricing", result["report"])
+        self.assertIn("Starter \\| Pro Enterprise tiers are listed.", result["report"])
+        self.assertIn("https://acme.example/pricing?a=1\\|b=2", result["report"])
 
 
 if __name__ == "__main__":

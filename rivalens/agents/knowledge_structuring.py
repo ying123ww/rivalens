@@ -20,6 +20,11 @@ class KnowledgeStructuringAgent:
         evidence_items = self._accepted_evidence_items(state)
 
         knowledge = self._build_competitor_knowledge(evidence_items, active_schema)
+        competitors = self._enrich_competitors(
+            state.get("competitors") or task.get("competitors", []),
+            evidence_items,
+            active_schema,
+        )
         message = create_agent_message(
             sender="knowledge_structuring",
             receiver="analysis",
@@ -36,6 +41,7 @@ class KnowledgeStructuringAgent:
         )
 
         return {
+            "competitors": competitors,
             "competitor_knowledge": knowledge,
             "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
@@ -51,6 +57,13 @@ class KnowledgeStructuringAgent:
                     },
                     "output": {
                         "knowledge_count": len(knowledge),
+                        "profile_count": len(
+                            [
+                                competitor
+                                for competitor in competitors
+                                if competitor.get("evidence_ids")
+                            ]
+                        ),
                     },
                 }
             ],
@@ -77,6 +90,8 @@ class KnowledgeStructuringAgent:
             persona_signals = []
 
             for feature_index, evidence in enumerate(competitor_evidence, start=1):
+                if evidence.get("dimension_id") == "competitor_profile":
+                    continue
                 evidence_id = evidence.get("id", "")
                 text = (
                     evidence.get("excerpt")
@@ -172,6 +187,103 @@ class KnowledgeStructuringAgent:
             )
 
         return knowledge_items
+
+    def _enrich_competitors(
+        self,
+        competitors: list[Any],
+        evidence_items: list[dict[str, Any]],
+        active_schema: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        profiles_by_competitor: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for evidence in evidence_items:
+            if evidence.get("dimension_id") != "competitor_profile":
+                continue
+            competitor = self._profile_key(evidence.get("competitor", ""))
+            if competitor:
+                profiles_by_competitor[competitor].append(evidence)
+
+        normalized = self._normalize_competitors(competitors)
+        if not normalized:
+            normalized = [
+                {"name": evidence.get("competitor", "")}
+                for evidence in evidence_items
+                if evidence.get("dimension_id") == "competitor_profile"
+                and evidence.get("competitor")
+            ]
+
+        selected_industry = (
+            active_schema.get("selected_industry", {}).get("name", "")
+            if isinstance(active_schema, dict)
+            else ""
+        )
+        enriched = []
+        for competitor in normalized:
+            profile = dict(competitor)
+            name = str(profile.get("name", "")).strip()
+            related = profiles_by_competitor.get(self._profile_key(name), [])
+            best_evidence = self._best_profile_evidence(related)
+            evidence_ids = [item.get("id", "") for item in related if item.get("id")]
+
+            if name and not profile.get("product"):
+                profile["product"] = name
+            if best_evidence and not profile.get("website"):
+                profile["website"] = best_evidence.get("url", "")
+            if selected_industry and not profile.get("category"):
+                profile["category"] = selected_industry
+            if best_evidence and not profile.get("notes"):
+                profile["notes"] = self._profile_note(best_evidence)
+            if evidence_ids:
+                profile["evidence_ids"] = list(dict.fromkeys(evidence_ids))
+                profile["confidence"] = self._average_confidence(related)
+
+            enriched.append(profile)
+
+        return enriched
+
+    def _normalize_competitors(self, competitors: list[Any]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for competitor in competitors:
+            if isinstance(competitor, str):
+                name = competitor.strip()
+                if name:
+                    normalized.append({"name": name})
+                continue
+            name = str(competitor.get("name", "")).strip()
+            if not name:
+                continue
+            normalized.append(
+                {
+                    "name": name,
+                    "product": competitor.get("product", ""),
+                    "website": competitor.get("website", ""),
+                    "category": competitor.get("category", ""),
+                    "notes": competitor.get("notes", ""),
+                    "evidence_ids": list(competitor.get("evidence_ids", []) or []),
+                    "confidence": competitor.get("confidence", 0.5),
+                }
+            )
+        return normalized
+
+    def _profile_key(self, value: Any) -> str:
+        return str(value or "").strip().lower()
+
+    def _best_profile_evidence(
+        self,
+        evidence_items: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not evidence_items:
+            return None
+        return sorted(
+            evidence_items,
+            key=lambda evidence: (
+                0 if evidence.get("source_type") == "official_site" else 1,
+                -float(evidence.get("confidence", 0.5)),
+            ),
+        )[0]
+
+    def _profile_note(self, evidence: dict[str, Any]) -> str:
+        text = evidence.get("excerpt") or evidence.get("title") or ""
+        return " ".join(str(text).split())[:220]
 
     def _guess_feature_category(self, text: str, active_schema: dict[str, Any]) -> str:
         for extension in active_schema.get("industry_extensions", []):

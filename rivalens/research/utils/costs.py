@@ -13,6 +13,7 @@ INPUT_COST_PER_TOKEN = 0.000005
 OUTPUT_COST_PER_TOKEN = 0.000015
 IMAGE_INFERENCE_COST = 0.003825
 EMBEDDING_COST = 0.02 / 1000000  # Assumes new ada-3-small
+EMBEDDING_ENCODING_MODEL = "cl100k_base"
 
 
 def estimate_llm_cost(input_content: str, output_content: str) -> float:
@@ -45,7 +46,13 @@ def estimate_embedding_cost(model: str, docs: list) -> float:
     Returns:
         The estimated embedding cost in USD.
     """
-    encoding = tiktoken.encoding_for_model(model)
+    encoding = _embedding_encoding(model)
     total_tokens = sum(len(encoding.encode(str(doc))) for doc in docs)
     return total_tokens * EMBEDDING_COST
 
+
+def _embedding_encoding(model: str):
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        return tiktoken.get_encoding(EMBEDDING_ENCODING_MODEL)

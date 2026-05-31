@@ -324,7 +324,7 @@ class CollectionAgent:
         branches = []
 
         for competitor in normalized_competitors:
-            for dimension in dimensions:
+            for dimension in [self._competitor_profile_dimension(), *dimensions]:
                 branch_id = self._task_id(competitor, dimension["id"])
                 branches.append(
                     {
@@ -358,6 +358,34 @@ class CollectionAgent:
                 )
 
         return branches
+
+    def _competitor_profile_dimension(self) -> dict[str, Any]:
+        return {
+            "id": "competitor_profile",
+            "name": "竞品基础信息",
+            "type": "profile",
+            "description": (
+                "Identify the competitor's official website, product or brand "
+                "identity, category, and concise public positioning."
+            ),
+            "source_hints": self._ranked_source_hints(
+                ["official_site", "public_registry", "marketplace", "news"],
+            ),
+            "guiding_questions": [
+                "What is the competitor's official website or canonical public page?",
+                "What product, brand, or platform identity does the competitor use publicly?",
+                "How is the competitor categorized or positioned in public sources?",
+            ],
+            "search_intent": (
+                "Collect profile evidence for the report competitor information card. "
+                "Prefer official or registry pages over commentary."
+            ),
+            "minimum_coverage": [
+                "At least one source-backed public evidence item for the competitor profile.",
+            ],
+            "risk_level": "low",
+            "expected_claim_types": ["competitor_profile"],
+        }
 
     def _build_verification_branches(
         self,

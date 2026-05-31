@@ -89,6 +89,8 @@ class Competitor(TypedDict, total=False):
     website: str
     category: str
     notes: str
+    evidence_ids: list[str]
+    confidence: float
 
 
 class EvidenceItem(TypedDict, total=False):
@@ -512,6 +514,8 @@ class CompetitorPayload(StrictPayloadModel):
     website: str | None = None
     category: str | None = None
     notes: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0, le=1)
 
 
 class IndustryCandidatePayload(StrictPayloadModel):

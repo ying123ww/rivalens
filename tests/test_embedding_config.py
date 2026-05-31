@@ -9,6 +9,7 @@ from rivalens.research.memory.embeddings import (
     _openai_embedding_api_base,
     _openai_embedding_api_key,
 )
+from rivalens.research.utils.costs import estimate_embedding_cost
 
 
 class EmbeddingConfigTest(unittest.TestCase):
@@ -86,6 +87,14 @@ class EmbeddingConfigTest(unittest.TestCase):
             ).get_embeddings()
 
         self.assertTrue(embeddings.check_embedding_ctx_length)
+
+    def test_embedding_cost_estimate_supports_text_embedding_v4(self):
+        cost = estimate_embedding_cost(
+            model="text-embedding-v4",
+            docs=["淘宝是综合电商平台。"],
+        )
+
+        self.assertGreater(cost, 0)
 
 
 if __name__ == "__main__":

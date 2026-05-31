@@ -99,6 +99,8 @@ class AnalysisAgent:
                 or evidence_items[0].get("dimension_id")
                 or "source_evidence"
             )
+            if dimension == "competitor_profile":
+                continue
             dimension_name = (
                 branch.get("dimension_name")
                 or evidence_items[0].get("dimension_name")
