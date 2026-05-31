@@ -936,12 +936,19 @@ class CollectionReviewTest(unittest.TestCase):
         researcher = created_researchers[0]
         self.assertIn("第一章：分析目的", researcher.custom_prompt)
         self.assertIn("第三章：竞品分析", researcher.custom_prompt)
+        self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", researcher.custom_prompt)
+        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ | 官网首页、公开采访、品牌宣传 |", researcher.custom_prompt)
+        self.assertIn("| 3.10 用户口碑 | 用户怎么评价？好评和差评集中在哪？ | 搜索API可索引的公开评价（尽力而为） |", researcher.custom_prompt)
         self.assertIn("Acme publishes a starter pricing plan", researcher.context)
         self.assertIn("https://acme.example/pricing", researcher.context)
+        self.assertIn("product_analysis_checklist", researcher.context)
         self.assertNotIn("ev_2", researcher.context)
         self.assertNotIn("https://acme.example/rejected", researcher.context)
         self.assertIn("# Generated Report", result["report"])
         self.assertIn("Acme has a public starter plan. [1]", result["report"])
+        self.assertIn("## 第三章：竞品分析", result["report"])
+        self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", result["report"])
+        self.assertIn("| 3.3 商业模式 | 这个产品怎么赚钱？定价策略是什么？ | 定价页、公开财务信息 |", result["report"])
         self.assertIn("## 附录：信息索引表格", result["report"])
         self.assertIn("| 引用标号 | 信息 ID |", result["report"])
         self.assertIn("| [1] | ev_1 | claim_1 |", result["report"])
@@ -989,11 +996,69 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("## 第一章：分析目的", result["report"])
         self.assertIn("## 第二章：确定竞品", result["report"])
         self.assertIn("## 第三章：竞品分析", result["report"])
+        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ | 官网首页、公开采访、品牌宣传 |", result["report"])
+        self.assertIn("### 3.3 商业模式", result["report"])
+        self.assertIn("### 3.10 用户口碑", result["report"])
         self.assertIn("## 第四章：总结", result["report"])
         self.assertIn("Acme publishes a starter pricing plan", result["report"])
         self.assertIn("[1]", result["report"])
         self.assertIn("## 附录：信息索引表格", result["report"])
         self.assertIn("https://acme.example/pricing", result["report"])
+
+    def test_writer_replaces_noncompliant_generated_chapter_three(self):
+        class NoncompliantReportGenerator:
+            def __init__(self, researcher):
+                self.researcher = researcher
+
+            async def write_report(self, **kwargs):
+                return "\n".join(
+                    [
+                        "# 竞品分析报告",
+                        "",
+                        "## 第三章：竞品分析",
+                        "",
+                        "### 3.1 Random Dimension",
+                        "This chapter does not follow the product checklist.",
+                        "",
+                        "## 第四章：总结",
+                        "Initial summary.",
+                    ]
+                )
+
+        state = {
+            "task": {"query": "Compare Acme pricing"},
+            "analysis_claims": [
+                {
+                    "id": "claim_1",
+                    "dimension": "pricing_model",
+                    "claim": "Acme publishes a starter pricing plan.",
+                    "evidence_ids": ["ev_1"],
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Acme pricing",
+                    "url": "https://acme.example/pricing",
+                    "excerpt": "Acme publishes a starter pricing plan.",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            ReportWriterAgent(report_generator_factory=NoncompliantReportGenerator).run(state)
+        )
+
+        self.assertNotIn("Random Dimension", result["report"])
+        self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", result["report"])
+        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ | 官网首页、公开采访、品牌宣传 |", result["report"])
+        self.assertIn("### 3.10 用户口碑", result["report"])
+        self.assertIn("Acme publishes a starter pricing plan. [1]", result["report"])
+        self.assertIn("## 第四章：总结", result["report"])
 
     def test_writer_fallback_uses_profile_fields_and_evidence_ids(self):
         class EmptyReportGenerator:

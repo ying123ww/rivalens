@@ -267,7 +267,9 @@ individual collection branch uses.
 `ReportWriterAgent` does not collect new evidence, but it adapts Rivalens claims,
 `CompetitorKnowledge`, and accepted `EvidenceItem` records into the shared
 `ReportGenerator` writing path, using a fixed report contract: analysis purpose,
-competitor selection, 10-section competitor analysis, summary, and an
+competitor selection, a fixed 3.1-3.10 product-analysis checklist for strategic
+positioning, target users, business model, operations, features, flow, structure,
+interaction design, signature features, and user reputation, summary, and an
 automatically appended information-index appendix that maps paper-style citation
 refs such as `[1]` back to evidence IDs and source URLs. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed

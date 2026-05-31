@@ -11,6 +11,90 @@ from rivalens.research.skills.writer import ReportGenerator
 from rivalens.research.utils.enum import ReportSource, ReportType, Tone
 
 
+PRODUCT_ANALYSIS_SECTIONS: list[dict[str, Any]] = [
+    {
+        "number": "3.1",
+        "id": "strategic_positioning",
+        "title": "战略定位",
+        "guiding_question": "这个产品把自己定位成什么？和竞品的定位差异在哪？",
+        "source_constraints": "官网首页、公开采访、品牌宣传",
+        "aliases": ["strategic_positioning", "positioning", "战略定位", "市场卡位", "品牌宣传"],
+    },
+    {
+        "number": "3.2",
+        "id": "target_users",
+        "title": "目标用户",
+        "guiding_question": "这个产品主要服务谁？用户画像是什么？",
+        "source_constraints": "官网描述、定价页暗示、公开报道",
+        "aliases": ["target_users", "target_users_personas", "user_personas", "persona", "目标用户", "用户画像", "使用场景"],
+    },
+    {
+        "number": "3.3",
+        "id": "business_model",
+        "title": "商业模式",
+        "guiding_question": "这个产品怎么赚钱？定价策略是什么？",
+        "source_constraints": "定价页、公开财务信息",
+        "aliases": ["business_model", "pricing_model", "pricing_business_model", "monetization", "商业模式", "定价", "收费"],
+    },
+    {
+        "number": "3.4",
+        "id": "operation_strategy",
+        "title": "运营策略",
+        "guiding_question": "这个产品怎么获客、怎么留存、怎么做增长？",
+        "source_constraints": "可观察的公开运营动作",
+        "aliases": ["operation_strategy", "market_growth", "growth", "go_to_market", "运营", "获客", "留存", "增长"],
+    },
+    {
+        "number": "3.5",
+        "id": "product_features",
+        "title": "产品功能",
+        "guiding_question": "核心功能有哪些？和竞品功能差异在哪？",
+        "source_constraints": "官方文档、功能页、帮助中心",
+        "aliases": ["product_features", "feature_tree", "feature", "capability", "产品功能", "核心功能", "功能差异"],
+    },
+    {
+        "number": "3.6",
+        "id": "product_flow",
+        "title": "产品流程",
+        "guiding_question": "用户的核心使用路径是什么？",
+        "source_constraints": "官方文档、教程、演示视频",
+        "aliases": ["product_flow", "workflow", "onboarding", "tutorial", "产品流程", "使用路径", "教程", "演示"],
+    },
+    {
+        "number": "3.7",
+        "id": "product_structure",
+        "title": "产品结构",
+        "guiding_question": "产品的模块划分和信息架构是什么？",
+        "source_constraints": "帮助中心目录、功能导航",
+        "aliases": ["product_structure", "architecture", "module", "navigation", "产品结构", "信息架构", "模块", "导航"],
+    },
+    {
+        "number": "3.8",
+        "id": "interaction_design",
+        "title": "交互设计",
+        "guiding_question": "交互有什么特点？体验亮点和不足？",
+        "source_constraints": "产品截图、评测文章",
+        "aliases": ["interaction_design", "interaction", "experience", "ux", "ui", "交互设计", "体验亮点", "体验不足"],
+    },
+    {
+        "number": "3.9",
+        "id": "signature_features",
+        "title": "特色功能",
+        "guiding_question": "有什么独有的、竞品没有的能力？",
+        "source_constraints": "官方宣传重点、对比评测",
+        "aliases": ["signature_features", "differentiation", "unique", "特色功能", "差异化", "独有", "竞品没有"],
+    },
+    {
+        "number": "3.10",
+        "id": "user_reputation",
+        "title": "用户口碑",
+        "guiding_question": "用户怎么评价？好评和差评集中在哪？",
+        "source_constraints": "搜索API可索引的公开评价（尽力而为）",
+        "aliases": ["user_reputation", "customer_proof", "review", "reviews", "用户口碑", "用户评价", "好评", "差评", "评论"],
+    },
+]
+
+
 class _ReportResearcherAdapter:
     """Small adapter exposing the ResearchEngine fields used by ReportGenerator."""
 
@@ -122,6 +206,12 @@ class ReportWriterAgent:
             claims,
             citation_refs_by_evidence_id,
         )
+        report = self._ensure_product_analysis_chapter(report, claims, evidence_items)
+        report = self._apply_inline_citations(
+            report,
+            claims,
+            citation_refs_by_evidence_id,
+        )
         report = self._append_information_index_appendix(
             report,
             claims,
@@ -190,11 +280,7 @@ class ReportWriterAgent:
         )
 
     def _report_format_prompt(self, analysis_dimensions: list[dict[str, Any]]) -> str:
-        dimension_lines = "\n".join(
-            f"- 3.{index} {dimension.get('name', dimension.get('id', ''))}: "
-            f"{dimension.get('description', '')}"
-            for index, dimension in enumerate(analysis_dimensions, start=1)
-        )
+        product_checklist = self._product_analysis_checklist_markdown()
         return f"""
 你将收到 Rivalens 结构化竞品分析上下文。请只基于 Context 写 Markdown 报告正文。
 
@@ -217,13 +303,27 @@ class ReportWriterAgent:
 - 推荐列：竞品、产品/品牌、分类、官网、备注、主要证据 ID。
 
 ## 第三章：竞品分析
-必须按以下 10 个小节输出，每个小节都必须包含：
+必须先输出以下产品分析调研清单 Markdown 表格，表头和 10 行章节名称必须保持一致：
+
+{product_checklist}
+
+随后必须按清单顺序输出以下 10 个小节，小节标题必须分别是：
+- 3.1 战略定位
+- 3.2 目标用户
+- 3.3 商业模式
+- 3.4 运营策略
+- 3.5 产品功能
+- 3.6 产品流程
+- 3.7 产品结构
+- 3.8 交互设计
+- 3.9 特色功能
+- 3.10 用户口碑
+
+每个小节都必须包含：
 1. 一个正式对比表格。
 2. 一段对应的分析文字。
 3. 表格或段落中要保留相关 citation_ref，例如 [1]。
-
-固定 10 个小节如下：
-{dimension_lines}
+4. 如果 Context 缺少该小节证据，结论写“公开证据不足”，不要编造。
 
 ## 第四章：总结
 ### SWOT 分析矩阵
@@ -260,6 +360,7 @@ class ReportWriterAgent:
                 "Do not use rejected evidence as support for claims.",
                 "Do not write the appendix; the system appends the information index.",
             ],
+            "product_analysis_checklist": self._product_analysis_sections(),
             "task": state.get("task", {}),
             "competitors": state.get("competitors")
             or state.get("task", {}).get("competitors", []),
@@ -340,28 +441,48 @@ class ReportWriterAgent:
         if dimension_by_id:
             return list(dimension_by_id.values())[:10]
 
-        fallback_names = [
-            "战略定位",
-            "目标用户",
-            "产品能力",
-            "定价与商业模式",
-            "市场与增长",
-            "渠道与分发",
-            "客户案例与口碑",
-            "技术与集成",
-            "合规与风险",
-            "竞争壁垒",
-        ]
         return [
             {
-                "id": f"fallback_dimension_{index}",
-                "name": name,
-                "description": "搜索阶段维度计划缺失，使用默认报告维度。",
+                "id": section["id"],
+                "name": section["title"],
+                "description": section["guiding_question"],
                 "priority": "P1",
-                "guiding_questions": [],
+                "guiding_questions": [section["guiding_question"]],
+                "source_constraints": section["source_constraints"],
             }
-            for index, name in enumerate(fallback_names, start=1)
+            for section in PRODUCT_ANALYSIS_SECTIONS
         ]
+
+    def _product_analysis_sections(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "number": section["number"],
+                "id": section["id"],
+                "title": section["title"],
+                "guiding_question": section["guiding_question"],
+                "source_constraints": section["source_constraints"],
+            }
+            for section in PRODUCT_ANALYSIS_SECTIONS
+        ]
+
+    def _product_analysis_checklist_markdown(self) -> str:
+        lines = [
+            "### 产品分析调研清单",
+            "",
+            "| 章节 | 引导问题 | 数据来源约束 |",
+            "| ---- | ---- | ---- |",
+        ]
+        for section in PRODUCT_ANALYSIS_SECTIONS:
+            lines.append(
+                self._markdown_table_row(
+                    [
+                        f"{section['number']} {section['title']}",
+                        section["guiding_question"],
+                        section["source_constraints"],
+                    ]
+                )
+            )
+        return "\n".join(lines)
 
     def _compact_claim(
         self,
@@ -528,6 +649,171 @@ class ReportWriterAgent:
             if evidence_id
         }
 
+    def _ensure_product_analysis_chapter(
+        self,
+        report: str,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+    ) -> str:
+        if self._has_product_analysis_chapter_format(report):
+            return report
+
+        chapter = self._product_analysis_chapter(claims, evidence_items).strip()
+        chapter_start = report.find("## 第三章：竞品分析")
+        chapter_end = report.find("## 第四章", chapter_start if chapter_start >= 0 else 0)
+
+        if chapter_start >= 0 and chapter_end > chapter_start:
+            return (
+                report[:chapter_start].rstrip()
+                + "\n\n"
+                + chapter
+                + "\n\n"
+                + report[chapter_end:].lstrip()
+            )
+        if chapter_start >= 0:
+            return report[:chapter_start].rstrip() + "\n\n" + chapter
+        if chapter_end >= 0:
+            return (
+                report[:chapter_end].rstrip()
+                + "\n\n"
+                + chapter
+                + "\n\n"
+                + report[chapter_end:].lstrip()
+            )
+        return report.rstrip() + "\n\n" + chapter
+
+    def _has_product_analysis_chapter_format(self, report: str) -> bool:
+        if "## 第三章：竞品分析" not in report:
+            return False
+        if "| 章节 | 引导问题 | 数据来源约束 |" not in report:
+            return False
+        return all(
+            f"| {section['number']} {section['title']} |" in report
+            and f"### {section['number']} {section['title']}" in report
+            for section in PRODUCT_ANALYSIS_SECTIONS
+        )
+
+    def _product_analysis_chapter(
+        self,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+    ) -> str:
+        report_evidence_ids = {
+            evidence.get("id", "")
+            for evidence in evidence_items
+            if evidence.get("id")
+        }
+        lines = [
+            "## 第三章：竞品分析",
+            "",
+            self._product_analysis_checklist_markdown(),
+        ]
+        for section in PRODUCT_ANALYSIS_SECTIONS:
+            section_claims = [
+                claim for claim in claims if self._matches_product_section(claim, section)
+            ]
+            section_evidence = [
+                evidence
+                for evidence in evidence_items
+                if self._matches_product_section(evidence, section)
+            ]
+            lines.extend(
+                [
+                    "",
+                    f"### {section['number']} {section['title']}",
+                    "",
+                    "| 引导问题 | 数据来源约束 | 竞品/对象 | 结论 | 引用 |",
+                    "| --- | --- | --- | --- | --- |",
+                ]
+            )
+            if section_claims:
+                for claim in section_claims:
+                    support_label = (
+                        "（证据较弱，需复核）"
+                        if claim.get("support_status") == "weak"
+                        else ""
+                    )
+                    lines.append(
+                        self._markdown_table_row(
+                            [
+                                section["guiding_question"],
+                                section["source_constraints"],
+                                ", ".join(claim.get("competitors", [])) or "综合",
+                                f"{claim.get('claim', '') or '公开证据不足'}{support_label}",
+                                ", ".join(
+                                    evidence_id
+                                    for evidence_id in claim.get("evidence_ids", [])
+                                    if evidence_id in report_evidence_ids
+                                )
+                                or "无",
+                            ]
+                        )
+                    )
+                lines.append("")
+                lines.append(
+                    "分析："
+                    + " ".join(
+                        claim.get("claim", "")
+                        for claim in section_claims[:3]
+                        if claim.get("claim")
+                    )
+                )
+            elif section_evidence:
+                for evidence in section_evidence[:3]:
+                    evidence_text = (
+                        evidence.get("excerpt")
+                        or evidence.get("title")
+                        or "公开证据显示该维度存在可复核信息。"
+                    )
+                    lines.append(
+                        self._markdown_table_row(
+                            [
+                                section["guiding_question"],
+                                section["source_constraints"],
+                                evidence.get("competitor", "") or "综合",
+                                evidence_text,
+                                evidence.get("id", "") or "无",
+                            ]
+                        )
+                    )
+                lines.append("")
+                lines.append(
+                    "分析：该小节仅引用已采集证据中的可观察信息，仍需结合更多公开来源复核竞争差异。"
+                )
+            else:
+                lines.append(
+                    self._markdown_table_row(
+                        [
+                            section["guiding_question"],
+                            section["source_constraints"],
+                            "综合",
+                            "公开证据不足",
+                            "无",
+                        ]
+                    )
+                )
+                lines.append("")
+                lines.append("分析：该维度目前缺少足够的公开证据，需要补充采集或人工校验。")
+        return "\n".join(lines)
+
+    def _matches_product_section(
+        self,
+        item: dict[str, Any],
+        section: dict[str, Any],
+    ) -> bool:
+        searchable = " ".join(
+            str(item.get(key, ""))
+            for key in (
+                "dimension",
+                "dimension_id",
+                "dimension_name",
+                "title",
+                "claim",
+            )
+        ).lower()
+        aliases = [str(alias).lower() for alias in section.get("aliases", [])]
+        return any(alias and alias in searchable for alias in aliases)
+
     def _fallback_report(
         self,
         state: CompetitorAnalysisState,
@@ -590,47 +876,7 @@ class ReportWriterAgent:
         else:
             lines.append("| 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
 
-        lines.extend(["", "## 第三章：竞品分析"])
-        for index, dimension in enumerate(analysis_dimensions[:10], start=1):
-            dimension_id = dimension.get("id", "")
-            dimension_claims = [
-                claim
-                for claim in claims
-                if claim.get("dimension") == dimension_id
-            ]
-            lines.extend(
-                [
-                    "",
-                    f"### 3.{index} {dimension.get('name', dimension_id)}",
-                    "",
-                    "| 对比项 | 竞品/对象 | 结论 | 引用 |",
-                    "| --- | --- | --- | --- |",
-                ]
-            )
-            if dimension_claims:
-                for claim in dimension_claims:
-                    support_label = (
-                        "（证据较弱，需复核）"
-                        if claim.get("support_status") == "weak"
-                        else ""
-                    )
-                    lines.append(
-                        "| "
-                        f"{dimension.get('name', dimension_id)} | "
-                        f"{', '.join(claim.get('competitors', [])) or '综合'} | "
-                        f"{claim.get('claim', '') or '公开证据不足'}{support_label} | "
-                        f"{', '.join(claim.get('evidence_ids', [])) or '无'} |"
-                    )
-                lines.append("")
-                lines.append(
-                    " ".join(claim.get("claim", "") for claim in dimension_claims[:3])
-                )
-            else:
-                lines.append(
-                    f"| {dimension.get('name', dimension_id)} | 综合 | 公开证据不足 | 无 |"
-                )
-                lines.append("")
-                lines.append("该维度目前缺少足够的公开证据，需要补充采集或人工校验。")
+        lines.append(self._product_analysis_chapter(claims, evidence_items))
 
         lines.extend(
             [
