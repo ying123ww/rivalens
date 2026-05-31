@@ -90,6 +90,55 @@ class UniFuncsDeepSearchTest(unittest.TestCase):
         self.assertEqual(payload["domain_scope"], ["notion.so", "clickup.com"])
         self.assertEqual(payload["reference_style"], "link")
 
+    def test_unifuncs_results_are_routed_to_scraper_queue(self):
+        fake_requests = types.ModuleType("requests")
+        fake_requests.post = Mock()
+        with patch.dict(sys.modules, {"requests": fake_requests}):
+            unifuncs_module = load_module(
+                "unifuncs_deepsearch_module_scraper_queue",
+                REPO_ROOT
+                / "rivalens"
+                / "research"
+                / "retrievers"
+                / "unifuncs_deepsearch"
+                / "unifuncs_deepsearch.py",
+            )
+        retriever_class = unifuncs_module.UniFuncsDeepSearch
+
+        response = Mock()
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "[Notion pricing](https://www.notion.so/pricing) - "
+                            "Short search summary only."
+                        )
+                    }
+                }
+            ]
+        }
+        response.raise_for_status = Mock()
+
+        with patch.dict(os.environ, {"UNIFUNCS_API_KEY": "sk-test"}, clear=False):
+            with patch.object(unifuncs_module.requests, "post", return_value=response):
+                results = retriever_class("Compare pricing").search(max_results=5)
+
+        scrape_queue = []
+        prefetched_content = []
+        for result in results:
+            url = result.get("href") or result.get("url")
+            raw_content = result.get("raw_content")
+            if result.get("content_is_full_text"):
+                raw_content = raw_content or result.get("body")
+            if url and raw_content and len(raw_content) > 100:
+                prefetched_content.append({"url": url, "raw_content": raw_content})
+            elif url:
+                scrape_queue.append(url)
+
+        self.assertEqual(scrape_queue, ["https://www.notion.so/pricing"])
+        self.assertEqual(prefetched_content, [])
+
 
 if __name__ == "__main__":
     unittest.main()

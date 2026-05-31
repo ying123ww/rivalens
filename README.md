@@ -221,6 +221,7 @@ Tavily for broader English web discovery:
 
 ```env
 RETRIEVER=unifuncs_deepsearch,tavily
+SCRAPER=tavily_extract
 
 UNIFUNCS_API_KEY=sk-your-unifuncs-key
 UNIFUNCS_DEEPSEARCH_BASE_URL=https://api.unifuncs.com/deepsearch/v1
@@ -234,7 +235,9 @@ TAVILY_API_KEY=tvly-your-tavily-key
 
 The UniFuncs retriever is used for source discovery, not final report writing.
 It returns source URLs and short snippets, then the existing scraper fetches full
-page content before evidence review and downstream analysis.
+page content before evidence review and downstream analysis. When
+`SCRAPER=tavily_extract` is set, URLs discovered by either UniFuncs or Tavily are
+fetched through Tavily Extract.
 
 ## Rivalens Collection Limits
 
