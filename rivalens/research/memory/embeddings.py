@@ -125,6 +125,7 @@ class Memory:
                 if "openai_api_base" not in embedding_kwargs and embedding_api_base:
                     embedding_kwargs["openai_api_base"] = embedding_api_base
                 embedding_kwargs.setdefault("check_embedding_ctx_length", False)
+                embedding_kwargs.setdefault("chunk_size", 10)
 
                 _embeddings = OpenAIEmbeddings(model=model, **embedding_kwargs)
             case "azure_openai":

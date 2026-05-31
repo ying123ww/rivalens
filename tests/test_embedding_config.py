@@ -77,6 +77,7 @@ class EmbeddingConfigTest(unittest.TestCase):
 
         self.assertEqual(embeddings.model, "text-embedding-v4")
         self.assertFalse(embeddings.check_embedding_ctx_length)
+        self.assertEqual(embeddings.chunk_size, 10)
 
     def test_explicit_embedding_context_length_check_is_preserved(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
@@ -87,6 +88,16 @@ class EmbeddingConfigTest(unittest.TestCase):
             ).get_embeddings()
 
         self.assertTrue(embeddings.check_embedding_ctx_length)
+
+    def test_explicit_embedding_chunk_size_is_preserved(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            embeddings = Memory(
+                "openai",
+                "text-embedding-v4",
+                chunk_size=4,
+            ).get_embeddings()
+
+        self.assertEqual(embeddings.chunk_size, 4)
 
     def test_embedding_cost_estimate_supports_text_embedding_v4(self):
         cost = estimate_embedding_cost(
