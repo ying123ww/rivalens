@@ -240,6 +240,42 @@ page content before evidence review and downstream analysis. When
 `SCRAPER=tavily_extract` is set, URLs discovered by either UniFuncs or Tavily are
 fetched through Tavily Extract.
 
+## LangSmith Tracing
+
+Rivalens uses LangGraph and LangChain components, so LangSmith tracing can be
+enabled with the official `LANGSMITH_*` environment variables. Traces are useful
+when debugging the `CollectionAgent`, because the top-level LangGraph run is
+tagged with `rivalens`, `competitive-analysis`, and metadata for retriever,
+branch budget, competitor count, and collection ownership.
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2-your-langsmith-key
+LANGSMITH_PROJECT=rivalens-local
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_WORKSPACE_ID=
+LANGCHAIN_CALLBACKS_BACKGROUND=false
+```
+
+Set `LANGSMITH_WORKSPACE_ID` only when the key can access more than one
+workspace, or when LangSmith asks you to choose a workspace. For EU, APAC,
+AWS-hosted, self-hosted, or hybrid LangSmith deployments, replace
+`LANGSMITH_ENDPOINT` with that deployment's API URL.
+
+The local smoke check submits one tiny trace to the configured project:
+
+```bash
+.venv/bin/python scripts/langsmith_smoke.py
+```
+
+The production Docker service passes the same variables through
+`docker-compose.yml`. The legacy `LANGCHAIN_*` aliases are still forwarded for
+older LangChain code paths, but new configuration should use `LANGSMITH_*`.
+When inspecting one `rivalens_competitive_analysis` run, expand
+`source_collection` and look for child spans named `rivalens_collect_evidence`,
+`rivalens_initial_search`, `rivalens_retriever_search`, and
+`rivalens_scrape_url`.
+
 ## Rivalens Collection Limits
 
 For `report_type=rivalens`, the competitor-analysis workflow creates collection

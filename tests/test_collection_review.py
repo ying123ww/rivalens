@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+from contextvars import Context, ContextVar
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from rivalens.agents.analysis import AnalysisAgent
@@ -14,10 +16,14 @@ from rivalens.agents.writing import (
     SUMMARY_CONTEXT_CHAR_LIMIT,
     ReportWriterAgent,
 )
-from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
+from rivalens.research.evidence_collector import (
+    ResearchEngineEvidenceCollector,
+    _collect_trace_outputs,
+)
+from rivalens.research.llm_provider.generic.base import GenericLLMProvider
 from rivalens.research.skills.researcher import ResearchConductor
 from rivalens.schema import SOURCE_TYPE_PRIORITY
-from rivalens.workflows.competitive_analysis import _int_budget
+from rivalens.workflows.competitive_analysis import _int_budget, _workflow_run_config
 
 
 def pricing_branch():
@@ -67,6 +73,91 @@ class CollectionReviewTest(unittest.TestCase):
                 _int_budget(5, "RIVALENS_MAX_EXPANSION_BRANCHES", 24),
                 5,
             )
+
+    def test_workflow_run_config_tags_collection_trace_metadata(self):
+        task = {
+            "query": "Compare Acme and Beta",
+            "competitors": [{"name": "Acme"}, {"name": "Beta"}],
+            "custom_analysis_directions": ["pricing", "security"],
+            "industry_directions_confirmed": True,
+            "deep_research": False,
+        }
+
+        with patch.dict(
+            "os.environ",
+            {
+                "RETRIEVER": "unifuncs_deepsearch,tavily",
+                "SCRAPER": "tavily_extract",
+                "RIVALENS_MAX_BRANCH_DEPTH": "0",
+                "RIVALENS_MAX_EXPANSION_BRANCHES": "3",
+                "RIVALENS_MAX_ROOT_BRANCHES": "2",
+            },
+        ):
+            config = _workflow_run_config(task, {})
+
+        self.assertEqual(config["run_name"], "rivalens_competitive_analysis")
+        self.assertIn("rivalens", config["tags"])
+        self.assertIn("competitive-analysis", config["tags"])
+        self.assertEqual(config["metadata"]["collector"], "CollectionAgent")
+        self.assertEqual(config["metadata"]["competitor_count"], 2)
+        self.assertEqual(config["metadata"]["competitors"], ["Acme", "Beta"])
+        self.assertEqual(config["metadata"]["custom_analysis_direction_count"], 2)
+        self.assertEqual(config["metadata"]["retriever"], "unifuncs_deepsearch,tavily")
+        self.assertEqual(config["metadata"]["scraper"], "tavily_extract")
+        self.assertEqual(config["metadata"]["max_branch_depth"], 0)
+        self.assertEqual(config["metadata"]["max_expansion_branches"], 3)
+        self.assertEqual(config["metadata"]["max_root_branch_hard_limit"], 2)
+
+    def test_llm_provider_preserves_trace_context_in_executor(self):
+        trace_token = ContextVar("rivalens_trace_token", default="missing")
+
+        class ContextReadingLLM:
+            def invoke(self, messages, **kwargs):
+                return SimpleNamespace(content=trace_token.get())
+
+        class ContextDroppingLoop:
+            async def run_in_executor(self, executor, func):
+                return Context().run(func)
+
+        async def run_probe():
+            provider = GenericLLMProvider(ContextReadingLLM())
+            token = trace_token.set("parent-run")
+            try:
+                with patch("asyncio.get_running_loop", return_value=ContextDroppingLoop()):
+                    return await provider.get_chat_response(
+                        [{"role": "user", "content": "probe"}],
+                        stream=False,
+                    )
+            finally:
+                trace_token.reset(token)
+
+        self.assertEqual(asyncio.run(run_probe()), "parent-run")
+
+    def test_collection_trace_outputs_summarize_evidence_without_context_body(self):
+        summary = _collect_trace_outputs(
+            {
+                "mode": "standard_evidence",
+                "query": "Acme pricing",
+                "context": "full page body " * 100,
+                "costs": 0.12,
+                "evidence_items": [
+                    {
+                        "id": "evidence_1",
+                        "title": "Acme Pricing",
+                        "url": "https://example.com/pricing",
+                        "source_type": "pricing_page",
+                        "confidence": 0.7,
+                        "excerpt": "large source excerpt",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(summary["evidence_count"], 1)
+        self.assertGreater(summary["context_length"], 0)
+        self.assertNotIn("context", summary)
+        self.assertNotIn("excerpt", summary["evidence"][0])
+        self.assertEqual(summary["evidence"][0]["url"], "https://example.com/pricing")
 
     def test_collection_root_branches_use_planned_industry_extensions(self):
         branches = CollectionAgent()._build_root_branches(

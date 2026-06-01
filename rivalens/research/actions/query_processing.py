@@ -1,5 +1,7 @@
 import json_repair
 
+from langsmith import traceable
+
 from rivalens.research.llm_provider.generic.base import ReasoningEfforts
 from ..utils.llm import create_chat_completion
 from ..prompts import PromptFamily
@@ -9,6 +11,43 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _retriever_name(retriever: Any) -> str:
+    return getattr(retriever, "__name__", retriever.__class__.__name__)
+
+
+def _search_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "query": inputs.get("query", ""),
+        "retriever": _retriever_name(inputs.get("retriever")),
+        "query_domains": list(inputs.get("query_domains") or []),
+    }
+
+
+def _search_trace_outputs(output: Any) -> dict[str, Any]:
+    results = output if isinstance(output, list) else []
+    return {
+        "result_count": len(results),
+        "results": [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("href") or item.get("url") or item.get("link") or "",
+                "body_chars": len(str(item.get("body") or item.get("content") or "")),
+                "has_full_text": bool(item.get("content_is_full_text")),
+            }
+            for item in results[:10]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+@traceable(
+    name="rivalens_initial_search",
+    run_type="retriever",
+    tags=["rivalens", "collection", "search"],
+    process_inputs=_search_trace_inputs,
+    process_outputs=_search_trace_outputs,
+)
 async def get_search_results(query: str, retriever: Any, query_domains: List[str] = None, researcher=None) -> List[Dict[str, Any]]:
     """
     Get web search results for a given query.

@@ -403,8 +403,24 @@ def get_config_dict(
     google_api_key: str, google_cx_key: str, bing_api_key: str,
     searchapi_api_key: str, serpapi_api_key: str, serper_api_key: str, searx_url: str
 ) -> Dict[str, str]:
+    langsmith_project = os.getenv("LANGSMITH_PROJECT") or os.getenv(
+        "LANGCHAIN_PROJECT",
+        "rivalens-local",
+    )
+    langsmith_tracing = os.getenv("LANGSMITH_TRACING") or os.getenv(
+        "LANGCHAIN_TRACING_V2",
+        "true",
+    )
+    langchain_key = langchain_api_key or os.getenv("LANGCHAIN_API_KEY", "")
+    langsmith_key = os.getenv("LANGSMITH_API_KEY") or langchain_key
     return {
-        "LANGCHAIN_API_KEY": langchain_api_key or os.getenv("LANGCHAIN_API_KEY", ""),
+        "LANGCHAIN_API_KEY": langchain_key,
+        "LANGSMITH_API_KEY": langsmith_key,
+        "LANGSMITH_TRACING": langsmith_tracing,
+        "LANGSMITH_PROJECT": langsmith_project,
+        "LANGSMITH_ENDPOINT": os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"),
+        "LANGSMITH_WORKSPACE_ID": os.getenv("LANGSMITH_WORKSPACE_ID", ""),
+        "LANGCHAIN_CALLBACKS_BACKGROUND": os.getenv("LANGCHAIN_CALLBACKS_BACKGROUND", "false"),
         "OPENAI_API_KEY": openai_api_key or os.getenv("OPENAI_API_KEY", ""),
         "TAVILY_API_KEY": tavily_api_key or os.getenv("TAVILY_API_KEY", ""),
         "GOOGLE_API_KEY": google_api_key or os.getenv("GOOGLE_API_KEY", ""),
@@ -414,7 +430,8 @@ def get_config_dict(
         "SERPAPI_API_KEY": serpapi_api_key or os.getenv("SERPAPI_API_KEY", ""),
         "SERPER_API_KEY": serper_api_key or os.getenv("SERPER_API_KEY", ""),
         "SEARX_URL": searx_url or os.getenv("SEARX_URL", ""),
-        "LANGCHAIN_TRACING_V2": os.getenv("LANGCHAIN_TRACING_V2", "true"),
+        "LANGCHAIN_TRACING_V2": os.getenv("LANGCHAIN_TRACING_V2", langsmith_tracing),
+        "LANGCHAIN_PROJECT": os.getenv("LANGCHAIN_PROJECT", langsmith_project),
         "DOC_PATH": os.getenv("DOC_PATH", "./my-docs"),
         "RETRIEVER": os.getenv("RETRIEVER", ""),
         "EMBEDDING_MODEL": os.getenv("OPENAI_EMBEDDING_MODEL", "")

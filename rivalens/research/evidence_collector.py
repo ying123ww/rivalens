@@ -4,6 +4,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from langsmith import traceable
+
 from rivalens.research.agent import ResearchEngine
 from rivalens.research.modes import REPORT_TYPE_BY_MODE, ResearchMode
 from rivalens.research.utils.enum import ReportSource, Tone
@@ -14,6 +16,62 @@ from rivalens.schema import (
     SOURCE_TYPE_PRIORITY,
 )
 from rivalens.text_quality import clean_text
+
+
+def _trace_collection_task(collection_task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": collection_task.get("id", ""),
+        "research_task_id": collection_task.get("research_task_id", ""),
+        "research_brief_id": collection_task.get("research_brief_id", ""),
+        "branch_id": collection_task.get("branch_id", ""),
+        "parent_branch_id": collection_task.get("parent_branch_id"),
+        "competitor": collection_task.get("competitor", ""),
+        "dimension_id": collection_task.get("dimension_id", ""),
+        "dimension_name": collection_task.get("dimension_name", ""),
+        "search_stage": collection_task.get("search_stage", ""),
+        "generated_from_gap": collection_task.get("generated_from_gap", ""),
+        "query": collection_task.get("query", ""),
+        "search_queries": list(collection_task.get("search_queries", []))[:6],
+        "target_url_count": len(collection_task.get("target_urls", []) or []),
+        "source_hints": list(collection_task.get("source_hints", []))[:10],
+    }
+
+
+def _collect_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    collection_task = inputs.get("collection_task") or {}
+    mode = inputs.get("mode", ResearchMode.STANDARD_EVIDENCE)
+    return {
+        "collection_task": _trace_collection_task(collection_task),
+        "mode": getattr(mode, "value", str(mode)),
+        "verbose": bool(inputs.get("verbose", True)),
+        "source": inputs.get("source", ReportSource.Web.value),
+        "source_url_count": len(inputs.get("source_urls") or []),
+        "query_domains": list(inputs.get("query_domains") or []),
+    }
+
+
+def _collect_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    evidence_items = output.get("evidence_items") or []
+    return {
+        "mode": output.get("mode", ""),
+        "query": output.get("query", ""),
+        "context_length": len(str(output.get("context", ""))),
+        "evidence_count": len(evidence_items),
+        "costs": output.get("costs", 0.0),
+        "evidence": [
+            {
+                "id": item.get("id", ""),
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "source_type": item.get("source_type", ""),
+                "confidence": item.get("confidence"),
+            }
+            for item in evidence_items[:10]
+        ],
+    }
 
 
 class ResearchEngineEvidenceCollector:
@@ -34,6 +92,13 @@ class ResearchEngineEvidenceCollector:
         self.tone = tone or Tone.Objective
         self.headers = headers or {}
 
+    @traceable(
+        name="rivalens_collect_evidence",
+        run_type="chain",
+        tags=["rivalens", "collection", "evidence"],
+        process_inputs=_collect_trace_inputs,
+        process_outputs=_collect_trace_outputs,
+    )
     async def collect(
         self,
         collection_task: EvidenceCollectionTask,

@@ -9,9 +9,11 @@ import importlib
 import logging
 import subprocess
 import sys
+from contextvars import copy_context
 
 import requests
 from colorama import Fore, init
+from langsmith import traceable
 
 from rivalens.research.utils.workers import WorkerPool
 
@@ -25,6 +27,25 @@ from . import (
     TavilyExtract,
     WebBaseLoaderScraper,
 )
+
+
+def _scrape_trace_inputs(inputs: dict) -> dict:
+    return {
+        "url": inputs.get("link", ""),
+    }
+
+
+def _scrape_trace_outputs(output) -> dict:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+    raw_content = output.get("raw_content") or ""
+    return {
+        "url": output.get("url", ""),
+        "title": output.get("title", ""),
+        "content_chars": len(raw_content),
+        "image_count": len(output.get("image_urls") or []),
+        "success": bool(raw_content),
+    }
 
 
 class Scraper:
@@ -105,6 +126,13 @@ class Scraper:
                     f"`pip install -U {pkg_inst_name}`"
                 )
 
+    @traceable(
+        name="rivalens_scrape_url",
+        run_type="tool",
+        tags=["rivalens", "collection", "scrape"],
+        process_inputs=_scrape_trace_inputs,
+        process_outputs=_scrape_trace_outputs,
+    )
     async def extract_data_from_url(self, link, session):
         """
         Extracts the data from the link with logging
@@ -122,12 +150,14 @@ class Scraper:
                 if hasattr(scraper, "scrape_async"):
                     content, image_urls, title = await scraper.scrape_async()
                 else:
+                    context = copy_context()
                     (
                         content,
                         image_urls,
                         title,
                     ) = await asyncio.get_running_loop().run_in_executor(
-                        self.worker_pool.executor, scraper.scrape
+                        self.worker_pool.executor,
+                        lambda: context.run(scraper.scrape),
                     )
 
                 if len(content) < 100:

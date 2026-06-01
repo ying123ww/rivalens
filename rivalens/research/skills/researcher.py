@@ -10,12 +10,44 @@ import logging
 import os
 import random
 
+from langsmith import traceable
+
 from ..actions.agent_creator import choose_agent
 from ..actions.query_processing import get_search_results, plan_research_outline
 from ..actions.utils import stream_output
 from ..document import DocumentLoader, LangChainDocumentLoader, OnlineDocumentLoader
 from ..utils.enum import ReportSource, ReportType
 from ..utils.logging_config import get_json_handler
+
+
+def _retriever_name(retriever: object) -> str:
+    return getattr(retriever, "__name__", retriever.__class__.__name__)
+
+
+def _retriever_trace_inputs(inputs: dict) -> dict:
+    return {
+        "query": inputs.get("query", ""),
+        "retriever": _retriever_name(inputs.get("retriever_class")),
+        "query_domains": list(inputs.get("query_domains") or []),
+        "max_results": inputs.get("max_results"),
+    }
+
+
+def _retriever_trace_outputs(output) -> dict:
+    results = output if isinstance(output, list) else []
+    return {
+        "result_count": len(results),
+        "results": [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("href") or item.get("url") or item.get("link") or "",
+                "body_chars": len(str(item.get("body") or item.get("content") or "")),
+                "has_full_text": bool(item.get("content_is_full_text")),
+            }
+            for item in results[:10]
+            if isinstance(item, dict)
+        ],
+    }
 
 
 class ResearchConductor:
@@ -853,6 +885,27 @@ class ResearchConductor:
 
         return new_urls
 
+    @traceable(
+        name="rivalens_retriever_search",
+        run_type="retriever",
+        tags=["rivalens", "collection", "search"],
+        process_inputs=_retriever_trace_inputs,
+        process_outputs=_retriever_trace_outputs,
+    )
+    async def _run_retriever_search(
+        self,
+        retriever_class,
+        query: str,
+        query_domains: list,
+        max_results: int,
+    ):
+        retriever = retriever_class(
+            query,
+            headers=self.researcher.headers,
+            query_domains=query_domains,
+        )
+        return await asyncio.to_thread(retriever.search, max_results=max_results)
+
     async def _search_relevant_source_urls(self, query, query_domains: list | None = None):
         new_search_urls = []
         prefetched_content = []
@@ -867,16 +920,11 @@ class ResearchConductor:
                 continue
 
             try:
-                # Instantiate the retriever with the sub-query
-                retriever = retriever_class(
+                search_results = await self._run_retriever_search(
+                    retriever_class,
                     query,
-                    headers=self.researcher.headers,
-                    query_domains=query_domains,
-                )
-
-                # Perform the search using the current retriever
-                search_results = await asyncio.to_thread(
-                    retriever.search, max_results=self.researcher.cfg.max_search_results_per_query
+                    query_domains,
+                    self.researcher.cfg.max_search_results_per_query,
                 )
 
                 if not search_results:
