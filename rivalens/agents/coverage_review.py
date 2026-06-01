@@ -4,16 +4,106 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch
+from langsmith import traceable
+
+from rivalens.agents.evidence_review import (
+    _branch_trace_summary,
+    _criteria_trace_summary,
+    _evidence_trace_summary,
+)
 from rivalens.agents.success_criteria import (
     evidence_matches_success_criterion,
     normalize_success_criteria,
 )
+from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch
+
+
+def _follow_up_trace_summary(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "objective": spec.get("objective", ""),
+            "query": spec.get("query", ""),
+            "generated_from_gap": spec.get("generated_from_gap", ""),
+            "decision_action": spec.get("decision_action", ""),
+            "decision_subtype": spec.get("decision_subtype", ""),
+            "target_source_types": list(spec.get("target_source_types", []))[:5],
+            "success_criteria": _criteria_trace_summary(
+                spec.get("success_criteria", []),
+            ),
+        }
+        for spec in specs[:10]
+        if isinstance(spec, dict)
+    ]
+
+
+def _coverage_review_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    branch = inputs.get("branch") or {}
+    evidence_items = inputs.get("evidence_items") or []
+    evidence_review = inputs.get("evidence_review") or {}
+    return {
+        "branch": _branch_trace_summary(branch),
+        "research_task_ids": list(inputs.get("research_task_ids") or []),
+        "evidence_count": len(evidence_items),
+        "evidence": _evidence_trace_summary(evidence_items),
+        "evidence_review": {
+            "id": evidence_review.get("id", ""),
+            "accepted": bool(evidence_review.get("accepted")),
+            "required_action": evidence_review.get("required_action", ""),
+            "score": evidence_review.get("score"),
+            "accepted_evidence_ids": list(
+                evidence_review.get("accepted_evidence_ids", []),
+            )[:20],
+            "rejected_evidence_ids": list(
+                evidence_review.get("rejected_evidence_ids", []),
+            )[:20],
+            "criterion_matches": list(
+                evidence_review.get("criterion_matches", []),
+            )[:20],
+        },
+    }
+
+
+def _coverage_review_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+    return {
+        "coverage_id": output.get("id", ""),
+        "branch_id": output.get("branch_id", ""),
+        "next_action": output.get("next_action", ""),
+        "confidence": output.get("confidence"),
+        "decision": output.get("decision", {}),
+        "accepted_evidence_ids": list(output.get("accepted_evidence_ids", []))[:20],
+        "rejected_evidence_ids": list(output.get("rejected_evidence_ids", []))[:20],
+        "found_source_types": list(output.get("found_source_types", []))[:10],
+        "covered_questions": list(output.get("covered_questions", []))[:10],
+        "missing_questions": list(output.get("missing_questions", []))[:10],
+        "satisfied_criteria": _criteria_trace_summary(
+            output.get("satisfied_criteria", []),
+        ),
+        "partial_criteria": _criteria_trace_summary(
+            output.get("partial_criteria", []),
+        ),
+        "missing_criteria": _criteria_trace_summary(
+            output.get("missing_criteria", []),
+        ),
+        "criterion_matches": list(output.get("criterion_matches", []))[:20],
+        "selected_follow_up_specs": _follow_up_trace_summary(
+            output.get("selected_follow_up_specs", []),
+        ),
+        "arbitration": output.get("arbitration", {}),
+    }
 
 
 class CoverageReviewer:
     """Assess whether a branch has enough evidence coverage for analysis."""
 
+    @traceable(
+        name="rivalens_coverage_review",
+        run_type="chain",
+        tags=["rivalens", "collection", "coverage-review"],
+        process_inputs=_coverage_review_trace_inputs,
+        process_outputs=_coverage_review_trace_outputs,
+    )
     def review(
         self,
         branch: ResearchBranch,

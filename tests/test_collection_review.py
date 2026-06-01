@@ -7,8 +7,16 @@ from unittest.mock import patch
 from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.claim_support import ClaimSupportReviewer
 from rivalens.agents.collection import CollectionAgent
-from rivalens.agents.coverage_review import CoverageReviewer
-from rivalens.agents.evidence_review import EvidenceQualityReviewer
+from rivalens.agents.coverage_review import (
+    CoverageReviewer,
+    _coverage_review_trace_inputs,
+    _coverage_review_trace_outputs,
+)
+from rivalens.agents.evidence_review import (
+    EvidenceQualityReviewer,
+    _evidence_review_trace_inputs,
+    _evidence_review_trace_outputs,
+)
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import (
     OPENING_CONTEXT_CHAR_LIMIT,
@@ -290,6 +298,84 @@ class CollectionReviewTest(unittest.TestCase):
             extra["metadata"]["rivalens_operation"],
             "retriever_search",
         )
+
+    def test_review_trace_summaries_include_criteria_without_excerpt_body(self):
+        branch = {
+            **pricing_branch(),
+            "research_brief_id": "brief_collect_acme_pricing_model",
+            "research_goal": "Collect public pricing evidence.",
+            "search_stage": "focused",
+            "query": "Acme pricing official",
+            "guiding_questions": ["What public starter pricing is available?"],
+            "success_criteria": [
+                {
+                    "id": "public_pricing",
+                    "description": "What public starter pricing is available?",
+                    "target_source_types": ["pricing_page"],
+                }
+            ],
+        }
+        evidence = [
+            {
+                "id": "ev_1",
+                "competitor": "Acme",
+                "dimension_id": "pricing_model",
+                "title": "Acme pricing",
+                "url": "https://acme.example/pricing",
+                "source_type": "pricing_page",
+                "excerpt": "Acme starter pricing is $10 per user. " * 20,
+                "confidence": 0.9,
+            }
+        ]
+
+        evidence_inputs = _evidence_review_trace_inputs(
+            {"branch": branch, "evidence_items": evidence},
+        )
+        self.assertEqual(
+            evidence_inputs["branch"]["success_criteria"][0]["id"],
+            "public_pricing",
+        )
+        self.assertEqual(evidence_inputs["evidence"][0]["excerpt_chars"], 760)
+        self.assertNotIn("excerpt", evidence_inputs["evidence"][0])
+
+        evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            branch,
+            evidence,
+        )
+        evidence_outputs = _evidence_review_trace_outputs(evidence_review)
+        self.assertEqual(evidence_outputs["accepted_evidence_ids"], ["ev_1"])
+        self.assertEqual(
+            evidence_outputs["criterion_matches"][0]["criterion_ids"],
+            ["public_pricing"],
+        )
+
+        coverage_inputs = _coverage_review_trace_inputs(
+            {
+                "branch": branch,
+                "evidence_items": evidence,
+                "evidence_review": evidence_review,
+                "research_task_ids": ["task_collect_acme_pricing_model"],
+            },
+        )
+        self.assertEqual(
+            coverage_inputs["evidence_review"]["criterion_matches"],
+            evidence_review["criterion_matches"],
+        )
+        self.assertNotIn("excerpt", coverage_inputs["evidence"][0])
+
+        coverage = CoverageReviewer().review(
+            branch=branch,
+            evidence_items=evidence,
+            evidence_review=evidence_review,
+            research_task_ids=["task_collect_acme_pricing_model"],
+        )
+        coverage_outputs = _coverage_review_trace_outputs(coverage)
+        self.assertEqual(coverage_outputs["next_action"], "ready_for_analysis")
+        self.assertEqual(
+            coverage_outputs["satisfied_criteria"][0]["id"],
+            "public_pricing",
+        )
+        self.assertEqual(coverage_outputs["selected_follow_up_specs"], [])
 
     def test_research_engine_keeps_trace_context_out_of_llm_kwargs(self):
         trace_context = {
