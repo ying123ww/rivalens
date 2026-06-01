@@ -250,6 +250,8 @@ variables to reduce or expand that branch budget:
 RIVALENS_MAX_ROOT_BRANCHES=20
 RIVALENS_MAX_BRANCH_DEPTH=0
 RIVALENS_MAX_EXPANSION_BRANCHES=0
+RIVALENS_MAX_CONCURRENT_COLLECTIONS=3
+RIVALENS_MAX_SUBQUERY_CONCURRENCY=2
 RIVALENS_ENABLE_CLAIM_VERIFICATION=false
 ```
 
@@ -259,6 +261,10 @@ RIVALENS_ENABLE_CLAIM_VERIFICATION=false
 - `RIVALENS_MAX_BRANCH_DEPTH=0` disables follow-up collection branches.
 - `RIVALENS_MAX_EXPANSION_BRANCHES` caps follow-up branches created from
   coverage gaps.
+- `RIVALENS_MAX_CONCURRENT_COLLECTIONS` caps how many collection branches run at
+  once. Lower this when embedding or LLM providers return quota/rate errors.
+- `RIVALENS_MAX_SUBQUERY_CONCURRENCY` caps per-branch sub-query processing,
+  including scraped-content compression and embedding calls.
 - `RIVALENS_ENABLE_CLAIM_VERIFICATION=false` keeps weak/unverifiable claim
   review from launching a claim-driven verification collection pass.
 

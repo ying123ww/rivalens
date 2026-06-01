@@ -44,6 +44,11 @@ class ResearchConductor:
         self._mcp_results_cache = None
         # Track MCP query count for balanced mode
         self._mcp_query_count = 0
+        self.max_subquery_concurrency = _int_env(
+            "RIVALENS_MAX_SUBQUERY_CONCURRENCY",
+            2,
+            minimum=1,
+        )
 
     async def plan_research(self, query, query_domains=None):
         """Gets the sub-queries from the query
@@ -343,9 +348,13 @@ class ResearchConductor:
             )
 
         # Using asyncio.gather to process the sub_queries asynchronously
+        subquery_semaphore = asyncio.Semaphore(self.max_subquery_concurrency)
         context = await asyncio.gather(
             *[
-                self._process_sub_query_with_vectorstore(sub_query, filter)
+                self._process_sub_query_with_limit(
+                    subquery_semaphore,
+                    self._process_sub_query_with_vectorstore(sub_query, filter),
+                )
                 for sub_query in sub_queries
             ]
         )
@@ -434,9 +443,13 @@ class ResearchConductor:
 
         # Using asyncio.gather to process the sub_queries asynchronously
         try:
+            subquery_semaphore = asyncio.Semaphore(self.max_subquery_concurrency)
             context = await asyncio.gather(
                 *[
-                    self._process_sub_query(sub_query, scraped_data, query_domains)
+                    self._process_sub_query_with_limit(
+                        subquery_semaphore,
+                        self._process_sub_query(sub_query, scraped_data, query_domains),
+                    )
                     for sub_query in sub_queries
                 ]
             )
@@ -451,6 +464,10 @@ class ResearchConductor:
         except Exception as e:
             self.logger.error(f"Error during web search: {e}", exc_info=True)
             return []
+
+    async def _process_sub_query_with_limit(self, semaphore: asyncio.Semaphore, awaitable):
+        async with semaphore:
+            return await awaitable
 
     def _get_mcp_strategy(self) -> str:
         """
@@ -1114,3 +1131,14 @@ class ResearchConductor:
                     "progress": progress
                 }
             )
+
+
+def _int_env(env_name: str, default: int, minimum: int = 0) -> int:
+    raw_value = os.getenv(env_name)
+    if raw_value in (None, ""):
+        return default
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)

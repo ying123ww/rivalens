@@ -15,6 +15,7 @@ from rivalens.agents.writing import (
     ReportWriterAgent,
 )
 from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
+from rivalens.research.skills.researcher import ResearchConductor
 from rivalens.schema import SOURCE_TYPE_PRIORITY
 from rivalens.workflows.competitive_analysis import _int_budget
 
@@ -150,6 +151,95 @@ class CollectionReviewTest(unittest.TestCase):
             2,
         )
         self.assertTrue(result["agent_events"][-1]["input"]["root_branch_limit_exceeded"])
+
+    def test_collection_run_limits_concurrent_collection_tasks(self):
+        class CountingCollector:
+            def __init__(self):
+                self.active = 0
+                self.max_active = 0
+
+            async def collect(self, collection_task, mode, verbose, source_urls=None):
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                await asyncio.sleep(0.01)
+                self.active -= 1
+                return {
+                    "task": collection_task,
+                    "mode": mode.value,
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [],
+                    "costs": 0.0,
+                }
+
+        collector = CountingCollector()
+        state = {
+            "task": {
+                "query": "Compare Acme and Beta",
+                "verbose": False,
+            },
+            "competitors": [{"name": "Acme"}],
+            "active_knowledge_schema": {
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {"id": "positioning", "name": "Positioning"},
+                    {"id": "pricing", "name": "Pricing"},
+                    {"id": "security", "name": "Security"},
+                ],
+            },
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=collector,
+                max_branch_depth=0,
+                max_concurrent_collections=2,
+            ).run(state)
+        )
+
+        self.assertLessEqual(collector.max_active, 2)
+        self.assertEqual(
+            result["agent_events"][-1]["input"]["max_concurrent_collections"],
+            2,
+        )
+
+    def test_research_conductor_limits_concurrent_subqueries(self):
+        class FakeResearcher:
+            verbose = False
+            websocket = None
+            retrievers = []
+            report_type = "subtopic_report"
+            mcp_strategy = "fast"
+
+        async def run_probe():
+            conductor = ResearchConductor(FakeResearcher())
+            conductor.max_subquery_concurrency = 2
+            active = 0
+            max_active = 0
+
+            async def fake_plan_research(query, query_domains=None):
+                return ["query-1", "query-2", "query-3", "query-4"]
+
+            async def fake_process_sub_query(sub_query, scraped_data=None, query_domains=None):
+                nonlocal active, max_active
+                active += 1
+                max_active = max(max_active, active)
+                await asyncio.sleep(0.01)
+                active -= 1
+                return sub_query
+
+            conductor.plan_research = fake_plan_research
+            conductor._process_sub_query = fake_process_sub_query
+
+            context = await conductor._get_context_by_web_search("root", [], [])
+            return context, max_active
+
+        context, max_active = asyncio.run(run_probe())
+
+        self.assertLessEqual(max_active, 2)
+        self.assertIn("query-1", context)
+        self.assertIn("query-4", context)
 
     def test_collection_does_not_fallback_to_core_fields(self):
         branches = CollectionAgent()._build_root_branches(

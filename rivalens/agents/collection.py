@@ -1,6 +1,7 @@
 """Evidence collection agent for competitor analysis."""
 
 import asyncio
+import os
 from typing import Any
 
 from rivalens.agents.coverage_review import CoverageReviewer
@@ -30,6 +31,7 @@ class CollectionAgent:
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
         max_root_branch_hard_limit: int = 20,
+        max_concurrent_collections: int | None = None,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
@@ -38,6 +40,12 @@ class CollectionAgent:
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
+        self.max_concurrent_collections = _int_env(
+            max_concurrent_collections,
+            "RIVALENS_MAX_CONCURRENT_COLLECTIONS",
+            3,
+            minimum=1,
+        )
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
@@ -111,9 +119,14 @@ class CollectionAgent:
                 if file_rag_context:
                     collection_task["file_rag_context"] = file_rag_context
 
+            collection_semaphore = asyncio.Semaphore(self.max_concurrent_collections)
             results = await asyncio.gather(
                 *[
-                    self._run_collection_task(collection_task, verbose=verbose)
+                    self._run_collection_task_with_limit(
+                        collection_semaphore,
+                        collection_task,
+                        verbose=verbose,
+                    )
                     for collection_task in collection_tasks
                 ],
                 return_exceptions=True,
@@ -278,6 +291,7 @@ class CollectionAgent:
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
                         "max_expansion_branches": self.max_expansion_branches,
                         "max_root_branches_per_competitor": self.max_root_branch_hard_limit,
+                        "max_concurrent_collections": self.max_concurrent_collections,
                         "dimensions": sorted(
                             {branch["dimension_id"] for branch in research_branches}
                         ),
@@ -299,6 +313,15 @@ class CollectionAgent:
                 }
             ],
         }
+
+    async def _run_collection_task_with_limit(
+        self,
+        semaphore: asyncio.Semaphore,
+        collection_task: EvidenceCollectionTask,
+        verbose: bool,
+    ) -> EvidenceCollectionResult:
+        async with semaphore:
+            return await self._run_collection_task(collection_task, verbose=verbose)
 
     async def _run_collection_task(
         self,
@@ -838,3 +861,19 @@ class CollectionAgent:
         for review in evidence_reviews:
             rejected.extend(review.get("rejected_evidence_ids", []))
         return list(dict.fromkeys(rejected))
+
+
+def _int_env(
+    value: int | None,
+    env_name: str,
+    default: int,
+    minimum: int = 0,
+) -> int:
+    raw_value = value if value is not None else os.getenv(env_name)
+    if raw_value in (None, ""):
+        return default
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
