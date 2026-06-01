@@ -16,6 +16,11 @@ from ..actions.agent_creator import choose_agent
 from ..actions.query_processing import get_search_results, plan_research_outline
 from ..actions.utils import stream_output
 from ..document import DocumentLoader, LangChainDocumentLoader, OnlineDocumentLoader
+from ..trace_context import (
+    compact_trace_context,
+    langsmith_extra_for_trace_context,
+    trace_context_from_conductor,
+)
 from ..utils.enum import ReportSource, ReportType
 from ..utils.logging_config import get_json_handler
 
@@ -25,11 +30,15 @@ def _retriever_name(retriever: object) -> str:
 
 
 def _retriever_trace_inputs(inputs: dict) -> dict:
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = trace_context_from_conductor(inputs.get("self"))
     return {
         "query": inputs.get("query", ""),
         "retriever": _retriever_name(inputs.get("retriever_class")),
         "query_domains": list(inputs.get("query_domains") or []),
         "max_results": inputs.get("max_results"),
+        "collection_task": trace_context,
     }
 
 
@@ -47,6 +56,25 @@ def _retriever_trace_outputs(output) -> dict:
             for item in results[:10]
             if isinstance(item, dict)
         ],
+    }
+
+
+def _subquery_trace_inputs(inputs: dict) -> dict:
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = trace_context_from_conductor(inputs.get("self"))
+    return {
+        "sub_query": inputs.get("sub_query", ""),
+        "scraped_data_size": len(inputs.get("scraped_data") or []),
+        "query_domains": list(inputs.get("query_domains") or []),
+        "collection_task": trace_context,
+    }
+
+
+def _subquery_trace_outputs(output) -> dict:
+    return {
+        "has_context": bool(output),
+        "context_chars": len(str(output or "")),
     }
 
 
@@ -89,6 +117,20 @@ class ResearchConductor:
         Returns:
             List of queries
         """
+        preplanned_queries = self._rivalens_preplanned_search_queries()
+        if preplanned_queries:
+            self.logger.info(
+                "Using Rivalens preplanned branch search queries: %s",
+                preplanned_queries,
+            )
+            await stream_output(
+                "logs",
+                "planning_research",
+                f"🔎 Using Rivalens planned search queries for branch: {query}...",
+                self.researcher.websocket,
+            )
+            return preplanned_queries
+
         await stream_output(
             "logs",
             "planning_research",
@@ -123,6 +165,16 @@ class ResearchConductor:
         self.logger.info(f"Research outline planned: {outline}")
         return outline
 
+    def _rivalens_preplanned_search_queries(self):
+        preplanned_queries = self._dedupe_search_queries(
+            getattr(self.researcher, "rivalens_search_queries", []),
+        )
+        if preplanned_queries:
+            return preplanned_queries
+
+        trace_context = trace_context_from_conductor(self)
+        return self._dedupe_search_queries(trace_context.get("search_queries", []))
+
     async def _get_initial_search_results(self, query, query_domains=None):
         retrievers = list(self.researcher.retrievers or [])
         non_mcp_retrievers = [
@@ -138,6 +190,11 @@ class ResearchConductor:
                 retrievers[0],
                 query_domains,
                 researcher=self.researcher,
+                **self._trace_kwargs_for(
+                    get_search_results,
+                    "initial_search",
+                    query=query,
+                ),
             )
             return self._dedupe_initial_search_results(
                 results or [],
@@ -155,6 +212,11 @@ class ResearchConductor:
                     retriever,
                     query_domains,
                     researcher=self.researcher,
+                    **self._trace_kwargs_for(
+                        get_search_results,
+                        "initial_search",
+                        query=query,
+                    ),
                 )
             except Exception as exc:
                 self.logger.warning(
@@ -364,10 +426,10 @@ class ResearchConductor:
         self.logger.info(f"Starting vectorstore search for query: {query}")
         context = []
         # Generate Sub-Queries including original query
-        sub_queries = await self.plan_research(query)
+        sub_queries = self._dedupe_search_queries(await self.plan_research(query))
         # If this is not part of a sub researcher, add original query to research for better results
         if self.researcher.report_type != "subtopic_report":
-            sub_queries.append(query)
+            sub_queries = self._dedupe_search_queries([*sub_queries, query])
 
         if self.researcher.verbose:
             await stream_output(
@@ -456,12 +518,14 @@ class ResearchConductor:
                 self.logger.info(f"MCP results cached: {len(mcp_context)} total context entries")
 
         # Generate Sub-Queries including original query
-        sub_queries = await self.plan_research(query, query_domains)
+        sub_queries = self._dedupe_search_queries(
+            await self.plan_research(query, query_domains),
+        )
         self.logger.info(f"Generated sub-queries: {sub_queries}")
         
         # If this is not part of a sub researcher, add original query to research for better results
         if self.researcher.report_type != "subtopic_report":
-            sub_queries.append(query)
+            sub_queries = self._dedupe_search_queries([*sub_queries, query])
 
         if self.researcher.verbose:
             await stream_output(
@@ -480,7 +544,16 @@ class ResearchConductor:
                 *[
                     self._process_sub_query_with_limit(
                         subquery_semaphore,
-                        self._process_sub_query(sub_query, scraped_data, query_domains),
+                        self._process_sub_query(
+                            sub_query,
+                            scraped_data,
+                            query_domains,
+                            **self._trace_kwargs_for(
+                                self._process_sub_query,
+                                "process_subquery",
+                                query=sub_query,
+                            ),
+                        ),
                     )
                     for sub_query in sub_queries
                 ]
@@ -500,6 +573,22 @@ class ResearchConductor:
     async def _process_sub_query_with_limit(self, semaphore: asyncio.Semaphore, awaitable):
         async with semaphore:
             return await awaitable
+
+    def _dedupe_search_queries(self, queries):
+        deduped = []
+        seen = set()
+        for query in queries or []:
+            if not isinstance(query, str):
+                continue
+            cleaned = " ".join(query.split()).strip()
+            if not cleaned:
+                continue
+            key = cleaned.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(cleaned)
+        return deduped
 
     def _get_mcp_strategy(self) -> str:
         """
@@ -583,7 +672,20 @@ class ResearchConductor:
         
         return all_mcp_context
 
-    async def _process_sub_query(self, sub_query: str, scraped_data: list = [], query_domains: list = []):
+    @traceable(
+        name="rivalens_process_subquery",
+        run_type="chain",
+        tags=["rivalens", "collection", "subquery"],
+        process_inputs=_subquery_trace_inputs,
+        process_outputs=_subquery_trace_outputs,
+    )
+    async def _process_sub_query(
+        self,
+        sub_query: str,
+        scraped_data: list = [],
+        query_domains: list = [],
+        trace_context: dict | None = None,
+    ):
         """Takes in a sub query and scrapes urls based on it and gathers context."""
         if self.json_handler:
             self.json_handler.log_event("sub_query", {
@@ -898,6 +1000,7 @@ class ResearchConductor:
         query: str,
         query_domains: list,
         max_results: int,
+        trace_context: dict | None = None,
     ):
         retriever = retriever_class(
             query,
@@ -905,6 +1008,41 @@ class ResearchConductor:
             query_domains=query_domains,
         )
         return await asyncio.to_thread(retriever.search, max_results=max_results)
+
+    def _trace_extra(
+        self,
+        operation: str,
+        *,
+        query: str = "",
+        tags: list[str] | None = None,
+    ) -> dict:
+        trace_context = trace_context_from_conductor(self)
+        metadata = {"rivalens_actual_query": query} if query else None
+        return langsmith_extra_for_trace_context(
+            trace_context,
+            operation=operation,
+            tags=tags,
+            metadata=metadata,
+        )
+
+    def _trace_kwargs_for(
+        self,
+        callable_obj,
+        operation: str,
+        *,
+        query: str = "",
+        tags: list[str] | None = None,
+    ) -> dict:
+        if not getattr(callable_obj, "__langsmith_traceable__", False):
+            return {}
+        return {
+            "trace_context": trace_context_from_conductor(self),
+            "langsmith_extra": self._trace_extra(
+                operation,
+                query=query,
+                tags=tags,
+            )
+        }
 
     async def _search_relevant_source_urls(self, query, query_domains: list | None = None):
         new_search_urls = []
@@ -925,6 +1063,11 @@ class ResearchConductor:
                     query,
                     query_domains,
                     self.researcher.cfg.max_search_results_per_query,
+                    **self._trace_kwargs_for(
+                        self._run_retriever_search,
+                        "retriever_search",
+                        query=query,
+                    ),
                 )
 
                 if not search_results:

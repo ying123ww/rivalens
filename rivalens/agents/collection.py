@@ -8,8 +8,11 @@ from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.search_query_builder import SearchQueryBuilder
+from rivalens.agents.success_criteria import normalize_success_criteria
 from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
+from rivalens.research.evidence_collector import _trace_collection_task
+from rivalens.research.trace_context import langsmith_extra_for_trace_context
 from rivalens.schema import (
     CompetitorAnalysisState,
     EvidenceCollectionResult,
@@ -47,7 +50,11 @@ class CollectionAgent:
             minimum=1,
         )
 
-    async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
+    async def run(
+        self,
+        state: CompetitorAnalysisState,
+        config: Any | None = None,
+    ) -> CompetitorAnalysisState:
         task = state.get("task", {})
         schema_message = latest_message_for(
             state,
@@ -126,6 +133,7 @@ class CollectionAgent:
                         collection_semaphore,
                         collection_task,
                         verbose=verbose,
+                        trace_config=config,
                     )
                     for collection_task in collection_tasks
                 ],
@@ -319,20 +327,37 @@ class CollectionAgent:
         semaphore: asyncio.Semaphore,
         collection_task: EvidenceCollectionTask,
         verbose: bool,
+        trace_config: Any | None = None,
     ) -> EvidenceCollectionResult:
         async with semaphore:
-            return await self._run_collection_task(collection_task, verbose=verbose)
+            return await self._run_collection_task(
+                collection_task,
+                verbose=verbose,
+                trace_config=trace_config,
+            )
 
     async def _run_collection_task(
         self,
         collection_task: EvidenceCollectionTask,
         verbose: bool,
+        trace_config: Any | None = None,
     ) -> EvidenceCollectionResult:
-        return await self.evidence_collector.collect(
+        kwargs: dict[str, Any] = {}
+        collect = self.evidence_collector.collect
+        if getattr(collect, "__langsmith_traceable__", False):
+            trace_context = _trace_collection_task(collection_task)
+            kwargs["config"] = trace_config
+            kwargs["langsmith_extra"] = langsmith_extra_for_trace_context(
+                trace_context,
+                operation="collect_evidence",
+            )
+
+        return await collect(
             collection_task=collection_task,
             mode=self._research_mode_for_task(collection_task),
             source_urls=collection_task.get("target_urls", []),
             verbose=verbose,
+            **kwargs,
         )
 
     def _research_mode_for_task(
@@ -360,6 +385,8 @@ class CollectionAgent:
                     dimension=dimension,
                     active_schema=active_schema,
                 )
+                research_goal = self._research_goal(query, competitor, dimension)
+                success_criteria = self._success_criteria(query, competitor, dimension)
                 branches.append(
                     {
                         "id": branch_id,
@@ -374,7 +401,9 @@ class CollectionAgent:
                         "parent_dimension_id": dimension.get("parent_dimension_id", ""),
                         "topic": dimension["name"],
                         "query": query_plan.primary_query,
+                        "research_goal": research_goal,
                         "search_queries": query_plan.search_queries,
+                        "success_criteria": success_criteria,
                         "task_context": self._schema_aware_task_context(
                             query,
                             competitor,
@@ -470,6 +499,12 @@ class CollectionAgent:
                     "parent_dimension_id": task_spec.get("parent_dimension_id", ""),
                     "topic": task_spec.get("objective", "Claim verification"),
                     "query": query,
+                    "research_goal": task_spec.get(
+                        "objective",
+                        "Verify the target claim with direct public evidence.",
+                    ),
+                    "search_queries": task_spec.get("search_queries", [query]),
+                    "success_criteria": self._verification_success_criteria(task_spec),
                     "target_urls": task_spec.get("target_urls", []),
                     "search_stage": "verification",
                     "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
@@ -525,9 +560,11 @@ class CollectionAgent:
                     "dimension_id": branch.get("dimension_id", ""),
                     "dimension_name": dimension_name,
                     "objective": (
-                        f"Collect source-backed public evidence about {competitor} "
+                        branch.get("research_goal")
+                        or f"Collect source-backed public evidence about {competitor} "
                         f"for the {dimension_name} dimension."
                     ),
+                    "success_criteria": branch.get("success_criteria", []),
                     "guiding_questions": branch.get("guiding_questions", []),
                     "source_hints": branch.get("source_hints", []),
                     "minimum_coverage": branch.get("minimum_coverage", []),
@@ -569,12 +606,14 @@ class CollectionAgent:
             "search_stage": search_stage,
             "objective": brief.get("objective", branch.get("topic", "")),
             "query": branch.get("query", ""),
+            "research_goal": branch.get("research_goal", brief.get("objective", "")),
             "target_urls": branch.get("target_urls", []),
             "source_hints": branch.get("source_hints", []),
             "generated_from_gap": generated_from_gap,
             "decision_action": branch.get("decision_action", ""),
             "decision_subtype": branch.get("decision_subtype", ""),
             "search_queries": branch.get("search_queries", [branch.get("query", "")]),
+            "success_criteria": branch.get("success_criteria", []),
             "task_context": branch.get("task_context", ""),
             "reason": reason,
             "drift_risk": "low" if not generated_from_gap else "medium",
@@ -606,7 +645,12 @@ class CollectionAgent:
             "dimension_type": branch.get("dimension_type", ""),
             "parent_dimension_id": branch.get("parent_dimension_id", ""),
             "query": branch.get("query", ""),
+            "research_goal": research_task.get("research_goal", branch.get("research_goal", "")),
             "search_queries": branch.get("search_queries", [branch.get("query", "")]),
+            "success_criteria": research_task.get(
+                "success_criteria",
+                branch.get("success_criteria", []),
+            ),
             "task_context": branch.get("task_context", ""),
             "target_urls": branch.get("target_urls", []),
         }
@@ -627,6 +671,17 @@ class CollectionAgent:
             dimension_name = follow_up_spec.get("dimension_name", parent.get("dimension_name", ""))
             dimension_type = follow_up_spec.get("dimension_type", parent.get("dimension_type", ""))
             child_id = f"{parent['id']}_d{parent.get('depth', 0) + 1}_{index}"
+            success_criteria = follow_up_spec.get(
+                "success_criteria",
+                parent.get("success_criteria", []),
+            )
+            guiding_questions = follow_up_spec.get("guiding_questions")
+            if guiding_questions is None:
+                guiding_questions = [
+                    criterion.get("description", "")
+                    for criterion in success_criteria
+                    if criterion.get("kind") == "guiding_question"
+                ] or parent.get("guiding_questions", [])
             children.append(
                 {
                     "id": child_id,
@@ -644,6 +699,9 @@ class CollectionAgent:
                     ),
                     "topic": topic,
                     "query": query,
+                    "research_goal": topic,
+                    "search_queries": follow_up_spec.get("search_queries", [query]),
+                    "success_criteria": success_criteria,
                     "target_urls": follow_up_spec.get("target_urls", []),
                     "search_stage": follow_up_spec.get("search_stage", "focused"),
                     "generated_from_gap": follow_up_spec.get(
@@ -652,9 +710,12 @@ class CollectionAgent:
                     ),
                     "decision_action": follow_up_spec.get("decision_action", ""),
                     "decision_subtype": follow_up_spec.get("decision_subtype", ""),
-                    "source_hints": parent.get("source_hints", []),
+                    "source_hints": follow_up_spec.get(
+                        "target_source_types",
+                        parent.get("source_hints", []),
+                    ),
                     "minimum_coverage": parent.get("minimum_coverage", []),
-                    "guiding_questions": parent.get("guiding_questions", []),
+                    "guiding_questions": guiding_questions,
                     "evidence_ids": [],
                     "parent_task_id": parent_task_id,
                     "status": "active",
@@ -703,6 +764,7 @@ class CollectionAgent:
                         extension.get("source_hints", []),
                     ),
                     "guiding_questions": extension.get("guiding_questions", []),
+                    "success_criteria": extension.get("success_criteria", []),
                     "search_intent": extension.get("search_intent", ""),
                     "minimum_coverage": ["At least two source-backed public evidence items."],
                     "risk_level": "medium",
@@ -737,6 +799,9 @@ class CollectionAgent:
             f"Selected industry: {selected_industry}",
             f"Research focus: {dimension['name']} ({dimension['type']})",
             f"Focus definition: {dimension['description']}",
+            self._success_criteria_line(
+                self._success_criteria(query, competitor, dimension),
+            ),
             self._guiding_questions_line(dimension),
             dimension.get("search_intent", ""),
         ]
@@ -753,6 +818,81 @@ class CollectionAgent:
             "listings when relevant.",
         )
         return "\n".join(line for line in lines if line)
+
+    def _research_goal(
+        self,
+        query: str,
+        competitor: str,
+        dimension: dict[str, Any],
+    ) -> str:
+        return (
+            f"Collect source-backed public evidence about {competitor or 'the requested competitor'} "
+            f"for {dimension['name']} while staying aligned with the original request: {query}"
+        )
+
+    def _success_criteria(
+        self,
+        query: str,
+        competitor: str,
+        dimension: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        explicit_criteria = normalize_success_criteria(
+            dimension.get("success_criteria", []),
+        )
+        base_criterion = {
+            "id": "branch_relevant_source",
+            "description": (
+                f"Find source-backed public evidence about "
+                f"{competitor or 'the requested competitor'} for {dimension['name']}."
+            ),
+            "target_source_types": dimension.get("source_hints", []),
+            "required_source_types": [],
+            "kind": "branch_relevance",
+        }
+        if explicit_criteria:
+            return [base_criterion, *explicit_criteria]
+
+        criteria = [base_criterion]
+        for index, question in enumerate(dimension.get("guiding_questions", []), start=1):
+            criteria.append(
+                {
+                    "id": f"guiding_question_{index}",
+                    "description": str(question),
+                    "target_source_types": dimension.get("source_hints", []),
+                    "required_source_types": [],
+                    "kind": "guiding_question",
+                }
+            )
+        return normalize_success_criteria(criteria)
+
+    def _verification_success_criteria(
+        self,
+        task_spec: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return normalize_success_criteria(
+            task_spec.get("success_criteria")
+            or [
+                {
+                    "id": "claim_verification",
+                    "description": task_spec.get(
+                        "objective",
+                        "Verify the target claim with direct public evidence.",
+                    ),
+                    "target_source_types": task_spec.get("target_source_types", []),
+                    "required_source_types": task_spec.get("target_source_types", []),
+                    "kind": "claim_verification",
+                }
+            ]
+        )
+
+    def _success_criteria_line(self, success_criteria: list[dict[str, Any]]) -> str:
+        if not success_criteria:
+            return ""
+        descriptions = [
+            f"{criterion.get('id')}: {criterion.get('description')}"
+            for criterion in success_criteria
+        ]
+        return "Success criteria: " + " | ".join(descriptions)
 
     def _guiding_questions_line(self, dimension: dict[str, Any]) -> str:
         guiding_questions = dimension.get("guiding_questions", [])

@@ -4,6 +4,10 @@ from typing import Any
 
 from rivalens.schema import EvidenceReviewFinding, EvidenceReviewResult, ResearchBranch
 from rivalens.text_quality import is_low_quality_text
+from rivalens.agents.success_criteria import (
+    matched_success_criterion_ids,
+    normalize_success_criteria,
+)
 
 
 class EvidenceQualityReviewer:
@@ -20,10 +24,40 @@ class EvidenceQualityReviewer:
         item_findings: list[EvidenceReviewFinding] = []
         accepted_evidence_ids: list[str] = []
         rejected_evidence_ids: list[str] = []
+        criterion_matches: list[dict[str, Any]] = []
+        success_criteria = normalize_success_criteria(
+            branch.get("success_criteria", []),
+        )
 
         for evidence in evidence_items:
             evidence_id = evidence.get("id", "")
             item_rejected = False
+            matched_criterion_ids = matched_success_criterion_ids(
+                evidence,
+                success_criteria,
+                branch,
+            )
+            if matched_criterion_ids:
+                evidence["success_criterion_ids"] = matched_criterion_ids
+                criterion_matches.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "criterion_ids": matched_criterion_ids,
+                    }
+                )
+            elif success_criteria:
+                item_findings.append(
+                    self._finding(
+                        branch,
+                        code="no_success_criterion_match",
+                        severity="medium",
+                        evidence_id=evidence_id,
+                        message="Evidence item does not answer the branch success criteria.",
+                        recommendation="Reject this source for this branch and narrow the follow-up query to missing criteria.",
+                    )
+                )
+                item_rejected = True
+
             if not evidence.get("url"):
                 item_findings.append(
                     self._finding(
@@ -101,6 +135,7 @@ class EvidenceQualityReviewer:
             "findings": findings,
             "accepted_evidence_ids": accepted_evidence_ids,
             "rejected_evidence_ids": rejected_evidence_ids,
+            "criterion_matches": criterion_matches,
             "required_action": required_action,
         }
 
@@ -219,6 +254,14 @@ class EvidenceQualityReviewer:
         if "missing_source_url" in high_codes and accepted_count == 0:
             return "retry"
         if "low_quality_text" in high_codes and accepted_count == 0:
+            return "retry"
+        if (
+            any(
+                finding.get("code") == "no_success_criterion_match"
+                for finding in item_findings
+            )
+            and accepted_count == 0
+        ):
             return "retry"
         return "expand"
 

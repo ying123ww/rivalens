@@ -84,7 +84,7 @@ AI agent 在修改本仓库时，应按以下顺序建立上下文：
 
 - 不要绕过 `rivalens/schema/competitive.py` 中的结构化状态和消息协议。
 - 不要生成没有 `evidence_ids` 的关键分析结论。
-- 不要恢复末端“删 claim 即通过”的伪质检闭环。review 应优先在 standard search 后作为 source-level evidence gate 和 coverage-level gap detector 运行，由 `CoverageReviewer` 输出补采任务，`CollectionAgent` 直接控制 depth 和 budget。
+- 不要恢复末端“删 claim 即通过”的伪质检闭环。review 应优先在 standard search 后作为 source-level evidence gate 和 success-criteria coverage gap detector 运行，由 `CoverageReviewer` 输出只针对缺失标准的补采任务，`CollectionAgent` 直接控制 depth 和 budget。
 - 不要把大段原始网页内容直接传给下游 Agent。应保留证据摘要、URL、source metadata 和必要 excerpt。
 - 不要在 backend 或 Agent 内重复实现报告文件导出。报告导出应复用 `rivalens/report_export.py`，发布状态和 publish 消息应使用结构化 artifact payload。
 - 不要为了演示效果隐藏失败。失败、重试、降级应进入可观测日志或 agent events。

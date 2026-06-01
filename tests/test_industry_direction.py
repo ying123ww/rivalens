@@ -2,7 +2,11 @@ import asyncio
 import unittest
 
 from rivalens.agents.industry_direction import IndustryDirectionSkill
-from rivalens.agents.planning import PlanningAgent
+from rivalens.agents.planning import (
+    PlanningAgent,
+    _planning_trace_inputs,
+    _planning_trace_outputs,
+)
 from rivalens.industry_templates import INDUSTRY_DIRECTION_TEMPLATES
 from rivalens.schema.competitive import EvidenceType, SOURCE_TYPE_PRIORITY
 from rivalens.schema_registry.registry import SchemaRegistry
@@ -514,6 +518,28 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             result["industry_direction_plan"]["detected_competitors"],
             ["chatgpt", "kimi", "perplexity"],
         )
+
+    def test_planning_trace_summarizes_scope_decisions(self):
+        state = {
+            "task": {
+                "query": "对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品体验",
+                "competitors": ["ChatGPT", "Kimi", "Perplexity"],
+                "custom_analysis_directions": ["搜索体验"],
+                "industry_directions_confirmed": True,
+            },
+            "messages": [],
+        }
+
+        inputs = _planning_trace_inputs({"state": state})
+        result = asyncio.run(PlanningAgent().run(state))
+        outputs = _planning_trace_outputs(result)
+
+        self.assertEqual(inputs["competitors"], ["ChatGPT", "Kimi", "Perplexity"])
+        self.assertEqual(inputs["custom_analysis_direction_count"], 1)
+        self.assertEqual(outputs["selected_industry"], "ai_product_application")
+        self.assertEqual(outputs["message_type"], "schema_selection")
+        self.assertIn("final_direction_ids", outputs)
+        self.assertIn("user_direction_1", outputs["user_added_direction_ids"])
 
     def test_priority_directions_are_required_and_use_specific_sources(self):
         required_direction_ids = {

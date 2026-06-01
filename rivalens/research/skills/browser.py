@@ -9,6 +9,7 @@ from rivalens.research.utils.workers import WorkerPool
 from ..actions.utils import stream_output
 from ..actions.web_scraping import scrape_urls
 from ..scraper.utils import get_image_hash
+from ..trace_context import trace_context_from_researcher
 
 
 class BrowserManager:
@@ -53,7 +54,10 @@ class BrowserManager:
             )
 
         scraped_content, images = await scrape_urls(
-            urls, self.researcher.cfg, self.worker_pool
+            urls,
+            self.researcher.cfg,
+            self.worker_pool,
+            trace_context=trace_context_from_researcher(self.researcher),
         )
         self.researcher.add_research_sources(scraped_content)
         new_images = self.select_top_images(images, k=4)  # Select top 4 images

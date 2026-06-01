@@ -7,6 +7,7 @@ from ..utils.llm import create_chat_completion
 from ..prompts import PromptFamily
 from typing import Any, List, Dict
 from ..config import Config
+from ..trace_context import compact_trace_context, trace_context_from_researcher
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,14 @@ def _retriever_name(retriever: Any) -> str:
 
 
 def _search_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = trace_context_from_researcher(inputs.get("researcher"))
     return {
         "query": inputs.get("query", ""),
         "retriever": _retriever_name(inputs.get("retriever")),
         "query_domains": list(inputs.get("query_domains") or []),
+        "collection_task": trace_context,
     }
 
 
@@ -41,6 +46,69 @@ def _search_trace_outputs(output: Any) -> dict[str, Any]:
     }
 
 
+def _parse_jsonish(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text or text[0] not in "[{\"":
+        return value
+
+    try:
+        return json_repair.loads(text)
+    except Exception:
+        return value
+
+
+def _clean_sub_query(query: str) -> str:
+    return " ".join(query.split()).strip().strip("\"'")
+
+
+def _dedupe_sub_queries(queries: list[str]) -> list[str]:
+    deduped = []
+    seen = set()
+    for query in queries:
+        cleaned = _clean_sub_query(query)
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _normalize_sub_queries_response(response: Any) -> List[str]:
+    parsed = _parse_jsonish(response)
+
+    if isinstance(parsed, dict):
+        for key in ("queries", "search_queries", "sub_queries", "query"):
+            if key in parsed:
+                return _normalize_sub_queries_response(parsed[key])
+        text = parsed.get("text")
+        if isinstance(text, str):
+            return _normalize_sub_queries_response(text)
+        return []
+
+    if isinstance(parsed, list):
+        queries = []
+        for item in parsed:
+            if isinstance(item, str):
+                queries.append(item)
+            elif isinstance(item, dict):
+                queries.extend(_normalize_sub_queries_response(item))
+        return _dedupe_sub_queries(queries)
+
+    if isinstance(parsed, str):
+        reparsed = _parse_jsonish(parsed)
+        if reparsed is not parsed:
+            return _normalize_sub_queries_response(reparsed)
+        return _dedupe_sub_queries([parsed])
+
+    return []
+
+
 @traceable(
     name="rivalens_initial_search",
     run_type="retriever",
@@ -48,7 +116,13 @@ def _search_trace_outputs(output: Any) -> dict[str, Any]:
     process_inputs=_search_trace_inputs,
     process_outputs=_search_trace_outputs,
 )
-async def get_search_results(query: str, retriever: Any, query_domains: List[str] = None, researcher=None) -> List[Dict[str, Any]]:
+async def get_search_results(
+    query: str,
+    retriever: Any,
+    query_domains: List[str] = None,
+    researcher=None,
+    trace_context: dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get web search results for a given query.
 
@@ -150,7 +224,13 @@ async def generate_sub_queries(
                 **kwargs
             )
 
-    return json_repair.loads(response)
+    sub_queries = _normalize_sub_queries_response(response)
+    if not sub_queries:
+        logger.warning(
+            "Sub-query LLM returned no parseable queries. Falling back to original query.",
+        )
+        return [query]
+    return sub_queries
 
 async def plan_research_outline(
     query: str,

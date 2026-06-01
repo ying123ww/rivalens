@@ -245,11 +245,14 @@ Use this context to inform and refine your search queries. The context provides 
 
         dynamic_example = ", ".join([f'"query {i+1}"' for i in range(max_iterations)])
 
-        return f"""Write {max_iterations} google search queries to search online that form an objective opinion from the following task: "{task}"
+        return f"""Write {max_iterations} Google search queries that collect source-backed evidence for the following task: "{task}"
 
 Assume the current date is {datetime.now(timezone.utc).strftime('%B %d, %Y')} if required.
 
 {context_prompt}
+The original task is binding. Use the context only to make the searches more precise; do not change the topic, competitor, product, geography, or time scope unless the original task requires it.
+Each query must target one concrete missing fact or source type that would help answer the original task. Prefer official pages, pricing pages, docs, filings, reviews, news, or marketplace listings when relevant.
+Do not generate broad adjacent-topic queries, decorative research angles, or generic background searches.
 You must respond with a list of strings in the following format: [{dynamic_example}].
 The response should contain ONLY the list.
 """

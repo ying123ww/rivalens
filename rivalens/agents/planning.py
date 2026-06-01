@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 from typing import Any
 
+from langsmith import traceable, utils as langsmith_utils
+
 from rivalens.agents.industry_direction import IndustryDirectionSkill
 from rivalens.agents.messages import create_agent_message
 from rivalens.file_context import (
@@ -20,6 +22,117 @@ from rivalens.schema import (
 from rivalens.schema_registry import CORE_SCHEMA_FIELDS, SchemaRegistry
 
 
+def _competitor_names(competitors: Any) -> list[str]:
+    if competitors in (None, ""):
+        return []
+    if not isinstance(competitors, list):
+        competitors = [competitors]
+
+    names = []
+    for competitor in competitors:
+        if isinstance(competitor, dict):
+            name = competitor.get("name", "")
+        else:
+            name = str(competitor)
+        if name:
+            names.append(name)
+    return names
+
+
+def _direction_ids(directions: list[dict[str, Any]]) -> list[str]:
+    return [
+        direction.get("direction_id", "")
+        for direction in directions
+        if direction.get("direction_id")
+    ]
+
+
+def _planning_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    state = inputs.get("state") or {}
+    task = state.get("task", {}) if isinstance(state, dict) else {}
+    competitors = state.get("competitors") or task.get("competitors") or []
+    file_context = state.get("file_context") or {}
+
+    return {
+        "query": task.get("query", ""),
+        "competitors": _competitor_names(competitors),
+        "competitor_count": len(_competitor_names(competitors)),
+        "file_source_count": len(file_context.get("sources", [])),
+        "file_chunk_count": len(file_context.get("chunks", [])),
+        "custom_analysis_direction_count": len(
+            task.get("custom_analysis_directions") or []
+        ),
+        "industry_directions_confirmed": bool(
+            task.get("industry_directions_confirmed"),
+        ),
+        "provided_industry_direction_plan": bool(task.get("industry_direction_plan")),
+    }
+
+
+def _planning_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    active_schema = output.get("active_knowledge_schema") or {}
+    selected_industry = active_schema.get("selected_industry") or {}
+    industry_direction_plan = output.get("industry_direction_plan") or {}
+    final_analysis_plan = industry_direction_plan.get("final_analysis_plan") or {}
+    messages = output.get("messages") or []
+
+    return {
+        "competitors": _competitor_names(output.get("competitors") or []),
+        "selected_industry": selected_industry.get("industry_id", ""),
+        "selected_industry_name": selected_industry.get("name", ""),
+        "active_schema_id": active_schema.get("id", ""),
+        "candidate_industry_count": len(active_schema.get("candidate_industries", [])),
+        "industry_extension_count": len(active_schema.get("industry_extensions", [])),
+        "detected_competitors": list(
+            industry_direction_plan.get("detected_competitors") or []
+        ),
+        "default_direction_ids": _direction_ids(
+            industry_direction_plan.get("default_directions") or []
+        ),
+        "planner_added_direction_ids": _direction_ids(
+            industry_direction_plan.get("planner_added_directions") or []
+        ),
+        "user_added_direction_ids": _direction_ids(
+            industry_direction_plan.get("user_added_directions") or []
+        ),
+        "final_direction_ids": _direction_ids(
+            industry_direction_plan.get("final_directions") or []
+        ),
+        "scope_limited_by_query": bool(final_analysis_plan.get("scope_limited_by_query")),
+        "planner_supplement_skipped": bool(
+            final_analysis_plan.get("planner_supplement_skipped"),
+        ),
+        "message_type": messages[-1].get("type", "") if messages else "",
+        "research_artifact_count": len(output.get("research_artifacts") or []),
+        "agent_event_count": len(output.get("agent_events") or []),
+    }
+
+
+def _planning_trace_extra(state: CompetitorAnalysisState) -> dict[str, Any]:
+    task = state.get("task", {})
+    competitors = state.get("competitors") or task.get("competitors") or []
+    return {
+        "metadata": {
+            "rivalens_operation": "scope_planner",
+            "rivalens_query_length": len(task.get("query", "")),
+            "rivalens_competitor_count": len(_competitor_names(competitors)),
+            "rivalens_custom_analysis_direction_count": len(
+                task.get("custom_analysis_directions") or []
+            ),
+            "rivalens_industry_directions_confirmed": bool(
+                task.get("industry_directions_confirmed"),
+            ),
+            "rivalens_provided_industry_direction_plan": bool(
+                task.get("industry_direction_plan"),
+            ),
+        },
+        "tags": ["rivalens", "planner", "scope"],
+    }
+
+
 class PlanningAgent:
     def __init__(
         self,
@@ -31,7 +144,31 @@ class PlanningAgent:
             industry_direction_skill or IndustryDirectionSkill()
         )
 
-    async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
+    async def run(
+        self,
+        state: CompetitorAnalysisState,
+        config: Any | None = None,
+    ) -> CompetitorAnalysisState:
+        if langsmith_utils.tracing_is_enabled() is not True:
+            return await self._run_scope_planner.__wrapped__(self, state)
+
+        return await self._run_scope_planner(
+            state,
+            config=config,
+            langsmith_extra=_planning_trace_extra(state),
+        )
+
+    @traceable(
+        name="rivalens_scope_planner",
+        run_type="chain",
+        tags=["rivalens", "planner", "scope"],
+        process_inputs=_planning_trace_inputs,
+        process_outputs=_planning_trace_outputs,
+    )
+    async def _run_scope_planner(
+        self,
+        state: CompetitorAnalysisState,
+    ) -> CompetitorAnalysisState:
         task = state.get("task", {})
         query = task.get("query", "")
         competitors = state.get("competitors") or task.get("competitors") or []
