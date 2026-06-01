@@ -528,6 +528,74 @@ class CollectionReviewTest(unittest.TestCase):
             result["agent_events"][-1]["input"]["verification_enabled"],
         )
 
+    def test_claim_support_review_merges_prioritizes_and_caps_verification_tasks(self):
+        reviewer = ClaimSupportReviewer(enable_verification=True, max_verification_tasks=2)
+
+        def fake_support_status(claim_text, evidence_items, base_confidence):
+            if "contradicted" in claim_text:
+                return "contradicted", ["contradicted"], "Contradicted.", 0.2
+            if "unverifiable" in claim_text:
+                return "unverifiable", ["missing"], "Missing evidence.", 0.3
+            return "weak", ["weak"], "Weak evidence.", 0.4
+
+        reviewer._support_status = fake_support_status
+        state = {
+            "analysis_claims": [
+                {
+                    "id": "claim_contradicted",
+                    "dimension": "pricing_model",
+                    "branch_id": "branch_1",
+                    "claim": "contradicted pricing claim",
+                    "competitors": ["Acme"],
+                    "evidence_ids": [],
+                },
+                {
+                    "id": "claim_unverifiable_1",
+                    "dimension": "security_compliance",
+                    "branch_id": "branch_2",
+                    "claim": "unverifiable security claim",
+                    "competitors": ["Acme"],
+                    "evidence_ids": [],
+                },
+                {
+                    "id": "claim_unverifiable_2",
+                    "dimension": "security_compliance",
+                    "branch_id": "branch_3",
+                    "claim": "unverifiable admin claim",
+                    "competitors": ["Acme"],
+                    "evidence_ids": [],
+                },
+                {
+                    "id": "claim_weak",
+                    "dimension": "user_personas",
+                    "branch_id": "branch_4",
+                    "claim": "weak persona claim",
+                    "competitors": ["Acme"],
+                    "evidence_ids": [],
+                },
+            ],
+            "evidence_items": [],
+            "messages": [],
+            "verification_rounds": 0,
+        }
+
+        result = reviewer.review(state)
+        queue = result["verification_task_queue"]
+
+        self.assertEqual(len(queue), 2)
+        self.assertEqual(queue[0]["support_statuses"], ["contradicted"])
+        self.assertEqual(queue[1]["support_statuses"], ["unverifiable"])
+        self.assertEqual(
+            sorted(queue[1]["claim_ids"]),
+            ["claim_unverifiable_1", "claim_unverifiable_2"],
+        )
+        self.assertEqual(queue[1]["merged_claim_count"], 2)
+        self.assertNotIn("claim_weak", {claim_id for task in queue for claim_id in task["claim_ids"]})
+        self.assertEqual(
+            result["agent_events"][-1]["output"]["verification_task_candidate_count"],
+            4,
+        )
+
     def test_claim_support_review_supports_chinese_claims_with_chinese_evidence(self):
         state = {
             "analysis_claims": [
@@ -654,6 +722,71 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(result["verification_rounds"], 1)
         self.assertEqual(result["verification_task_queue"], [])
         self.assertEqual(len(result["research_branches"]), 1)
+
+    def test_collection_limits_verification_concurrency(self):
+        active_count = 0
+        max_seen_active = 0
+
+        class SlowVerificationCollector:
+            async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
+                nonlocal active_count, max_seen_active
+                active_count += 1
+                max_seen_active = max(max_seen_active, active_count)
+                await asyncio.sleep(0.01)
+                active_count -= 1
+                return {
+                    "task": dict(collection_task),
+                    "mode": "standard_evidence",
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [
+                        {
+                            "competitor": "Acme",
+                            "dimension_id": collection_task["dimension_id"],
+                            "title": "Acme evidence",
+                            "url": "https://acme.example/evidence",
+                            "source_type": "official_site",
+                            "excerpt": "Acme evidence.",
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme",
+                "competitors": [{"name": "Acme"}],
+                "verbose": False,
+            },
+            "active_knowledge_schema": {"industry_extensions": []},
+            "verification_task_queue": [
+                {
+                    "objective": f"Verify claim {index}",
+                    "query": f"Acme verification {index}",
+                    "target_source_types": ["official_site"],
+                    "generated_from_gap": f"verification:claim_{index}",
+                    "reason": "Claim support review requested verification.",
+                    "search_stage": "verification",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "parent_branch_id": "collect_acme_pricing_model",
+                }
+                for index in range(5)
+            ],
+            "verification_rounds": 0,
+            "messages": [],
+        }
+
+        asyncio.run(
+            CollectionAgent(
+                evidence_collector=SlowVerificationCollector(),
+                max_branch_depth=0,
+                max_verification_concurrency=2,
+            ).run(state)
+        )
+
+        self.assertLessEqual(max_seen_active, 2)
 
     def test_evidence_item_uses_query_relevant_chunk(self):
         irrelevant_intro = "General company overview. " * 80

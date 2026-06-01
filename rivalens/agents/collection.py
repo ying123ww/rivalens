@@ -1,6 +1,7 @@
 """Evidence collection agent for competitor analysis."""
 
 import asyncio
+import os
 from typing import Any
 
 from rivalens.agents.coverage_review import CoverageReviewer
@@ -30,6 +31,7 @@ class CollectionAgent:
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
         max_root_branch_hard_limit: int = 20,
+        max_verification_concurrency: int | None = None,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
@@ -38,6 +40,11 @@ class CollectionAgent:
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
+        self.max_verification_concurrency = (
+            max_verification_concurrency
+            if max_verification_concurrency is not None
+            else self._env_int("RIVALENS_MAX_VERIFICATION_CONCURRENCY", 3, minimum=1)
+        )
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
@@ -111,13 +118,27 @@ class CollectionAgent:
                 if file_rag_context:
                     collection_task["file_rag_context"] = file_rag_context
 
-            results = await asyncio.gather(
-                *[
-                    self._run_collection_task(collection_task, verbose=verbose)
-                    for collection_task in collection_tasks
-                ],
-                return_exceptions=True,
-            )
+            if verification_pass:
+                semaphore = asyncio.Semaphore(self.max_verification_concurrency)
+                results = await asyncio.gather(
+                    *[
+                        self._run_collection_task_limited(
+                            collection_task,
+                            verbose=verbose,
+                            semaphore=semaphore,
+                        )
+                        for collection_task in collection_tasks
+                    ],
+                    return_exceptions=True,
+                )
+            else:
+                results = await asyncio.gather(
+                    *[
+                        self._run_collection_task(collection_task, verbose=verbose)
+                        for collection_task in collection_tasks
+                    ],
+                    return_exceptions=True,
+                )
 
             next_frontier: list[ResearchBranch] = []
             for branch, research_task, collection_task, result in zip(
@@ -273,6 +294,7 @@ class CollectionAgent:
                         "active_schema_id": active_schema.get("id"),
                         "collection_phase": "verification" if verification_pass else "initial_or_gap_collection",
                         "verification_task_count": len(verification_queue),
+                        "max_verification_concurrency": self.max_verification_concurrency,
                         "root_branch_count": len(root_branches),
                         "max_branch_depth": self.max_branch_depth,
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
@@ -311,6 +333,25 @@ class CollectionAgent:
             source_urls=collection_task.get("target_urls", []),
             verbose=verbose,
         )
+
+    async def _run_collection_task_limited(
+        self,
+        collection_task: EvidenceCollectionTask,
+        verbose: bool,
+        semaphore: asyncio.Semaphore,
+    ) -> EvidenceCollectionResult:
+        async with semaphore:
+            return await self._run_collection_task(collection_task, verbose=verbose)
+
+    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
 
     def _research_mode_for_task(
         self,

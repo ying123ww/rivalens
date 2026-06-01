@@ -36,6 +36,8 @@ class CustomLogsHandler:
         self.logs = []
         self.websocket = websocket
         self.websocket_closed = False
+        self.log_batch_size = self._env_int("RIVALENS_WS_LOG_BATCH_SIZE", 20, minimum=1)
+        self.pending_log_batch: list[Dict[str, Any]] = []
         sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
         self.log_file = os.path.join("outputs", f"{sanitized_filename}.json")
         self.timestamp = datetime.now().isoformat()
@@ -61,6 +63,15 @@ class CustomLogsHandler:
         if not self.websocket or self.websocket_closed:
             return
 
+        if data.get("type") == "logs":
+            self.pending_log_batch.append(data)
+            if len(self.pending_log_batch) >= self.log_batch_size:
+                await self.flush_log_batch()
+            return
+
+        if data.get("type") != "report":
+            await self.flush_log_batch()
+
         try:
             await self.websocket.send_json(data)
         except Exception as exc:
@@ -74,6 +85,66 @@ class CustomLogsHandler:
                 exc,
                 exc_info=not _is_websocket_disconnect_error(exc),
             )
+
+    async def flush_log_batch(self) -> None:
+        if not self.pending_log_batch or not self.websocket or self.websocket_closed:
+            self.pending_log_batch = []
+            return
+
+        batch = self.pending_log_batch
+        self.pending_log_batch = []
+        summary = self._log_batch_summary(batch)
+        try:
+            await self.websocket.send_json(summary)
+        except Exception as exc:
+            self.websocket_closed = True
+            self.websocket = None
+            self._record_websocket_disconnect(exc, summary)
+            log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+            log_method(
+                "WebSocket log batch send failed; server-side logging will continue: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=not _is_websocket_disconnect_error(exc),
+            )
+
+    def _log_batch_summary(self, batch: list[Dict[str, Any]]) -> Dict[str, Any]:
+        content_counts: dict[str, int] = {}
+        for item in batch:
+            content = str(item.get("content", "log"))
+            content_counts[content] = content_counts.get(content, 0) + 1
+
+        latest = [
+            {
+                "content": item.get("content"),
+                "output": self._truncate(str(item.get("output", "")), 180),
+            }
+            for item in batch[-5:]
+        ]
+        return {
+            "type": "logs",
+            "content": "log_batch",
+            "output": f"{len(batch)} log events batched on the server.",
+            "metadata": {
+                "batched": True,
+                "count": len(batch),
+                "content_counts": content_counts,
+                "latest": latest,
+            },
+        }
+
+    def _truncate(self, value: str, limit: int) -> str:
+        return value if len(value) <= limit else value[: limit - 3] + "..."
+
+    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
 
     def _write_log_data(self, data: Dict[str, Any]) -> None:
         # Read current log file
