@@ -839,20 +839,10 @@ class CollectionAgent:
         explicit_criteria = normalize_success_criteria(
             dimension.get("success_criteria", []),
         )
-        base_criterion = {
-            "id": "branch_relevant_source",
-            "description": (
-                f"Find source-backed public evidence about "
-                f"{competitor or 'the requested competitor'} for {dimension['name']}."
-            ),
-            "target_source_types": dimension.get("source_hints", []),
-            "required_source_types": [],
-            "kind": "branch_relevance",
-        }
         if explicit_criteria:
-            return [base_criterion, *explicit_criteria]
+            return explicit_criteria
 
-        criteria = [base_criterion]
+        criteria = []
         for index, question in enumerate(dimension.get("guiding_questions", []), start=1):
             criteria.append(
                 {
@@ -869,21 +859,7 @@ class CollectionAgent:
         self,
         task_spec: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        return normalize_success_criteria(
-            task_spec.get("success_criteria")
-            or [
-                {
-                    "id": "claim_verification",
-                    "description": task_spec.get(
-                        "objective",
-                        "Verify the target claim with direct public evidence.",
-                    ),
-                    "target_source_types": task_spec.get("target_source_types", []),
-                    "required_source_types": task_spec.get("target_source_types", []),
-                    "kind": "claim_verification",
-                }
-            ]
-        )
+        return normalize_success_criteria(task_spec.get("success_criteria", []))
 
     def _success_criteria_line(self, success_criteria: list[dict[str, Any]]) -> str:
         if not success_criteria:

@@ -186,50 +186,20 @@ async def generate_sub_queries(
         context=context,
     )
 
-    try:
-        response = await create_chat_completion(
-            model=cfg.strategic_llm_model,
-            messages=[{"role": "user", "content": gen_queries_prompt}],
-            llm_provider=cfg.strategic_llm_provider,
-            max_tokens=None,
-            llm_kwargs=cfg.llm_kwargs,
-            reasoning_effort=ReasoningEfforts.Medium.value,
-            cost_callback=cost_callback,
-            **kwargs
-        )
-    except Exception as e:
-        logger.warning(f"Error with strategic LLM: {e}. Retrying with max_tokens={cfg.strategic_token_limit}.")
-        try:
-            response = await create_chat_completion(
-                model=cfg.strategic_llm_model,
-                messages=[{"role": "user", "content": gen_queries_prompt}],
-                max_tokens=cfg.strategic_token_limit,
-                llm_provider=cfg.strategic_llm_provider,
-                llm_kwargs=cfg.llm_kwargs,
-                cost_callback=cost_callback,
-                **kwargs
-            )
-            logger.warning(f"Retrying with max_tokens={cfg.strategic_token_limit} successful.")
-        except Exception as e:
-            logger.warning(f"Retrying with max_tokens={cfg.strategic_token_limit} failed.")
-            logger.warning(f"Error with strategic LLM: {e}. Falling back to smart LLM.")
-            response = await create_chat_completion(
-                model=cfg.smart_llm_model,
-                messages=[{"role": "user", "content": gen_queries_prompt}],
-                temperature=cfg.temperature,
-                max_tokens=cfg.smart_token_limit,
-                llm_provider=cfg.smart_llm_provider,
-                llm_kwargs=cfg.llm_kwargs,
-                cost_callback=cost_callback,
-                **kwargs
-            )
+    response = await create_chat_completion(
+        model=cfg.strategic_llm_model,
+        messages=[{"role": "user", "content": gen_queries_prompt}],
+        llm_provider=cfg.strategic_llm_provider,
+        max_tokens=None,
+        llm_kwargs=cfg.llm_kwargs,
+        reasoning_effort=ReasoningEfforts.Medium.value,
+        cost_callback=cost_callback,
+        **kwargs
+    )
 
     sub_queries = _normalize_sub_queries_response(response)
     if not sub_queries:
-        logger.warning(
-            "Sub-query LLM returned no parseable queries. Falling back to original query.",
-        )
-        return [query]
+        raise ValueError("Sub-query LLM returned no parseable queries.")
     return sub_queries
 
 async def plan_research_outline(

@@ -49,11 +49,9 @@ def normalize_success_criteria(
     criteria: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     normalized = []
-    for index, criterion in enumerate(criteria or [], start=1):
-        description = str(
-            criterion.get("description") or criterion.get("objective") or "",
-        ).strip()
-        criterion_id = str(criterion.get("id") or f"criterion_{index}").strip()
+    for criterion in criteria or []:
+        description = str(criterion.get("description", "")).strip()
+        criterion_id = str(criterion.get("id", "")).strip()
         if not criterion_id or not description:
             continue
         normalized.append(
@@ -77,22 +75,13 @@ def normalize_success_criteria(
 def evidence_matches_success_criterion(
     evidence: dict[str, Any],
     criterion: dict[str, Any],
-    branch: dict[str, Any] | None = None,
+    branch: dict[str, Any],
 ) -> bool:
     required_source_types = set(_string_list(criterion.get("required_source_types", [])))
-    target_source_types = set(_string_list(criterion.get("target_source_types", [])))
     source_type = str(evidence.get("source_type") or "")
     if required_source_types and source_type in required_source_types:
         return True
-    if (
-        criterion.get("kind") == "branch_relevance"
-        and not required_source_types
-        and target_source_types
-        and source_type in target_source_types
-    ):
-        return True
 
-    branch = branch or {}
     meaningful_terms = _criterion_terms(criterion, branch)
     if not meaningful_terms:
         return False
@@ -104,7 +93,7 @@ def evidence_matches_success_criterion(
 def matched_success_criterion_ids(
     evidence: dict[str, Any],
     criteria: list[dict[str, Any]],
-    branch: dict[str, Any] | None = None,
+    branch: dict[str, Any],
 ) -> list[str]:
     return [
         criterion["id"]
@@ -123,14 +112,6 @@ def _criterion_terms(
         criterion.get("objective", ""),
         " ".join(_string_list(criterion.get("keywords", []))),
     ]
-    if criterion.get("kind") == "branch_relevance":
-        parts.extend(
-            [
-                branch.get("dimension_id", ""),
-                branch.get("dimension_name", ""),
-                branch.get("topic", ""),
-            ]
-        )
     text = " ".join(str(value or "") for value in parts)
     return {
         term

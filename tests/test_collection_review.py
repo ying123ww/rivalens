@@ -564,7 +564,7 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(collection_task["search_queries"], branch["search_queries"])
         self.assertEqual(
             [criterion["id"] for criterion in collection_task["success_criteria"]],
-            ["branch_relevant_source", "guiding_question_1", "guiding_question_2"],
+            ["guiding_question_1", "guiding_question_2"],
         )
         self.assertTrue(
             any(
@@ -709,7 +709,21 @@ class CollectionReviewTest(unittest.TestCase):
         class FakeEvidenceCollector:
             async def collect(self, collection_task, mode="standard_evidence", verbose=True, source_urls=None):
                 gap = collection_task.get("generated_from_gap", "")
-                if gap == "missing_guiding_question":
+                if collection_task.get("dimension_id") == "competitor_profile":
+                    source = {
+                        "competitor": "Acme",
+                        "dimension_id": "competitor_profile",
+                        "title": "Acme official site",
+                        "url": "https://acme.example",
+                        "source_type": "official_site",
+                        "excerpt": (
+                            "Acme is the official website and product brand identity "
+                            "for the Acme platform, categorized and positioned as a "
+                            "productivity SaaS platform."
+                        ),
+                        "confidence": 0.9,
+                    }
+                elif gap == "missing_guiding_question":
                     source = {
                         "competitor": "Acme",
                         "dimension_id": "pricing_business_model",
@@ -754,7 +768,10 @@ class CollectionReviewTest(unittest.TestCase):
                         "name": "定价与商业模式",
                         "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
                         "source_hints": ["pricing_page", "official_site"],
-                        "guiding_questions": ["What packaging details are available?"],
+                        "guiding_questions": [
+                            "What monetization evidence is public?",
+                            "What packaging details are available?",
+                        ],
                     }
                 ],
             },
@@ -773,28 +790,33 @@ class CollectionReviewTest(unittest.TestCase):
             task.get("generated_from_gap", "")
             for task in result["research_tasks"]
         ]
+        pricing_root_assessment = next(
+            assessment
+            for assessment in result["coverage_assessments"]
+            if assessment["branch_id"] == "collect_acme_pricing_business_model"
+        )
         self.assertIn("missing_guiding_question", generated_gaps)
         self.assertGreaterEqual(len(result["coverage_assessments"]), 2)
         self.assertEqual(
-            result["coverage_assessments"][0]["next_action"],
+            pricing_root_assessment["next_action"],
             "collect_more",
         )
         self.assertEqual(
-            result["coverage_assessments"][0]["decision"]["action"],
+            pricing_root_assessment["decision"]["action"],
             "source_discovery",
         )
         self.assertEqual(
-            result["coverage_assessments"][0]["decision"]["subtype"],
+            pricing_root_assessment["decision"]["subtype"],
             "coverage_gap_search",
         )
         self.assertEqual(
-            result["coverage_assessments"][0]["stage_contract"]["search_stage"],
+            pricing_root_assessment["stage_contract"]["search_stage"],
             "focused",
         )
         self.assertTrue(
-            result["coverage_assessments"][0]["stage_contract"]["produces_evidence"],
+            pricing_root_assessment["stage_contract"]["produces_evidence"],
         )
-        self.assertTrue(result["coverage_assessments"][0]["selected_follow_up_specs"])
+        self.assertTrue(pricing_root_assessment["selected_follow_up_specs"])
         self.assertTrue(
             any(
                 task.get("generated_from_gap") == "missing_guiding_question"
@@ -1210,10 +1232,10 @@ class CollectionReviewTest(unittest.TestCase):
             **pricing_branch(),
             "success_criteria": [
                 {
-                    "id": "branch_relevant_source",
+                    "id": "pricing_details",
                     "description": "Find source-backed pricing evidence for Acme.",
                     "target_source_types": ["pricing_page"],
-                    "kind": "branch_relevance",
+                    "kind": "success_criterion",
                 }
             ],
         }
@@ -1346,13 +1368,13 @@ class CollectionReviewTest(unittest.TestCase):
             **pricing_branch(),
             "success_criteria": [
                 {
-                    "id": "branch_relevant_source",
-                    "description": "Find source-backed pricing evidence for Acme.",
+                    "id": "public_pricing",
+                    "description": "What public starter pricing and billing terms are available?",
                     "target_source_types": ["pricing_page"],
-                    "kind": "branch_relevance",
+                    "kind": "success_criterion",
                 },
                 {
-                    "id": "guiding_question_1",
+                    "id": "enterprise_packaging",
                     "description": "What enterprise packaging details are public?",
                     "target_source_types": ["pricing_page"],
                     "kind": "guiding_question",
@@ -1387,11 +1409,11 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(assessment["accepted_evidence_ids"], ["ev_1"])
         self.assertEqual(
             [criterion["id"] for criterion in assessment["satisfied_criteria"]],
-            ["branch_relevant_source"],
+            ["public_pricing"],
         )
         self.assertEqual(
             [criterion["id"] for criterion in assessment["missing_criteria"]],
-            ["guiding_question_1"],
+            ["enterprise_packaging"],
         )
         self.assertEqual(
             assessment["selected_follow_up_specs"][0]["generated_from_gap"],
@@ -1399,7 +1421,7 @@ class CollectionReviewTest(unittest.TestCase):
         )
         self.assertEqual(
             assessment["selected_follow_up_specs"][0]["success_criteria"][0]["id"],
-            "guiding_question_1",
+            "enterprise_packaging",
         )
 
     def test_coverage_review_uses_dimension_policy_guiding_questions(self):
