@@ -142,7 +142,7 @@ class UniFuncsDeepSearchTest(unittest.TestCase):
     def test_standard_research_passes_headers_to_non_mcp_retrievers(self):
         researcher_source = (
             REPO_ROOT / "rivalens" / "research" / "skills" / "researcher.py"
-        ).read_text()
+        ).read_text(encoding="utf-8")
 
         self.assertIn("headers=self.researcher.headers", researcher_source)
         self.assertIn("retriever_results", researcher_source)

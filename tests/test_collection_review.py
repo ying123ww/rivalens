@@ -30,6 +30,10 @@ def pricing_branch():
     }
 
 
+def _word_count(query: str) -> int:
+    return len(query.split())
+
+
 class CollectionReviewTest(unittest.TestCase):
     def test_collection_budget_reads_env_with_safe_defaults(self):
         with patch.dict(
@@ -85,12 +89,16 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(branches[0]["dimension_name"], "竞品基础信息")
         self.assertEqual(branches[1]["dimension_id"], "direction_strategic_positioning")
         self.assertEqual(branches[1]["dimension_name"], "战略定位")
-        self.assertIn("品牌定位和市场细分", branches[1]["query"])
-        self.assertNotIn("Expected source types", branches[1]["query"])
-        self.assertIn(
-            "Preferred evidence sources, in priority order: official_site, news",
-            branches[1]["query"],
+        self.assertLessEqual(_word_count(branches[1]["query"]), 15)
+        self.assertEqual(branches[1]["query"], branches[1]["search_queries"][0])
+        self.assertGreaterEqual(len(branches[1]["search_queries"]), 2)
+        self.assertTrue(
+            any("official" in query.lower() for query in branches[1]["search_queries"])
         )
+        self.assertNotIn("Research focus:", branches[1]["query"])
+        self.assertNotIn("Guiding questions:", branches[1]["query"])
+        self.assertNotIn("Preferred evidence sources", branches[1]["query"])
+        self.assertIn("Preferred evidence sources", branches[1]["task_context"])
         self.assertEqual(branches[1]["source_hints"], ["official_site", "news"])
         self.assertEqual(branches[1]["search_stage"], "focused")
 
@@ -123,7 +131,151 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(profile_branch["dimension_type"], "profile")
         self.assertIn("竞品基础信息", profile_branch["dimension_name"])
         self.assertIn("official_site", profile_branch["source_hints"])
-        self.assertIn("report competitor information card", profile_branch["query"])
+        self.assertLessEqual(_word_count(profile_branch["query"]), 15)
+        self.assertNotIn("report competitor information card", profile_branch["query"])
+        self.assertIn("report competitor information card", profile_branch["task_context"])
+
+    def test_collection_task_uses_short_query_and_keeps_context_separate(self):
+        branches = CollectionAgent()._build_root_branches(
+            query="Compare AcmeAI and BetaAI for pricing, packaging, and security posture",
+            competitors=[{"name": "AcmeAI"}],
+            active_schema={
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "pricing_packaging",
+                        "name": "Pricing and packaging",
+                        "description": (
+                            "Compare public plans, fees, packaging, "
+                            "and enterprise tiers."
+                        ),
+                        "source_hints": ["official_site", "pricing_page", "review"],
+                        "guiding_questions": [
+                            "What plans are public?",
+                            "What fees or tiers are visible?",
+                        ],
+                    }
+                ],
+            },
+        )
+
+        branch = next(
+            branch
+            for branch in branches
+            if branch["dimension_id"] == "pricing_packaging"
+        )
+        collection_task = CollectionAgent()._branch_to_collection_task(branch)
+
+        self.assertEqual(collection_task["query"], branch["search_queries"][0])
+        self.assertLessEqual(_word_count(collection_task["query"]), 15)
+        self.assertIn("AcmeAI", collection_task["query"])
+        self.assertNotIn("Compare AcmeAI and BetaAI", collection_task["query"])
+        self.assertNotIn("Guiding questions:", collection_task["query"])
+        self.assertIn("Compare AcmeAI and BetaAI", collection_task["task_context"])
+        self.assertEqual(collection_task["search_queries"], branch["search_queries"])
+        self.assertTrue(
+            any(
+                "pricing" in query.lower() or "plans" in query.lower()
+                for query in collection_task["search_queries"]
+            )
+        )
+
+    def test_short_queries_are_generic_across_competitor_names(self):
+        forbidden_demo_aliases = ["Feishu", "Lark", "DingTalk", "飞书", "钉钉"]
+        for competitor in ["AcmeAI", "某通用协作工具", "美团"]:
+            with self.subTest(competitor=competitor):
+                branches = CollectionAgent()._build_root_branches(
+                    query=f"分析 {competitor} 的定价和商业模式",
+                    competitors=[{"name": competitor}],
+                    active_schema={
+                        "selected_industry": {"name": "通用行业"},
+                        "industry_extensions": [
+                            {
+                                "id": "pricing_business_model",
+                                "name": "定价和商业模式",
+                                "description": (
+                                    "Compare public pricing, packaging, "
+                                    "fees, and business model."
+                                ),
+                                "source_hints": ["official_site", "pricing_page"],
+                            }
+                        ],
+                    },
+                )
+                branch = next(
+                    branch
+                    for branch in branches
+                    if branch["dimension_id"] == "pricing_business_model"
+                )
+                joined_queries = " ".join(branch["search_queries"])
+
+                self.assertEqual(branch["query"], branch["search_queries"][0])
+                self.assertTrue(any("定价" in query for query in branch["search_queries"]))
+                self.assertTrue(
+                    any("pricing" in query.lower() for query in branch["search_queries"])
+                )
+                for query in branch["search_queries"]:
+                    self.assertLessEqual(_word_count(query), 15)
+                for alias in forbidden_demo_aliases:
+                    self.assertNotIn(alias, joined_queries)
+
+    def test_collection_run_does_not_append_file_rag_to_search_query(self):
+        class CapturingCollector:
+            def __init__(self):
+                self.tasks = []
+
+            async def collect(
+                self,
+                collection_task,
+                mode="standard_evidence",
+                verbose=True,
+                source_urls=None,
+            ):
+                self.tasks.append(dict(collection_task))
+                return {
+                    "task": dict(collection_task),
+                    "mode": str(mode),
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [],
+                    "costs": 0.0,
+                }
+
+        collector = CapturingCollector()
+        state = {
+            "task": {
+                "query": "Compare AcmeAI and BetaAI",
+                "verbose": False,
+            },
+            "competitors": [{"name": "AcmeAI"}],
+            "active_knowledge_schema": {
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [],
+            },
+            "file_context": {
+                "chunks": [
+                    {
+                        "source_name": "brief.md",
+                        "title": "Pricing",
+                        "text": "AcmeAI enterprise pricing and packaging details.",
+                    }
+                ]
+            },
+            "messages": [],
+        }
+
+        asyncio.run(
+            CollectionAgent(
+                evidence_collector=collector,
+                max_branch_depth=0,
+            ).run(state)
+        )
+
+        self.assertTrue(collector.tasks)
+        collection_task = collector.tasks[0]
+        self.assertNotIn("Local file RAG context", collection_task["query"])
+        self.assertIn("file_rag_context", collection_task)
+        self.assertIn("Local file RAG context", collection_task["file_rag_context"])
 
     def test_knowledge_structuring_enriches_competitor_profiles_from_profile_evidence(self):
         state = {

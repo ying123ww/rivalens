@@ -59,7 +59,7 @@ class ResearchConductor:
             self.researcher.websocket,
         )
 
-        search_results = await get_search_results(query, self.researcher.retrievers[0], query_domains, researcher=self.researcher)
+        search_results = await self._get_initial_search_results(query, query_domains)
         self.logger.info(f"Initial search results obtained: {len(search_results)} results")
 
         await stream_output(
@@ -85,6 +85,94 @@ class ResearchConductor:
         )
         self.logger.info(f"Research outline planned: {outline}")
         return outline
+
+    async def _get_initial_search_results(self, query, query_domains=None):
+        retrievers = list(self.researcher.retrievers or [])
+        non_mcp_retrievers = [
+            retriever
+            for retriever in retrievers
+            if not self._is_mcp_retriever(retriever)
+        ]
+        if not non_mcp_retrievers:
+            if not retrievers:
+                return []
+            results = await get_search_results(
+                query,
+                retrievers[0],
+                query_domains,
+                researcher=self.researcher,
+            )
+            return self._dedupe_initial_search_results(
+                results or [],
+                self._initial_search_result_limit(1),
+            )
+
+        per_retriever_limit = self._per_retriever_initial_search_limit()
+        total_limit = self._initial_search_result_limit(len(non_mcp_retrievers))
+        merged_results = []
+
+        for retriever in non_mcp_retrievers:
+            try:
+                results = await get_search_results(
+                    query,
+                    retriever,
+                    query_domains,
+                    researcher=self.researcher,
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "Initial planning search failed for %s: %s",
+                    retriever.__name__,
+                    exc,
+                )
+                continue
+
+            merged_results.extend((results or [])[:per_retriever_limit])
+
+        return self._dedupe_initial_search_results(merged_results, total_limit)
+
+    def _per_retriever_initial_search_limit(self):
+        configured_limit = getattr(
+            self.researcher.cfg,
+            "max_search_results_per_query",
+            5,
+        )
+        return max(1, int(configured_limit or 5))
+
+    def _initial_search_result_limit(self, retriever_count):
+        per_retriever_limit = self._per_retriever_initial_search_limit()
+        return per_retriever_limit * max(1, min(2, retriever_count))
+
+    def _dedupe_initial_search_results(self, search_results, total_limit):
+        deduped = []
+        seen = set()
+        for result in search_results:
+            key = self._initial_search_result_key(result)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(result)
+            if len(deduped) >= total_limit:
+                break
+        return deduped
+
+    def _initial_search_result_key(self, result):
+        if not isinstance(result, dict):
+            return repr(result)
+        url = result.get("href") or result.get("url") or result.get("link")
+        if url:
+            return f"url:{url}"
+        title = result.get("title") or result.get("name") or ""
+        text = (
+            result.get("body")
+            or result.get("content")
+            or result.get("snippet")
+            or ""
+        )
+        return f"text:{title}|{text[:200]}"
+
+    def _is_mcp_retriever(self, retriever):
+        return "mcpretriever" in retriever.__name__.lower()
 
     async def conduct_research(self):
         """Runs the Rivalens to conduct research"""
