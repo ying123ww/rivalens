@@ -134,6 +134,9 @@ class EvidenceCollectionTask(TypedDict, total=False):
     parent_dimension_id: str
     target_urls: list[str]
     query: str
+    search_queries: list[str]
+    task_context: str
+    file_rag_context: str
 
 
 class EvidenceCollectionResult(TypedDict, total=False):
@@ -201,6 +204,8 @@ class ResearchBranch(TypedDict, total=False):
     dimension_type: str
     topic: str
     query: str
+    search_queries: list[str]
+    task_context: str
     target_urls: list[str]
     search_stage: str
     generated_from_gap: str
@@ -249,6 +254,8 @@ class ResearchTask(TypedDict, total=False):
     search_stage: SearchStage
     objective: str
     query: str
+    search_queries: list[str]
+    task_context: str
     target_urls: list[str]
     source_hints: list[str]
     generated_from_gap: str

@@ -6,6 +6,7 @@ from typing import Any
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.agents.search_query_builder import SearchQueryBuilder
 from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
 from rivalens.schema import (
@@ -25,6 +26,7 @@ class CollectionAgent:
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
         evidence_reviewer: EvidenceQualityReviewer | None = None,
         coverage_reviewer: CoverageReviewer | None = None,
+        search_query_builder: SearchQueryBuilder | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
         max_root_branch_hard_limit: int = 20,
@@ -32,6 +34,7 @@ class CollectionAgent:
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
         self.coverage_reviewer = coverage_reviewer or CoverageReviewer()
+        self.search_query_builder = search_query_builder or SearchQueryBuilder()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
@@ -101,10 +104,12 @@ class CollectionAgent:
                 for branch, research_task in zip(active_frontier, planned_tasks, strict=True)
             ]
             for collection_task in collection_tasks:
-                collection_task["query"] = self._with_file_rag(
+                file_rag_context = self._file_rag_context(
                     collection_task["query"],
                     file_context,
                 )
+                if file_rag_context:
+                    collection_task["file_rag_context"] = file_rag_context
 
             results = await asyncio.gather(
                 *[
@@ -326,6 +331,12 @@ class CollectionAgent:
         for competitor in normalized_competitors:
             for dimension in [self._competitor_profile_dimension(), *dimensions]:
                 branch_id = self._task_id(competitor, dimension["id"])
+                query_plan = self.search_query_builder.build(
+                    original_query=query,
+                    competitor=competitor,
+                    dimension=dimension,
+                    active_schema=active_schema,
+                )
                 branches.append(
                     {
                         "id": branch_id,
@@ -339,7 +350,9 @@ class CollectionAgent:
                         "dimension_type": dimension["type"],
                         "parent_dimension_id": dimension.get("parent_dimension_id", ""),
                         "topic": dimension["name"],
-                        "query": self._schema_aware_query(
+                        "query": query_plan.primary_query,
+                        "search_queries": query_plan.search_queries,
+                        "task_context": self._schema_aware_task_context(
                             query,
                             competitor,
                             dimension,
@@ -519,6 +532,8 @@ class CollectionAgent:
             "generated_from_gap": generated_from_gap,
             "decision_action": branch.get("decision_action", ""),
             "decision_subtype": branch.get("decision_subtype", ""),
+            "search_queries": branch.get("search_queries", [branch.get("query", "")]),
+            "task_context": branch.get("task_context", ""),
             "reason": reason,
             "drift_risk": "low" if not generated_from_gap else "medium",
         }
@@ -549,6 +564,8 @@ class CollectionAgent:
             "dimension_type": branch.get("dimension_type", ""),
             "parent_dimension_id": branch.get("parent_dimension_id", ""),
             "query": branch.get("query", ""),
+            "search_queries": branch.get("search_queries", [branch.get("query", "")]),
+            "task_context": branch.get("task_context", ""),
             "target_urls": branch.get("target_urls", []),
         }
 
@@ -656,7 +673,7 @@ class CollectionAgent:
             deduped[dimension["id"]] = dimension
         return list(deduped.values())
 
-    def _schema_aware_query(
+    def _schema_aware_task_context(
         self,
         query: str,
         competitor: str,
@@ -725,15 +742,12 @@ class CollectionAgent:
             key=lambda source_type: SOURCE_TYPE_PRIORITY.get(source_type, 99),
         )
 
-    def _with_file_rag(
+    def _file_rag_context(
         self,
         query: str,
         file_context: dict[str, Any],
     ) -> str:
-        rag_context = format_rag_context(file_context, query, limit=4)
-        if not rag_context:
-            return query
-        return "\n".join([query, "", rag_context])
+        return format_rag_context(file_context, query, limit=4)
 
     def _task_id(self, competitor: str, dimension_id: str) -> str:
         competitor_slug = self._slug(competitor or "query")
