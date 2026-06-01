@@ -237,7 +237,7 @@ async def handle_start_command(websocket, data: str, manager, on_log_handler=Non
 
     sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
 
-    report = await manager.start_streaming(
+    report_payload = await manager.start_streaming(
         task,
         report_type,
         report_source,
@@ -253,7 +253,11 @@ async def handle_start_command(websocket, data: str, manager, on_log_handler=Non
         max_search_results,
         industry_direction_plan,
     )
-    report = str(report)
+    report = (
+        str(report_payload.get("report", ""))
+        if isinstance(report_payload, dict)
+        else str(report_payload)
+    )
     file_paths = await generate_report_files(
         report,
         sanitized_filename,
@@ -262,6 +266,8 @@ async def handle_start_command(websocket, data: str, manager, on_log_handler=Non
     )
     # Add JSON log path to file_paths
     file_paths["json"] = os.path.relpath(logs_handler.log_file)
+    if isinstance(report_payload, dict):
+        file_paths["rivalens_response"] = report_payload
     await send_file_paths(logs_handler, file_paths)
 
 

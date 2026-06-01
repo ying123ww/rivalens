@@ -120,6 +120,7 @@ async def run_competitive_analysis_task(
     active workflow.
     """
     task = {
+        "run_id": kwargs.get("run_id"),
         "query": query,
         "competitors": kwargs.get("competitors", []),
         "files": kwargs.get("files", kwargs.get("file_paths", [])),
