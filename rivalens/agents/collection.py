@@ -79,9 +79,9 @@ class CollectionAgent:
                 competitors,
                 active_schema,
             )
-            root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
-            if root_branch_limit_exceeded:
-                root_branches = root_branches[: self.max_root_branch_hard_limit]
+            root_branches, root_branch_limit_exceeded = (
+                self._limit_root_branches_per_competitor(root_branches)
+            )
         frontier = root_branches
         research_branches.extend(root_branches)
         new_briefs = self._build_research_briefs(root_branches)
@@ -277,7 +277,7 @@ class CollectionAgent:
                         "max_branch_depth": self.max_branch_depth,
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
                         "max_expansion_branches": self.max_expansion_branches,
-                        "max_root_branch_hard_limit": self.max_root_branch_hard_limit,
+                        "max_root_branches_per_competitor": self.max_root_branch_hard_limit,
                         "dimensions": sorted(
                             {branch["dimension_id"] for branch in research_branches}
                         ),
@@ -371,6 +371,25 @@ class CollectionAgent:
                 )
 
         return branches
+
+    def _limit_root_branches_per_competitor(
+        self,
+        root_branches: list[ResearchBranch],
+    ) -> tuple[list[ResearchBranch], bool]:
+        branch_count_by_competitor: dict[str, int] = {}
+        limited_branches: list[ResearchBranch] = []
+        limit_exceeded = False
+
+        for branch in root_branches:
+            competitor = branch.get("competitor", "")
+            branch_count = branch_count_by_competitor.get(competitor, 0)
+            if branch_count >= self.max_root_branch_hard_limit:
+                limit_exceeded = True
+                continue
+            branch_count_by_competitor[competitor] = branch_count + 1
+            limited_branches.append(branch)
+
+        return limited_branches, limit_exceeded
 
     def _competitor_profile_dimension(self) -> dict[str, Any]:
         return {

@@ -68,7 +68,7 @@ def build_competitive_analysis_graph(
         max_root_branch_hard_limit=_int_budget(
             max_root_branch_hard_limit,
             "RIVALENS_MAX_ROOT_BRANCHES",
-            80,
+            20,
             minimum=1,
         ),
     )

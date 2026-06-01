@@ -201,8 +201,9 @@ Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion
 budget applies only to child branches created from `CoverageReviewer`
 follow-up task specs, with
-`max_root_branch_hard_limit` acting as a defensive cap for unusually large
-schemas and `max_expansion_branches` controlling follow-up breadth.
+`max_root_branch_hard_limit` acting as a per-competitor defensive cap for
+unusually large schemas and `max_expansion_branches` controlling follow-up
+breadth.
 
 This keeps provider calls, source normalization, costs, and evidence metadata in
 one place while preserving the main Rivalens chain:
@@ -246,15 +247,15 @@ branches before calling the underlying search retrievers. Use these environment
 variables to reduce or expand that branch budget:
 
 ```env
-RIVALENS_MAX_ROOT_BRANCHES=40
+RIVALENS_MAX_ROOT_BRANCHES=20
 RIVALENS_MAX_BRANCH_DEPTH=0
 RIVALENS_MAX_EXPANSION_BRANCHES=0
 RIVALENS_ENABLE_CLAIM_VERIFICATION=false
 ```
 
-- `RIVALENS_MAX_ROOT_BRANCHES` caps the initial competitor x analysis-dimension
-  collection branches. Budget for `(competitor count) x (selected directions + 1
-  competitor_profile task)`.
+- `RIVALENS_MAX_ROOT_BRANCHES` caps the initial analysis-dimension collection
+  branches per competitor. Budget for `selected directions + 1
+  competitor_profile task` for each competitor.
 - `RIVALENS_MAX_BRANCH_DEPTH=0` disables follow-up collection branches.
 - `RIVALENS_MAX_EXPANSION_BRANCHES` caps follow-up branches created from
   coverage gaps.

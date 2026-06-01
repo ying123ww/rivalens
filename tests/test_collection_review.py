@@ -53,7 +53,7 @@ class CollectionReviewTest(unittest.TestCase):
                 3,
             )
             self.assertEqual(
-                _int_budget(None, "RIVALENS_MAX_ROOT_BRANCHES", 80, minimum=1),
+                _int_budget(None, "RIVALENS_MAX_ROOT_BRANCHES", 20, minimum=1),
                 2,
             )
 
@@ -101,6 +101,55 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Preferred evidence sources", branches[1]["task_context"])
         self.assertEqual(branches[1]["source_hints"], ["official_site", "news"])
         self.assertEqual(branches[1]["search_stage"], "focused")
+
+    def test_collection_root_branch_limit_applies_per_competitor(self):
+        class FakeCollector:
+            async def collect(self, collection_task, mode, verbose, source_urls=None):
+                return {
+                    "task": collection_task,
+                    "mode": mode.value,
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [],
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme and Beta",
+                "verbose": False,
+            },
+            "competitors": [{"name": "Acme"}, {"name": "Beta"}],
+            "active_knowledge_schema": {
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {"id": "positioning", "name": "Positioning"},
+                    {"id": "pricing", "name": "Pricing"},
+                    {"id": "security", "name": "Security"},
+                ],
+            },
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=FakeCollector(),
+                max_branch_depth=0,
+                max_root_branch_hard_limit=2,
+            ).run(state)
+        )
+
+        root_branches = result["research_branches"]
+        self.assertEqual(len(root_branches), 4)
+        self.assertEqual(
+            [branch["competitor"] for branch in root_branches],
+            ["Acme", "Acme", "Beta", "Beta"],
+        )
+        self.assertEqual(
+            result["agent_events"][-1]["input"]["max_root_branches_per_competitor"],
+            2,
+        )
+        self.assertTrue(result["agent_events"][-1]["input"]["root_branch_limit_exceeded"])
 
     def test_collection_does_not_fallback_to_core_fields(self):
         branches = CollectionAgent()._build_root_branches(
