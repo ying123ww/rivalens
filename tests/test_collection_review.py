@@ -487,6 +487,55 @@ class CollectionReviewTest(unittest.TestCase):
         )
         self.assertTrue(result["agent_events"][-1]["input"]["root_branch_limit_exceeded"])
 
+    def test_collection_follow_up_slots_are_distributed_across_competitors(self):
+        class EmptyCollector:
+            async def collect(self, collection_task, mode, verbose, source_urls=None):
+                return {
+                    "task": collection_task,
+                    "mode": mode.value,
+                    "query": collection_task["query"],
+                    "context": "",
+                    "evidence_items": [],
+                    "costs": 0.0,
+                }
+
+        state = {
+            "task": {
+                "query": "Compare Acme and Beta pricing",
+                "verbose": False,
+            },
+            "competitors": [{"name": "Acme"}, {"name": "Beta"}],
+            "active_knowledge_schema": {
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "pricing_business_model",
+                        "name": "Pricing",
+                        "description": "Pricing and packaging",
+                        "source_hints": ["pricing_page", "official_site"],
+                        "guiding_questions": ["What pricing evidence is public?"],
+                    }
+                ],
+            },
+            "messages": [],
+        }
+
+        result = asyncio.run(
+            CollectionAgent(
+                evidence_collector=EmptyCollector(),
+                max_branch_depth=1,
+                max_expansion_branches=2,
+            ).run(state)
+        )
+
+        child_competitors = [
+            branch["competitor"]
+            for branch in result["research_branches"]
+            if branch.get("depth") == 1
+        ]
+        self.assertEqual(len(child_competitors), 2)
+        self.assertEqual(set(child_competitors), {"Acme", "Beta"})
+
     def test_collection_run_limits_concurrent_collection_tasks(self):
         class CountingCollector:
             def __init__(self):
@@ -1349,6 +1398,42 @@ class CollectionReviewTest(unittest.TestCase):
             {finding["code"] for finding in review["findings"]},
         )
 
+    def test_evidence_review_matches_chinese_criteria_to_english_dimension_evidence(self):
+        branch = {
+            **pricing_branch(),
+            "dimension_name": "定价与商业模式",
+            "success_criteria": [
+                {
+                    "id": "pricing_details",
+                    "description": "价格、套餐和计费单位是否有公开信息？",
+                    "target_source_types": ["pricing_page"],
+                    "kind": "guiding_question",
+                }
+            ],
+        }
+
+        review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
+            branch,
+            [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "dimension_id": "pricing_model",
+                    "url": "https://acme.example/blog/pricing-update",
+                    "title": "Acme pricing plans",
+                    "excerpt": "Acme describes public pricing plans and billing options.",
+                    "source_type": "news",
+                }
+            ],
+        )
+
+        self.assertEqual(review["accepted_evidence_ids"], ["ev_1"])
+        self.assertEqual(review["rejected_evidence_ids"], [])
+        self.assertNotIn(
+            "no_success_criterion_match",
+            {finding["code"] for finding in review["findings"]},
+        )
+
     def test_coverage_review_refines_query_after_source_retry(self):
         branch = pricing_branch()
         evidence_review = EvidenceQualityReviewer(min_sources_per_branch=1).review(
@@ -1738,6 +1823,47 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Acme Pricing Model:", claim["claim"])
         self.assertIn("Acme publishes a starter pricing plan", claim["claim"])
         self.assertNotIn("Rejected scrape", claim["claim"])
+
+    def test_analysis_keeps_partial_accepted_evidence_from_expand_reviews(self):
+        state = {
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Beta",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "title": "Beta pricing note",
+                    "excerpt": "Beta describes public pricing but still needs official page verification.",
+                    "confidence": 0.7,
+                }
+            ],
+            "research_branches": [
+                {
+                    "id": "collect_beta_pricing_model",
+                    "competitor": "Beta",
+                    "dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                }
+            ],
+            "evidence_reviews": [
+                {
+                    "id": "ev_review_collect_beta_pricing_model",
+                    "branch_id": "collect_beta_pricing_model",
+                    "accepted": False,
+                    "score": 0.64,
+                    "accepted_evidence_ids": ["ev_1"],
+                    "rejected_evidence_ids": [],
+                    "required_action": "expand",
+                }
+            ],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+
+        self.assertEqual(len(result["analysis_claims"]), 1)
+        self.assertEqual(result["analysis_claims"][0]["competitors"], ["Beta"])
+        self.assertEqual(result["analysis_claims"][0]["evidence_ids"], ["ev_1"])
 
     def test_analysis_repairs_mojibake_and_skips_unreadable_claim_text(self):
         mojibake_excerpt = "飞书核心功能说明".encode("utf-8").decode("latin-1")

@@ -141,13 +141,11 @@ class CollectionAgent:
             )
 
             next_frontier: list[ResearchBranch] = []
-            for branch, research_task, collection_task, result in zip(
-                active_frontier,
-                planned_tasks,
-                collection_tasks,
-                results,
-                strict=True,
-            ):
+            for result_index in self._fair_branch_result_indexes(active_frontier):
+                branch = active_frontier[result_index]
+                research_task = planned_tasks[result_index]
+                collection_task = collection_tasks[result_index]
+                result = results[result_index]
                 if isinstance(result, Exception):
                     branch["status"] = "stopped"
                     failed_tasks.append(
@@ -365,6 +363,27 @@ class CollectionAgent:
         collection_task: EvidenceCollectionTask,
     ) -> ResearchMode:
         return ResearchMode.STANDARD_EVIDENCE
+
+    def _fair_branch_result_indexes(
+        self,
+        branches: list[ResearchBranch],
+    ) -> list[int]:
+        indexes_by_competitor: dict[str, list[int]] = {}
+        competitor_order: list[str] = []
+        for index, branch in enumerate(branches):
+            competitor = branch.get("competitor", "") or "unknown"
+            if competitor not in indexes_by_competitor:
+                indexes_by_competitor[competitor] = []
+                competitor_order.append(competitor)
+            indexes_by_competitor[competitor].append(index)
+
+        ordered_indexes: list[int] = []
+        while any(indexes_by_competitor.values()):
+            for competitor in competitor_order:
+                indexes = indexes_by_competitor[competitor]
+                if indexes:
+                    ordered_indexes.append(indexes.pop(0))
+        return ordered_indexes
 
     def _build_root_branches(
         self,

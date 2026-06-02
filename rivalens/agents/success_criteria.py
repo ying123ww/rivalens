@@ -44,6 +44,46 @@ _STOPWORDS = {
     "with",
 }
 
+_CJK_TERM_ALIASES = {
+    "价格": {"price", "pricing"},
+    "定价": {"price", "pricing"},
+    "套餐": {"plan", "plans", "package", "packaging"},
+    "计费": {"billing"},
+    "收费": {"fee", "pricing"},
+    "变现": {"monetization"},
+    "商业模式": {"business", "model", "monetization"},
+    "企业": {"enterprise"},
+    "免费": {"free"},
+    "功能": {"feature", "features"},
+    "能力": {"capability", "capabilities"},
+    "产品": {"product"},
+    "用户": {"user", "users"},
+    "客户": {"customer", "customers"},
+    "画像": {"persona", "segment"},
+    "评价": {"review", "reviews"},
+    "口碑": {"review", "sentiment"},
+    "案例": {"case", "customer"},
+    "安全": {"security"},
+    "合规": {"compliance"},
+    "隐私": {"privacy"},
+    "信任": {"trust"},
+    "风险": {"risk"},
+    "集成": {"integration", "integrations"},
+    "接口": {"api"},
+    "文档": {"docs", "documentation"},
+    "开发": {"developer", "api"},
+    "市场": {"market"},
+    "增长": {"growth"},
+    "融资": {"funding"},
+    "区域": {"region"},
+    "定位": {"positioning"},
+    "战略": {"strategy"},
+    "差异": {"differentiation"},
+    "优势": {"advantage"},
+    "流程": {"workflow", "process"},
+    "工作流": {"workflow"},
+}
+
 
 def normalize_success_criteria(
     criteria: list[dict[str, Any]] | None,
@@ -113,9 +153,25 @@ def _criterion_terms(
         " ".join(_string_list(criterion.get("keywords", []))),
     ]
     text = " ".join(str(value or "") for value in parts)
-    return {
+    criterion_terms = {
         term
         for term in _terms(text)
+        if term not in competitor_terms and term not in _STOPWORDS
+    }
+    if criterion_terms:
+        return criterion_terms
+
+    branch_text = " ".join(
+        str(value or "")
+        for value in [
+            branch.get("dimension_id", ""),
+            branch.get("dimension_name", ""),
+            branch.get("topic", ""),
+        ]
+    )
+    return {
+        term
+        for term in _terms(branch_text)
         if term not in competitor_terms and term not in _STOPWORDS
     }
 
@@ -139,6 +195,9 @@ def _terms(text: str) -> set[str]:
             segment[index : index + 2]
             for index in range(0, max(1, len(segment) - 1))
         )
+    for phrase, aliases in _CJK_TERM_ALIASES.items():
+        if phrase in normalized:
+            terms.update(aliases)
     return terms
 
 

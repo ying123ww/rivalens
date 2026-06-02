@@ -84,9 +84,6 @@ class AnalysisAgent:
         claims: list[AnalysisClaim] = []
 
         for review in state.get("evidence_reviews", []):
-            if not review.get("accepted") and review.get("required_action") != "accept":
-                continue
-
             accepted_ids = [
                 evidence_id
                 for evidence_id in review.get("accepted_evidence_ids", [])
