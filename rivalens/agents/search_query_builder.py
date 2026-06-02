@@ -14,9 +14,9 @@ class SearchQueryPlan:
 
 
 class SearchQueryBuilder:
-    """Build one short seed query and leave expansion to ResearchEngine."""
+    """Build short localized search seeds without competitor-specific aliases."""
 
-    max_queries = 1
+    max_queries = 5
     max_query_words = 15
 
     _dimension_rules: tuple[tuple[tuple[str, ...], tuple[list[str], list[str]]], ...] = (
@@ -81,10 +81,28 @@ class SearchQueryBuilder:
         active_schema: dict[str, Any],
     ) -> SearchQueryPlan:
         subject = self._subject(competitor, original_query)
-        seed_focus = self._dimension_seed(dimension)
-        search_queries = self._dedupe([self._query([subject, seed_focus])])[
-            : self.max_queries
-        ]
+        zh_terms, en_terms = self._dimension_terms(dimension)
+        zh_sources, en_sources = self._source_terms(dimension.get("source_hints", []))
+        zh_industry, en_industry = self._industry_terms(active_schema)
+
+        if self._prefers_chinese_queries(original_query, competitor):
+            candidates = [
+                self._query([subject, *zh_terms[:2], *zh_sources[:2]]),
+                self._query([subject, *zh_terms[:1], *zh_sources[:2]]),
+                self._query([subject, *zh_terms[:2]]),
+                self._query([subject, *zh_sources[:2]]),
+                self._query([subject, *zh_industry[:1], *zh_terms[:1]]),
+            ]
+        else:
+            candidates = [
+                self._query([subject, *zh_terms[:2], *zh_sources[:2]]),
+                self._query([subject, *en_terms[:2], *en_sources[:2]]),
+                self._query([subject, *zh_terms[:1], *zh_sources[:2]]),
+                self._query([subject, *en_terms[:1], *en_sources[:2]]),
+                self._query([subject, *zh_industry[:1], *zh_terms[:1]]),
+                self._query([subject, *en_industry[:1], *en_terms[:1]]),
+            ]
+        search_queries = self._dedupe(candidates)[: self.max_queries]
         if not search_queries:
             search_queries = [self._query([original_query])]
         return SearchQueryPlan(
@@ -114,13 +132,6 @@ class SearchQueryBuilder:
             en_terms = self._fallback_en_terms(dimension)
         return self._dedupe(zh_terms), self._dedupe(en_terms)
 
-    def _dimension_seed(self, dimension: dict[str, Any]) -> str:
-        for key in ("search_focus", "name", "search_intent", "description", "id"):
-            value = self._clean(dimension.get(key, ""))
-            if value:
-                return self._truncate_words(value)
-        return "public evidence"
-
     def _source_terms(self, source_hints: list[str]) -> tuple[list[str], list[str]]:
         zh_terms: list[str] = []
         en_terms: list[str] = []
@@ -134,8 +145,10 @@ class SearchQueryBuilder:
 
     def _industry_terms(self, active_schema: dict[str, Any]) -> tuple[list[str], list[str]]:
         industry = active_schema.get("selected_industry", {}).get("name", "")
-        words = self._words(industry, limit=2)
-        return words, words
+        words = self._words(industry, limit=4)
+        zh_words = [word for word in words if self._contains_cjk(word)]
+        en_words = [word for word in words if not self._contains_cjk(word)]
+        return zh_words[:2], (en_words or words)[:2]
 
     def _fallback_zh_terms(self, dimension: dict[str, Any]) -> list[str]:
         name = self._clean(str(dimension.get("name", "")))
@@ -155,7 +168,17 @@ class SearchQueryBuilder:
         return self._truncate_words(query)
 
     def _words(self, value: str, limit: int) -> list[str]:
-        return self._clean(value).split()[:limit]
+        return [
+            word
+            for word in self._clean(value).split()
+            if any(character.isalnum() for character in word)
+        ][:limit]
+
+    def _prefers_chinese_queries(self, original_query: str, competitor: str) -> bool:
+        return self._contains_cjk(original_query) or self._contains_cjk(competitor)
+
+    def _contains_cjk(self, value: Any) -> bool:
+        return bool(re.search(r"[\u3400-\u9fff]", str(value)))
 
     def _clean(self, value: Any) -> str:
         text = re.sub(r"\s+", " ", str(value)).strip()

@@ -439,13 +439,48 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(branches[1]["dimension_name"], "战略定位")
         self.assertLessEqual(_word_count(branches[1]["query"]), 15)
         self.assertEqual(branches[1]["query"], branches[1]["search_queries"][0])
-        self.assertEqual(len(branches[1]["search_queries"]), 1)
+        self.assertGreaterEqual(len(branches[1]["search_queries"]), 2)
+        self.assertTrue(
+            any("official" in query.lower() for query in branches[1]["search_queries"])
+        )
         self.assertNotIn("Research focus:", branches[1]["query"])
         self.assertNotIn("Guiding questions:", branches[1]["query"])
         self.assertNotIn("Preferred evidence sources", branches[1]["query"])
         self.assertIn("Preferred evidence sources", branches[1]["task_context"])
         self.assertEqual(branches[1]["source_hints"], ["official_site", "news"])
         self.assertEqual(branches[1]["search_stage"], "focused")
+
+    def test_collection_root_branches_use_chinese_queries_for_chinese_products(self):
+        branches = CollectionAgent()._build_root_branches(
+            query="帮我对比钉钉和飞书，只关注产品定位和定价",
+            competitors=[{"name": "钉钉"}],
+            active_schema={
+                "selected_industry": {"name": "SaaS / 协作文档工具"},
+                "industry_extensions": [
+                    {
+                        "id": "direction_pricing_packaging",
+                        "name": "定价与套餐分层",
+                        "description": "免费版、团队版、企业版、AI 加购和用量限制。",
+                        "source_hints": ["pricing_page", "official_site", "review"],
+                    }
+                ],
+            },
+        )
+
+        pricing_branch = next(
+            branch
+            for branch in branches
+            if branch["dimension_id"] == "direction_pricing_packaging"
+        )
+
+        self.assertEqual(pricing_branch["query"], "钉钉 定价 套餐 官网")
+        self.assertIn("钉钉 定价 官网", pricing_branch["search_queries"])
+        for search_query in pricing_branch["search_queries"]:
+            self.assertRegex(search_query, r"[\u4e00-\u9fff]")
+            self.assertNotRegex(
+                search_query.lower(),
+                r"\b(official|pricing|plans|reviews|customers|public registry)\b",
+            )
 
     def test_collection_root_branch_limit_applies_per_competitor(self):
         class FakeCollector:
@@ -730,7 +765,12 @@ class CollectionReviewTest(unittest.TestCase):
             [criterion["id"] for criterion in collection_task["success_criteria"]],
             ["guiding_question_1", "guiding_question_2"],
         )
-        self.assertEqual(collection_task["search_queries"], [collection_task["query"]])
+        self.assertTrue(
+            any(
+                "pricing" in query.lower() or "plans" in query.lower()
+                for query in collection_task["search_queries"]
+            )
+        )
 
     def test_short_queries_are_generic_across_competitor_names(self):
         forbidden_demo_aliases = ["Feishu", "Lark", "DingTalk", "飞书", "钉钉"]
@@ -763,7 +803,10 @@ class CollectionReviewTest(unittest.TestCase):
 
                 self.assertEqual(branch["query"], branch["search_queries"][0])
                 self.assertTrue(any("定价" in query for query in branch["search_queries"]))
-                self.assertEqual(len(branch["search_queries"]), 1)
+                self.assertTrue(any("官网" in query for query in branch["search_queries"]))
+                self.assertFalse(
+                    any("pricing" in query.lower() for query in branch["search_queries"])
+                )
                 for query in branch["search_queries"]:
                     self.assertLessEqual(_word_count(query), 15)
                 for alias in forbidden_demo_aliases:

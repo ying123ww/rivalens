@@ -251,6 +251,7 @@ Assume the current date is {datetime.now(timezone.utc).strftime('%B %d, %Y')} if
 
 {context_prompt}
 The original task is binding. Use the context only to make the searches more precise; do not change the topic, competitor, product, geography, or time scope unless the original task requires it.
+Preserve the original task language in every query. If the task is Chinese or names Chinese products, write the queries in Chinese and use Chinese source terms such as \u5b98\u7f51, \u5b9a\u4ef7, \u6587\u6863, \u8bc4\u4ef7, and \u65b0\u95fb instead of English source labels.
 Each query must target one concrete missing fact or source type that would help answer the original task. Prefer official pages, pricing pages, docs, filings, reviews, news, or marketplace listings when relevant.
 Do not generate broad adjacent-topic queries, decorative research angles, or generic background searches.
 You must respond with a list of strings in the following format: [{dynamic_example}].

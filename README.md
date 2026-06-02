@@ -255,6 +255,11 @@ page content before evidence review and downstream analysis. When
 `SCRAPER=tavily_extract` is set, URLs discovered by either UniFuncs or Tavily are
 fetched through Tavily Extract.
 
+`CollectionAgent` localizes deterministic branch `search_queries` before they
+reach the retrievers. If the original task or competitor name is Chinese, for
+example 飞书 or 钉钉, the planned sub-queries use Chinese source terms such as
+官网、定价、文档、评价、新闻 to bias discovery toward Chinese-language sources.
+
 ## LangSmith Tracing
 
 Rivalens uses LangGraph and LangChain components, so LangSmith tracing can be
