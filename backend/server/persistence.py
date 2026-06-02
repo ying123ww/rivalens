@@ -32,6 +32,7 @@ DEFAULT_DATABASE_URL = (
     "postgresql://rivalens:rivalens_password@postgres:5432/rivalens"
 )
 DEFAULT_REDIS_URL = "redis://redis:6379/0"
+PERSISTENCE_ENABLED_ENV = "RIVALENS_PERSISTENCE_ENABLED"
 AUTO_CREATE_TABLES_ENV = "RIVALENS_AUTO_CREATE_TABLES"
 
 metadata = MetaData()
@@ -306,6 +307,7 @@ Index("ix_claim_support_reviews_claim_id", claim_support_reviews.c.claim_id)
 class PersistenceConfig:
     database_url: str
     redis_url: str
+    enabled: bool
     auto_create_tables: bool
 
 
@@ -329,6 +331,7 @@ def get_persistence_config() -> PersistenceConfig:
     return PersistenceConfig(
         database_url=os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL),
         redis_url=os.getenv("REDIS_URL", DEFAULT_REDIS_URL),
+        enabled=_env_flag(PERSISTENCE_ENABLED_ENV, default=True),
         auto_create_tables=_env_flag(AUTO_CREATE_TABLES_ENV, default=False),
     )
 

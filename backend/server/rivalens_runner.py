@@ -26,7 +26,14 @@ async def run_rivalens_task(*args, **kwargs) -> Any:
     state = await run_task(*args, **kwargs)
     if isinstance(state, dict):
         try:
-            from server.persistence import persist_competitive_analysis_state
+            from server.persistence import (
+                get_persistence_config,
+                persist_competitive_analysis_state,
+            )
+
+            if not get_persistence_config().enabled:
+                logger.info("Rivalens persistence is disabled; skipping run persistence.")
+                return state
 
             result = persist_competitive_analysis_state(state)
             logger.info(

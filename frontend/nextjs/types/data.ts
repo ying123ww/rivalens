@@ -102,7 +102,7 @@ export interface ResearchHistoryItem {
   question: string;
   answer: string;
   timestamp: number;
-  status?: "running" | "completed" | "failed" | "unknown";
+  status?: "running" | "completed" | "failed" | "error" | "cancelled" | "unknown";
   error?: string;
   artifacts?: Record<string, string>;
   report_artifacts?: Record<string, string>;

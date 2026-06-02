@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import urllib.parse
+import warnings
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -201,12 +202,18 @@ async def _write_pdf(path: Path, report: str, css_path: str | None = None) -> st
 
 async def _write_docx(path: Path, report: str) -> str:
     try:
+        from bs4 import MarkupResemblesLocatorWarning
         from docx import Document
         from htmldocx import HtmlToDocx
 
         path.parent.mkdir(parents=True, exist_ok=True)
         doc = Document()
-        HtmlToDocx().add_html_to_document(mistune.html(report), doc)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=MarkupResemblesLocatorWarning,
+            )
+            HtmlToDocx().add_html_to_document(mistune.html(report), doc)
         doc.save(path)
         return path.as_posix()
     except Exception:

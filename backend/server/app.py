@@ -101,7 +101,12 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Frontend directory not found: {frontend_path}")
     
     persistence_config = get_persistence_config()
-    if persistence_config.auto_create_tables:
+    if not persistence_config.enabled:
+        logger.info(
+            "Rivalens persistence is disabled; set "
+            "RIVALENS_PERSISTENCE_ENABLED=true to enable PostgreSQL persistence."
+        )
+    elif persistence_config.auto_create_tables:
         try:
             initialize_database()
             logger.info("Rivalens persistence tables are ready")
@@ -112,11 +117,14 @@ async def lifespan(app: FastAPI):
             "Rivalens automatic table creation is disabled; set "
             "RIVALENS_AUTO_CREATE_TABLES=true to enable it."
         )
-    logger.info(
-        "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
-        redact_url(persistence_config.database_url),
-        persistence_config.redis_url,
-    )
+    if persistence_config.enabled:
+        logger.info(
+            "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
+            redact_url(persistence_config.database_url),
+            persistence_config.redis_url,
+        )
+    else:
+        logger.info("Rivalens API ready - persistence targets are not active.")
     yield
     # Shutdown
     logger.info("Research API shutting down")

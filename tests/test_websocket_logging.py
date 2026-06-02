@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 from fastapi import WebSocketDisconnect
 
-from backend.server.server_utils import CustomLogsHandler, handle_websocket_communication
+from backend.server.server_utils import (
+    CustomLogsHandler,
+    handle_start_command,
+    handle_websocket_communication,
+)
 
 
 class ClosedWebSocket:
@@ -95,6 +99,50 @@ class StubWebSocketManager:
         await websocket.close()
 
 
+class StubReportStore:
+    def __init__(self):
+        self.records = {}
+
+    async def get_report(self, research_id):
+        return self.records.get(research_id)
+
+    async def upsert_report(self, research_id, record):
+        self.records[research_id] = record
+
+
+class FailingReportStore:
+    async def get_report(self, research_id):
+        return None
+
+    async def upsert_report(self, research_id, record):
+        raise OSError("reports.json is locked")
+
+
+class StreamingManager:
+    async def start_streaming(self, *args, **kwargs):
+        return {
+            "run_id": "rid_stream",
+            "report": "Structured streamed report",
+            "report_artifacts": {"markdown": "outputs/rivalens/competitor_analysis.md"},
+            "trace_summary": {"claim_count": 1},
+            "assessments": {"claim_support_reviews": [{"id": "csr_1"}]},
+            "evidence_index": [{"id": "ev_1"}],
+            "analysis_claims": [{"id": "claim_1", "evidence_ids": ["ev_1"]}],
+            "competitor_knowledge": [{"id": "knowledge_1"}],
+            "state": {"task": {"run_id": "rid_stream"}},
+        }
+
+
+class InspectingStreamingManager:
+    def __init__(self, store):
+        self.store = store
+        self.running_snapshot = None
+
+    async def start_streaming(self, *args, **kwargs):
+        self.running_snapshot = self.store.records.get("rid_running")
+        return "Done"
+
+
 class CustomLogsHandlerTest(unittest.IsolatedAsyncioTestCase):
     async def test_send_json_records_disconnect_when_websocket_is_closed(self):
         handler = CustomLogsHandler(ClosedWebSocket(), f"disconnect probe {uuid4()}")
@@ -127,7 +175,8 @@ class CustomLogsHandlerTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_log_messages_are_batched_for_websocket_but_written_fully(self):
         websocket = RecordingWebSocket()
-        handler = CustomLogsHandler(websocket, f"batch probe {uuid4()}")
+        with patch.dict(os.environ, {"RIVALENS_WS_LOG_BATCH_SIZE": "20"}):
+            handler = CustomLogsHandler(websocket, f"batch probe {uuid4()}")
         try:
             for index in range(19):
                 await handler.send_json({
@@ -269,6 +318,107 @@ class CustomLogsHandlerTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(manager.disconnected)
         self.assertTrue(websocket.closed)
+
+    async def test_streaming_rivalens_report_store_keeps_structured_state(self):
+        websocket = RecordingWebSocket()
+        store = StubReportStore()
+        data = json.dumps({
+            "research_id": "rid_stream",
+            "task": "Compare Alpha and Beta",
+            "report_type": "rivalens",
+            "report_source": "web",
+            "tone": "Objective",
+        })
+
+        async def fake_generate_report_files(report, filename, **kwargs):
+            return {
+                "markdown": f"outputs/{filename}.md",
+                "html": f"outputs/{filename}.html",
+                "pdf": f"outputs/{filename}.pdf",
+                "docx": f"outputs/{filename}.docx",
+            }
+
+        with patch(
+            "backend.server.server_utils.generate_report_files",
+            fake_generate_report_files,
+        ):
+            await handle_start_command(
+                websocket,
+                f"start {data}",
+                StreamingManager(),
+                report_store=store,
+            )
+
+        record = store.records["rid_stream"]
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["answer"], "Structured streamed report")
+        self.assertEqual(record["state"]["task"]["run_id"], "rid_stream")
+        self.assertEqual(record["analysis_claims"][0]["id"], "claim_1")
+        self.assertEqual(record["evidence_index"][0]["id"], "ev_1")
+        self.assertEqual(record["assessments"]["claim_support_reviews"][0]["id"], "csr_1")
+        self.assertEqual(record["report_artifacts"]["markdown"], "outputs/rid_stream.md")
+        self.assertNotIn("rivalens_response", record["artifacts"])
+
+    async def test_streaming_run_persists_running_progress(self):
+        websocket = RecordingWebSocket()
+        store = StubReportStore()
+        manager = InspectingStreamingManager(store)
+        data = json.dumps({
+            "research_id": "rid_running",
+            "task": "Compare Alpha and Beta",
+            "report_type": "research_report",
+            "report_source": "web",
+            "tone": "Objective",
+        })
+
+        async def fake_generate_report_files(report, filename, **kwargs):
+            return {"markdown": f"outputs/{filename}.md"}
+
+        with patch(
+            "backend.server.server_utils.generate_report_files",
+            fake_generate_report_files,
+        ):
+            await handle_start_command(
+                websocket,
+                f"start {data}",
+                manager,
+                report_store=store,
+            )
+
+        running_record = manager.running_snapshot
+        self.assertEqual(running_record["status"], "running")
+        self.assertEqual(running_record["orderedData"][0]["type"], "question")
+        self.assertTrue(
+            any(item.get("content") == "log_batch" for item in running_record["orderedData"])
+        )
+
+    async def test_report_store_write_failure_does_not_stop_streaming_run(self):
+        websocket = RecordingWebSocket()
+        data = json.dumps({
+            "research_id": "rid_locked_store",
+            "task": "Compare Alpha and Beta",
+            "report_type": "research_report",
+            "report_source": "web",
+            "tone": "Objective",
+        })
+
+        async def fake_generate_report_files(report, filename, **kwargs):
+            return {"markdown": f"outputs/{filename}.md"}
+
+        with patch(
+            "backend.server.server_utils.generate_report_files",
+            fake_generate_report_files,
+        ):
+            await handle_start_command(
+                websocket,
+                f"start {data}",
+                StreamingManager(),
+                report_store=FailingReportStore(),
+            )
+
+        self.assertTrue(
+            any(message.get("type") == "path" for message in websocket.messages)
+        )
 
 
 if __name__ == "__main__":
