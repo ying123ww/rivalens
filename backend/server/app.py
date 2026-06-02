@@ -32,7 +32,10 @@ from server.websocket_manager import run_agent
 from rivalens.report_export import generate_report_files
 from rivalens.research.utils.enum import Tone
 from chat.chat import ChatAgentWithMemory
-from rivalens.agents.industry_direction import IndustryDirectionSkill
+from rivalens.agents.industry_direction import (
+    IndustryDirectionSkill,
+    validate_query_no_direction_limits,
+)
 from rivalens.schema import IndustryDirectionPlanPayload
 
 from server.report_store import ReportStore
@@ -575,6 +578,13 @@ async def run_rivalens():
 
 @app.post("/api/industry-directions")
 async def preview_industry_directions(request: IndustryDirectionRequest):
+    competitor_names = [
+        c.get("name", "") for c in (request.competitors or [])
+    ]
+    limit_error = validate_query_no_direction_limits(request.task, competitor_names)
+    if limit_error:
+        raise HTTPException(status_code=422, detail=limit_error)
+
     plan = IndustryDirectionSkill().build_plan(
         query=request.task,
         competitors=request.competitors,

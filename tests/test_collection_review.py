@@ -427,10 +427,7 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(branches[1]["dimension_name"], "战略定位")
         self.assertLessEqual(_word_count(branches[1]["query"]), 15)
         self.assertEqual(branches[1]["query"], branches[1]["search_queries"][0])
-        self.assertGreaterEqual(len(branches[1]["search_queries"]), 2)
-        self.assertTrue(
-            any("official" in query.lower() for query in branches[1]["search_queries"])
-        )
+        self.assertEqual(len(branches[1]["search_queries"]), 1)
         self.assertNotIn("Research focus:", branches[1]["query"])
         self.assertNotIn("Guiding questions:", branches[1]["query"])
         self.assertNotIn("Preferred evidence sources", branches[1]["query"])
@@ -625,6 +622,26 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("query-1", context)
         self.assertIn("query-4", context)
 
+    def test_research_conductor_expands_single_seed_query(self):
+        one_seed = ResearchConductor(
+            SimpleNamespace(
+                rivalens_search_queries=["Acme Pricing"],
+                rivalens_trace_context={},
+            )
+        )
+        multi_query = ResearchConductor(
+            SimpleNamespace(
+                rivalens_search_queries=["Acme Pricing", "Acme Reviews"],
+                rivalens_trace_context={},
+            )
+        )
+
+        self.assertEqual(one_seed._rivalens_preplanned_search_queries(), [])
+        self.assertEqual(
+            multi_query._rivalens_preplanned_search_queries(),
+            ["Acme Pricing", "Acme Reviews"],
+        )
+
     def test_collection_does_not_fallback_to_core_fields(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",
@@ -701,12 +718,7 @@ class CollectionReviewTest(unittest.TestCase):
             [criterion["id"] for criterion in collection_task["success_criteria"]],
             ["guiding_question_1", "guiding_question_2"],
         )
-        self.assertTrue(
-            any(
-                "pricing" in query.lower() or "plans" in query.lower()
-                for query in collection_task["search_queries"]
-            )
-        )
+        self.assertEqual(collection_task["search_queries"], [collection_task["query"]])
 
     def test_short_queries_are_generic_across_competitor_names(self):
         forbidden_demo_aliases = ["Feishu", "Lark", "DingTalk", "飞书", "钉钉"]
@@ -739,9 +751,7 @@ class CollectionReviewTest(unittest.TestCase):
 
                 self.assertEqual(branch["query"], branch["search_queries"][0])
                 self.assertTrue(any("定价" in query for query in branch["search_queries"]))
-                self.assertTrue(
-                    any("pricing" in query.lower() for query in branch["search_queries"])
-                )
+                self.assertEqual(len(branch["search_queries"]), 1)
                 for query in branch["search_queries"]:
                     self.assertLessEqual(_word_count(query), 15)
                 for alias in forbidden_demo_aliases:

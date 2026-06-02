@@ -2,8 +2,14 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
+import re
 from typing import Any
 
+from rivalens.agents.industry_llm_fallback import (
+    IndustryLLMFallback,
+    normalize_fallback_directions,
+)
 from rivalens.industry_templates import INDUSTRY_DIRECTION_TEMPLATES
 from rivalens.schema import (
     AnalysisDirection,
@@ -12,6 +18,79 @@ from rivalens.schema import (
     IndustryDirectionPlan,
     IndustryProfileDirection,
 )
+
+# ── Query direction-limit validation ──────────────────────────────────────
+
+_CONSTRAINT_TERMS: tuple[str, ...] = (
+    "只看",
+    "仅看",
+    "只需要",
+    "只用",
+    "只关注",
+    "仅关注",
+    "只分析",
+    "仅分析",
+)
+
+_DIRECTION_KEYWORDS: tuple[str, ...] = (
+    # Pricing & business model
+    "定价", "价格", "套餐", "收费", "费用", "商业模式", "变现",
+    "pricing", "price", "plan", "package",
+    # Strategic positioning
+    "定位", "产品定位", "战略定位", "市场卡位", "差异化", "竞争格局",
+    "positioning", "strategy",
+    # Product features & UX
+    "功能", "产品功能", "核心功能", "特色功能", "产品结构",
+    "交互", "交互设计", "界面", "操作体验", "产品流程",
+    "feature", "capability", "ux", "ui", "interaction",
+    # Users & reputation
+    "目标用户", "用户画像", "用户口碑", "使用场景", "用户体验",
+    "persona", "segment", "use case", "review",
+    # Operations & growth
+    "运营", "运营策略", "增长", "留存", "获客",
+    "growth", "retention", "operation",
+)
+
+# Characters that signal clause boundaries for proximity checking
+_CLAUSE_BOUNDARY = re.compile(r"[。，,；;！!\n]")
+
+_PROXIMITY_WINDOW = 25
+
+
+def validate_query_no_direction_limits(
+    query: str,
+    competitor_names: list[str] | None = None,
+) -> str | None:
+    """Return an error message if *query* tries to limit analysis *directions*.
+
+    Constraints on *competitors* (e.g. "只看钉钉和飞书") are allowed.
+    Constraints on analysis *directions* (e.g. "只看产品定位和定价") are
+    rejected because competitive analysis requires comprehensive coverage.
+    """
+    lowered = query.lower()
+    if not any(term in lowered for term in _CONSTRAINT_TERMS):
+        return None
+
+    # Remove competitor names so they don't interfere with direction detection
+    text = lowered
+    for name in (competitor_names or []):
+        text = text.replace(name.lower(), "")
+
+    # Extract the clause containing the constraint term — the object being
+    # constrained should be nearby, not in a different sentence.
+    for term in _CONSTRAINT_TERMS:
+        idx = text.find(term)
+        if idx == -1:
+            continue
+        # Search in a window after the constraint term
+        window = text[idx:idx + _PROXIMITY_WINDOW]
+        if any(kw in window for kw in _DIRECTION_KEYWORDS):
+            return (
+                "竞品分析需要完整性和全面性，不支持限定特定分析方向。"
+                "请移除'只看/仅看/只关注/只需要'等方向限定词，重新输入一个开放式的分析请求。"
+            )
+
+    return None
 
 
 DEFAULT_SOURCE_HINTS = ["official_site", "pricing_page", "docs", "news", "review"]
@@ -142,8 +221,16 @@ class IndustryDirectionSkill:
     def __init__(
         self,
         templates: tuple[IndustryDirectionTemplate, ...] | None = None,
+        llm_fallback: IndustryLLMFallback | None = None,
+        fallback_threshold: float | None = None,
     ):
         self.templates = templates or _load_templates(INDUSTRY_DIRECTION_TEMPLATES)
+        self.llm_fallback = llm_fallback or IndustryLLMFallback()
+        self.fallback_threshold = (
+            fallback_threshold
+            if fallback_threshold is not None
+            else _float_env("RIVALENS_INDUSTRY_RULE_CONFIDENCE_THRESHOLD", 0.35)
+        )
 
     def build_plan(
         self,
@@ -154,6 +241,101 @@ class IndustryDirectionSkill:
         user_confirmed: bool = False,
     ) -> IndustryDirectionPlan:
         candidate_industries = self.rank_industries(query, competitors or [])
+        return self._build_template_plan(
+            query=query,
+            competitors=competitors or [],
+            user_directions=user_directions or [],
+            selected_direction_ids=selected_direction_ids,
+            user_confirmed=user_confirmed,
+            candidate_industries=candidate_industries,
+            selection_method="rule_template",
+        )
+
+    async def build_plan_with_fallback(
+        self,
+        query: str,
+        competitors: list[Competitor] | list[dict[str, Any]] | None = None,
+        user_directions: list[str | dict[str, Any]] | None = None,
+        selected_direction_ids: list[str] | None = None,
+        user_confirmed: bool = False,
+    ) -> IndustryDirectionPlan:
+        candidate_industries = self.rank_industries(query, competitors or [])
+        top_confidence = (
+            candidate_industries[0].get("confidence", 0)
+            if candidate_industries
+            else 0
+        )
+        if top_confidence >= self.fallback_threshold:
+            return self._build_template_plan(
+                query=query,
+                competitors=competitors or [],
+                user_directions=user_directions or [],
+                selected_direction_ids=selected_direction_ids,
+                user_confirmed=user_confirmed,
+                candidate_industries=candidate_industries,
+                selection_method="rule_template",
+            )
+
+        if self.llm_fallback and self.llm_fallback.is_configured():
+            try:
+                fallback_result = await self.llm_fallback.classify(
+                    query=query,
+                    competitors=list(competitors or []),
+                    candidate_industries=candidate_industries,
+                )
+                fallback_directions = normalize_fallback_directions(fallback_result)
+                if fallback_directions:
+                    return self._build_llm_fallback_plan(
+                        query=query,
+                        competitors=competitors or [],
+                        user_directions=user_directions or [],
+                        selected_direction_ids=selected_direction_ids,
+                        user_confirmed=user_confirmed,
+                        candidate_industries=candidate_industries,
+                        fallback_result=fallback_result,
+                        fallback_directions=fallback_directions,
+                    )
+            except Exception as exc:
+                return self._build_template_plan(
+                    query=query,
+                    competitors=competitors or [],
+                    user_directions=user_directions or [],
+                    selected_direction_ids=selected_direction_ids,
+                    user_confirmed=user_confirmed,
+                    candidate_industries=candidate_industries,
+                    selection_method="rule_template_after_llm_fallback_error",
+                    fallback_reason=f"LLM fallback failed: {exc}",
+                    fallback_model=self.llm_fallback.llm_spec,
+                )
+
+        return self._build_template_plan(
+            query=query,
+            competitors=competitors or [],
+            user_directions=user_directions or [],
+            selected_direction_ids=selected_direction_ids,
+            user_confirmed=user_confirmed,
+            candidate_industries=candidate_industries,
+            selection_method="rule_template_fallback_unavailable",
+            fallback_reason=(
+                "Rule confidence was below threshold, but no industry LLM fallback "
+                "model was configured."
+            ),
+            fallback_model=getattr(self.llm_fallback, "llm_spec", "") or "",
+        )
+
+    def _build_template_plan(
+        self,
+        *,
+        query: str,
+        competitors: list[Competitor] | list[dict[str, Any]],
+        user_directions: list[str | dict[str, Any]],
+        selected_direction_ids: list[str] | None,
+        user_confirmed: bool,
+        candidate_industries: list[IndustryCandidate],
+        selection_method: str,
+        fallback_reason: str = "",
+        fallback_model: str = "",
+    ) -> IndustryDirectionPlan:
         selected = candidate_industries[0]
         template = self._template_for(selected["industry_id"]) or self.templates[0]
         detected_competitors = self._detected_competitors(
@@ -170,36 +352,16 @@ class IndustryDirectionSkill:
             for index, direction in enumerate(template.default_directions, start=1)
         ]
         planner_candidate_directions = self._planner_added_directions(default_directions)
-        query_limited_direction_ids = self._query_limited_direction_ids(
-            query,
-            default_directions + planner_candidate_directions,
-        )
-        planner_added_directions = (
-            []
-            if query_limited_direction_ids is not None
-            else planner_candidate_directions
-        )
-        effective_selected_direction_ids = (
-            query_limited_direction_ids
-            if query_limited_direction_ids is not None
-            else selected_direction_ids
-        )
+        planner_added_directions = planner_candidate_directions
         selected_default_directions = self._select_default_directions(
             default_directions,
-            effective_selected_direction_ids,
-            include_required=query_limited_direction_ids is None,
+            selected_direction_ids,
+            include_required=True,
         )
         selected_planner_directions = self._select_planner_directions(
-            planner_candidate_directions
-            if query_limited_direction_ids is not None
-            else planner_added_directions,
-            effective_selected_direction_ids,
+            planner_added_directions,
+            selected_direction_ids,
         )
-        if query_limited_direction_ids is not None:
-            selected_planner_directions = [
-                self._query_limited_direction(direction)
-                for direction in selected_planner_directions
-            ]
         user_added_directions = self._normalize_user_directions(user_directions or [])
         final_directions = self._dedupe_directions(
             selected_default_directions
@@ -231,23 +393,118 @@ class IndustryDirectionSkill:
                 "planner_added_directions": planner_added_directions,
                 "planner_coverage_basis": [
                     direction["name"] for direction in PLANNER_COVERAGE_DIRECTIONS
-                ]
-                if query_limited_direction_ids is None
-                else [],
-                "scope_limited_by_query": query_limited_direction_ids is not None,
-                "auto_selected_directions": query_limited_direction_ids or [],
-                "planner_supplement_skipped": query_limited_direction_ids is not None,
-                "planner_supplement_skip_reason": (
-                    "用户查询包含只看/仅看/只关注等限定词，跳过自动补充方向。"
-                    if query_limited_direction_ids is not None
-                    else ""
-                ),
+                ],
+                "scope_limited_by_query": False,
+                "auto_selected_directions": [],
+                "planner_supplement_skipped": False,
+                "planner_supplement_skip_reason": "",
+                "selection_method": selection_method,
+                "fallback_reason": fallback_reason,
+                "fallback_model": fallback_model,
+                "rule_confidence_threshold": self.fallback_threshold,
                 "directions": final_directions,
                 "final_directions": [
                     direction.get("direction_id", "")
                     for direction in final_directions
                 ],
             },
+            "selection_method": selection_method,
+            "fallback_reason": fallback_reason,
+            "fallback_model": fallback_model,
+            "user_confirmed": user_confirmed,
+            "created_at": created_at,
+        }
+
+    def _build_llm_fallback_plan(
+        self,
+        *,
+        query: str,
+        competitors: list[Competitor] | list[dict[str, Any]],
+        user_directions: list[str | dict[str, Any]],
+        selected_direction_ids: list[str] | None,
+        user_confirmed: bool,
+        candidate_industries: list[IndustryCandidate],
+        fallback_result: Any,
+        fallback_directions: list[AnalysisDirection],
+    ) -> IndustryDirectionPlan:
+        selected = {
+            "industry_id": self._slug(fallback_result.industry_id)
+            or "llm_inferred_industry",
+            "name": fallback_result.industry_name,
+            "confidence": round(float(fallback_result.confidence), 2),
+            "signals": ["llm_fallback", fallback_result.reason],
+        }
+        detected_competitors = self._explicit_competitor_names(competitors)
+        suggested_competitors = [
+            competitor
+            for competitor in self._dedupe_text(fallback_result.suggested_competitors)
+            if competitor.lower() not in {item.lower() for item in detected_competitors}
+        ][:8]
+        planner_candidate_directions = self._planner_added_directions(
+            fallback_directions,
+        )
+        planner_added_directions = planner_candidate_directions
+        selected_default_directions = self._select_default_directions(
+            fallback_directions,
+            selected_direction_ids,
+            include_required=True,
+        )
+        selected_planner_directions = self._select_planner_directions(
+            planner_added_directions,
+            selected_direction_ids,
+        )
+        user_added_directions = self._normalize_user_directions(user_directions or [])
+        final_directions = self._dedupe_directions(
+            selected_default_directions
+            + selected_planner_directions
+            + user_added_directions
+        )
+        created_at = datetime.now(timezone.utc).isoformat()
+        fallback_model = getattr(self.llm_fallback, "llm_spec", "") or ""
+        return {
+            "id": f"industry_direction_{selected['industry_id']}_{created_at}",
+            "detected_industry": selected["name"],
+            "industry": selected,
+            "candidate_industries": self._merge_candidate_industries(
+                selected,
+                candidate_industries,
+            ),
+            "detected_competitors": detected_competitors,
+            "suggested_competitors": suggested_competitors,
+            "suggested_directions": fallback_directions,
+            "default_directions": fallback_directions,
+            "planner_added_directions": planner_added_directions,
+            "user_added_directions": user_added_directions,
+            "final_directions": final_directions,
+            "final_analysis_plan": {
+                "detected_industry": selected["name"],
+                "industry_id": selected["industry_id"],
+                "industry_name": selected["name"],
+                "detected_competitors": detected_competitors,
+                "suggested_competitors": suggested_competitors,
+                "direction_count": len(final_directions),
+                "suggested_directions": fallback_directions,
+                "planner_added_directions": planner_added_directions,
+                "planner_coverage_basis": [
+                    direction["name"] for direction in PLANNER_COVERAGE_DIRECTIONS
+                ],
+                "scope_limited_by_query": False,
+                "auto_selected_directions": [],
+                "planner_supplement_skipped": False,
+                "planner_supplement_skip_reason": "",
+                "selection_method": "llm_fallback",
+                "fallback_reason": fallback_result.reason,
+                "fallback_model": fallback_model,
+                "rule_confidence_threshold": self.fallback_threshold,
+                "directions": final_directions,
+                "final_directions": [
+                    direction.get("direction_id", "")
+                    for direction in final_directions
+                ],
+            },
+            "selection_method": "llm_fallback",
+            "fallback_reason": fallback_result.reason,
+            "fallback_model": fallback_model,
             "user_confirmed": user_confirmed,
             "created_at": created_at,
         }
@@ -434,6 +691,34 @@ class IndustryDirectionSkill:
                 deduped[cleaned.lower()] = cleaned
         return list(deduped.values())
 
+    def _explicit_competitor_names(
+        self,
+        competitors: list[Competitor] | list[dict[str, Any]],
+    ) -> list[str]:
+        detected = []
+        for competitor in competitors:
+            if isinstance(competitor, str):
+                name = competitor.strip()
+            else:
+                name = str(competitor.get("name", "")).strip()
+            if name:
+                detected.append(name)
+        return self._dedupe_text(detected)
+
+    def _merge_candidate_industries(
+        self,
+        selected_industry: IndustryCandidate,
+        candidates: list[IndustryCandidate],
+    ) -> list[IndustryCandidate]:
+        merged = [selected_industry]
+        selected_id = selected_industry.get("industry_id")
+        merged.extend(
+            candidate
+            for candidate in candidates
+            if candidate.get("industry_id") != selected_id
+        )
+        return merged
+
     def _select_default_directions(
         self,
         default_directions: list[AnalysisDirection],
@@ -510,114 +795,6 @@ class IndustryDirectionSkill:
             if direction.get("direction_id") in selected
         ]
 
-    def _query_has_limited_scope(self, query: str) -> bool:
-        lowered = query.lower()
-        return any(term in lowered for term in self._limit_terms())
-
-    def _limit_terms(self) -> tuple[str, ...]:
-        return (
-            "只看",
-            "仅看",
-            "只关注",
-            "仅关注",
-            "只分析",
-            "仅分析",
-            "限定",
-            "聚焦",
-        )
-
-    def _query_limited_direction(
-        self,
-        direction: AnalysisDirection,
-    ) -> AnalysisDirection:
-        limited_direction = dict(direction)
-        limited_direction["origin"] = "user_requested"
-        limited_direction["required"] = True
-        limited_direction["reason"] = (
-            "用户限定语义匹配的分析方向，未进行自动 Planner 补充。"
-        )
-        limited_direction["description"] = (
-            limited_direction.get("description")
-            or limited_direction.get("reason", "")
-        )
-        return limited_direction
-
-    def _query_limited_direction_ids(
-        self,
-        query: str,
-        directions: list[AnalysisDirection],
-    ) -> list[str] | None:
-        lowered = query.lower()
-        if not self._query_has_limited_scope(query):
-            return None
-
-        direction_aliases = {
-            "pricing": (
-                "定价",
-                "价格",
-                "套餐",
-                "收费",
-                "费用",
-                "pricing",
-                "price",
-                "plan",
-                "package",
-            ),
-            "positioning": (
-                "定位",
-                "产品定位",
-                "战略定位",
-                "市场卡位",
-                "差异化",
-                "positioning",
-                "strategy",
-            ),
-        }
-        requested_aliases = {
-            group
-            for group, aliases in direction_aliases.items()
-            if any(alias in lowered for alias in aliases)
-        }
-        if not requested_aliases:
-            return None
-
-        selected_ids = []
-        for direction in directions:
-            primary_searchable = " ".join(
-                str(direction.get(field, ""))
-                for field in ("direction_id", "name", "search_focus")
-            ).lower()
-            searchable = " ".join(
-                str(direction.get(field, ""))
-                for field in ("direction_id", "name", "reason", "description", "search_focus")
-            ).lower()
-            if (
-                "pricing" in requested_aliases
-                and (
-                    "pricing" in searchable
-                    or "定价" in searchable
-                    or "价格" in searchable
-                    or "套餐" in searchable
-                    or "收费" in searchable
-                    or "费用" in searchable
-                    or "商业模式" in searchable
-                )
-            ):
-                selected_ids.append(direction["direction_id"])
-                continue
-            if (
-                "positioning" in requested_aliases
-                and (
-                    "positioning" in primary_searchable
-                    or "战略定位" in primary_searchable
-                    or "定位" in primary_searchable
-                    or "市场卡位" in primary_searchable
-                )
-            ):
-                selected_ids.append(direction["direction_id"])
-
-        return selected_ids or None
-
     def _custom_direction_id(self, text: str, index: int) -> str:
         lowered = text.lower()
         if "ai" in lowered or "人工智能" in text:
@@ -649,3 +826,13 @@ class IndustryDirectionSkill:
                 next_parts.extend(part.split(separator))
             parts = next_parts
         return [part.strip() for part in parts if part.strip()]
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default

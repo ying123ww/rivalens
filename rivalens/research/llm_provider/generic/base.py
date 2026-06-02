@@ -111,6 +111,11 @@ class GenericLLMProvider:
             _check_pkg("langchain_anthropic")
             from langchain_anthropic import ChatAnthropic
 
+            if "anthropic_api_key" not in kwargs and os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+                kwargs["anthropic_api_key"] = os.environ["ANTHROPIC_AUTH_TOKEN"]
+            if "anthropic_api_url" not in kwargs and os.environ.get("ANTHROPIC_BASE_URL"):
+                kwargs["anthropic_api_url"] = os.environ["ANTHROPIC_BASE_URL"]
+
             llm = ChatAnthropic(**kwargs)
         elif provider == "azure_openai":
             _check_pkg("langchain_openai")

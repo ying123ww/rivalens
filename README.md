@@ -103,6 +103,12 @@ flowchart LR
 inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
 keeps the industry template directions separate from PlanningAgent supplement
 directions, then emits one `schema_selection` handoff to `source_collection`.
+When deterministic industry matching is confident, the planner continues to use
+the maintained industry templates. When the top rule score is below the
+configured threshold, it calls the Anthropic-compatible industry LLM fallback
+configured by `INDUSTRY_FALLBACK_LLM` / `ANTHROPIC_MODEL`, then stores the
+structured industry, rationale, and suggested directions inside the same
+`IndustryDirectionPlan` and `ActiveKnowledgeSchema` protocol.
 The planner uses the ten general product-analysis directions only as a coverage
 check for missing task-level `planner_added_directions`; they are not written
 back as original industry defaults. The confirmed direction plan is stored in
@@ -123,7 +129,10 @@ competitor-by-dimension collection tasks and runs them concurrently through
 research sources into `EvidenceItem` records with collection task and analysis
 dimension metadata, reviews each standard-search result against branch
 `success_criteria`, and stores accepted branch evidence for structuring and
-analysis. `CoverageReviewer` records which criteria are satisfied, partial, or
+analysis. Collection branches carry one clean seed query while preserving
+competitor, dimension, source hints, success criteria, and task context as
+structured fields; `ResearchEngine` expands that seed into natural-language
+sub-queries using the structured collection context. `CoverageReviewer` records which criteria are satisfied, partial, or
 missing, then narrows follow-up tasks to the missing criteria instead of
 throwing away partially useful evidence. `KnowledgeStructuringAgent`
 structures the accepted evidence into `CompetitorKnowledge`; `AnalysisAgent`

@@ -109,6 +109,35 @@ def _normalize_sub_queries_response(response: Any) -> List[str]:
     return []
 
 
+def _format_collection_planning_context(trace_context: dict[str, Any] | None) -> str:
+    if not trace_context:
+        return ""
+    lines = []
+    for label, key in (
+        ("Competitor", "competitor"),
+        ("Dimension", "dimension_name"),
+        ("Dimension ID", "dimension_id"),
+        ("Search stage", "search_stage"),
+        ("Research goal", "research_goal"),
+    ):
+        value = trace_context.get(key)
+        if value:
+            lines.append(f"{label}: {value}")
+    source_hints = trace_context.get("source_hints") or []
+    if source_hints:
+        lines.append("Preferred source types: " + ", ".join(source_hints[:10]))
+    criteria = trace_context.get("success_criteria") or []
+    if criteria:
+        criterion_text = [
+            criterion.get("description", "")
+            for criterion in criteria
+            if isinstance(criterion, dict) and criterion.get("description")
+        ]
+        if criterion_text:
+            lines.append("Success criteria: " + " | ".join(criterion_text[:6]))
+    return "\n".join(lines)
+
+
 @traceable(
     name="rivalens_initial_search",
     run_type="retriever",
@@ -160,6 +189,7 @@ async def generate_sub_queries(
     cfg: Config,
     cost_callback: callable = None,
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
+    trace_context: dict[str, Any] | None = None,
     **kwargs
 ) -> List[str]:
     """
@@ -185,6 +215,13 @@ async def generate_sub_queries(
         max_iterations=cfg.max_iterations or 3,
         context=context,
     )
+    collection_context = _format_collection_planning_context(trace_context)
+    if collection_context:
+        gen_queries_prompt += (
+            "\n\nStructured collection context. Use this to expand the seed query "
+            "without changing the competitor or dimension:\n"
+            f"{collection_context}"
+        )
 
     response = await create_chat_completion(
         model=cfg.strategic_llm_model,
@@ -211,6 +248,7 @@ async def plan_research_outline(
     report_type: str,
     cost_callback: callable = None,
     retriever_names: List[str] = None,
+    trace_context: dict[str, Any] | None = None,
     **kwargs
 ) -> List[str]:
     """
@@ -256,6 +294,7 @@ async def plan_research_outline(
         search_results,
         cfg,
         cost_callback,
+        trace_context=trace_context,
         **kwargs
     )
 
