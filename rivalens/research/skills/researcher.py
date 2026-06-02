@@ -558,9 +558,14 @@ class ResearchConductor:
                     for sub_query in sub_queries
                 ]
             )
-            self.logger.info(f"Gathered context from {len(context)} sub-queries")
             # Filter out empty results and join the context
+            processed_context_count = len(context)
             context = [c for c in context if c]
+            self.logger.info(
+                "Gathered context from %s/%s sub-queries",
+                len(context),
+                processed_context_count,
+            )
             if context:
                 combined_context = " ".join(context)
                 self.logger.info(f"Combined context size: {len(combined_context)}")
@@ -759,7 +764,8 @@ class ResearchConductor:
             # Get web search context using non-MCP retrievers (if no scraped data provided)
             if not scraped_data:
                 scraped_data = await self._scrape_data_by_urls(sub_query, query_domains)
-                self.logger.info(f"Scraped data size: {len(scraped_data)}")
+                if scraped_data:
+                    self.logger.info(f"Scraped data size: {len(scraped_data)}")
 
             # Get similar content based on scraped data
             if scraped_data:
@@ -786,7 +792,7 @@ class ResearchConductor:
                         self.researcher.websocket,
                     )
             else:
-                self.logger.warning(f"No combined context found for sub-query: {sub_query}")
+                self.logger.info(f"No combined context found for sub-query: {sub_query}")
                 if self.researcher.verbose:
                     await stream_output(
                         "logs",
@@ -940,7 +946,7 @@ class ResearchConductor:
             self.logger.info(f"Combined context for '{sub_query}': {len(final_context)} total chars")
             return final_context
         else:
-            self.logger.warning(f"No context to combine for sub-query: {sub_query}")
+            self.logger.info(f"No context to combine for sub-query: {sub_query}")
             return ""
 
     async def _process_sub_query_with_vectorstore(self, sub_query: str, filter: dict | None = None):
@@ -1128,6 +1134,17 @@ class ResearchConductor:
             query_domains = []
 
         new_search_urls, prefetched_content = await self._search_relevant_source_urls(sub_query, query_domains)
+
+        if not new_search_urls and not prefetched_content:
+            self.logger.info(f"No source URLs found for sub-query: {sub_query}; skipping scraping")
+            if self.researcher.verbose:
+                await stream_output(
+                    "logs",
+                    "no_sources_to_scrape",
+                    "No source candidates were found; skipping scraping for this query.",
+                    self.researcher.websocket,
+                )
+            return []
 
         # Log the research process if verbose mode is on
         if self.researcher.verbose:

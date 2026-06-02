@@ -163,6 +163,7 @@ report_store = ReportStore(Path(os.getenv('REPORT_STORE_PATH', os.path.join('dat
 
 # Constants
 DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
+OUTPUTS_DIR = Path("outputs")
 
 
 def _extract_rivalens_report_text(report_information: Any) -> str:
@@ -201,6 +202,35 @@ async def read_report(request: Request, research_id: str):
     if not os.path.exists(docx_path):
         return {"message": "Report not found."}
     return FileResponse(docx_path)
+
+
+def _resolve_output_download_path(file_path: str) -> Path:
+    clean_path = file_path.strip().lstrip("/")
+    if clean_path.startswith("outputs/"):
+        clean_path = clean_path[len("outputs/"):]
+    if not clean_path:
+        raise HTTPException(status_code=400, detail="Missing output file path")
+
+    output_dir = OUTPUTS_DIR.resolve()
+    target_path = (output_dir / clean_path).resolve()
+    try:
+        target_path.relative_to(output_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid output file path")
+
+    if not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Output file not found")
+    return target_path
+
+
+@app.get("/api/download/{file_path:path}")
+async def download_output_file(file_path: str):
+    target_path = _resolve_output_download_path(file_path)
+    return FileResponse(
+        target_path,
+        filename=target_path.name,
+        media_type="application/octet-stream",
+    )
 
 
 # Simplified API routes - no database persistence

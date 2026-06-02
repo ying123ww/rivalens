@@ -45,6 +45,9 @@ class BrowserManager:
         Returns:
             list[dict]: list of scraped content results.
         """
+        if not urls:
+            return []
+
         if self.researcher.verbose:
             await stream_output(
                 "logs",
