@@ -41,6 +41,62 @@ def _int_budget(
     return max(minimum, parsed)
 
 
+def _workflow_run_config(
+    task: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    competitors = task.get("competitors") or []
+    if not isinstance(competitors, list):
+        competitors = [competitors]
+
+    return {
+        "run_name": "rivalens_competitive_analysis",
+        "tags": [
+            "rivalens",
+            "competitive-analysis",
+            "langgraph",
+        ],
+        "metadata": {
+            "workflow": "competitive_analysis",
+            "entrypoint": "run_competitive_analysis_task",
+            "collector": "CollectionAgent",
+            "query_length": len(task.get("query", "")),
+            "competitor_count": len(competitors),
+            "competitors": [
+                competitor.get("name", "")
+                if isinstance(competitor, dict)
+                else str(competitor)
+                for competitor in competitors
+            ],
+            "industry_directions_confirmed": bool(
+                task.get("industry_directions_confirmed")
+            ),
+            "custom_analysis_direction_count": len(
+                task.get("custom_analysis_directions") or []
+            ),
+            "deep_research": bool(task.get("deep_research")),
+            "retriever": os.getenv("RETRIEVER", ""),
+            "scraper": os.getenv("SCRAPER", ""),
+            "max_branch_depth": _int_budget(
+                kwargs.get("max_branch_depth"),
+                "RIVALENS_MAX_BRANCH_DEPTH",
+                1,
+            ),
+            "max_expansion_branches": _int_budget(
+                kwargs.get("max_expansion_branches"),
+                "RIVALENS_MAX_EXPANSION_BRANCHES",
+                24,
+            ),
+            "max_root_branch_hard_limit": _int_budget(
+                kwargs.get("max_root_branch_hard_limit"),
+                "RIVALENS_MAX_ROOT_BRANCHES",
+                20,
+                minimum=1,
+            ),
+        },
+    }
+
+
 def build_competitive_analysis_graph(
     websocket=None,
     stream_output=None,
@@ -68,7 +124,7 @@ def build_competitive_analysis_graph(
         max_root_branch_hard_limit=_int_budget(
             max_root_branch_hard_limit,
             "RIVALENS_MAX_ROOT_BRANCHES",
-            80,
+            20,
             minimum=1,
         ),
     )
@@ -143,4 +199,7 @@ async def run_competitive_analysis_task(
         max_expansion_branches=kwargs.get("max_expansion_branches"),
         max_root_branch_hard_limit=kwargs.get("max_root_branch_hard_limit"),
     ).compile()
-    return await graph.ainvoke({"task": task})
+    return await graph.ainvoke(
+        {"task": task},
+        config=_workflow_run_config(task, kwargs),
+    )

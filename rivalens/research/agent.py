@@ -21,6 +21,7 @@ from .config import Config
 from .llm_provider import GenericLLMProvider
 from .memory import Memory
 from .prompts import get_prompt_family
+from .trace_context import RIVALENS_SEARCH_QUERIES_KEY, RIVALENS_TRACE_CONTEXT_KEY
 from .skills.browser import BrowserManager
 from .skills.context_manager import ContextManager
 from .skills.curator import SourceCurator
@@ -133,6 +134,8 @@ class ResearchEngine:
                 - "deep": Run MCP for all sub-queries for maximum thoroughness  
                 - "disabled": Skip MCP entirely, use only web retrievers
         """
+        self.rivalens_search_queries = kwargs.pop(RIVALENS_SEARCH_QUERIES_KEY, [])
+        self.rivalens_trace_context = kwargs.pop(RIVALENS_TRACE_CONTEXT_KEY, {})
         self.kwargs = kwargs
         self.query = query
         self.report_type = report_type

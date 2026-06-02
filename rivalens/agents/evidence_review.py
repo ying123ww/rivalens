@@ -2,8 +2,97 @@
 
 from typing import Any
 
+from langsmith import traceable
+
+from rivalens.agents.success_criteria import (
+    matched_success_criterion_ids,
+    normalize_success_criteria,
+)
 from rivalens.schema import EvidenceReviewFinding, EvidenceReviewResult, ResearchBranch
 from rivalens.text_quality import is_low_quality_text
+
+
+def _branch_trace_summary(branch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "branch_id": branch.get("id", ""),
+        "research_brief_id": branch.get("research_brief_id", ""),
+        "parent_branch_id": branch.get("parent_id"),
+        "depth": branch.get("depth", 0),
+        "competitor": branch.get("competitor", ""),
+        "dimension_id": branch.get("dimension_id", ""),
+        "dimension_name": branch.get("dimension_name", ""),
+        "search_stage": branch.get("search_stage", ""),
+        "generated_from_gap": branch.get("generated_from_gap", ""),
+        "decision_action": branch.get("decision_action", ""),
+        "decision_subtype": branch.get("decision_subtype", ""),
+        "query": branch.get("query", ""),
+        "research_goal": branch.get("research_goal", ""),
+        "success_criteria": _criteria_trace_summary(
+            branch.get("success_criteria", []),
+        ),
+    }
+
+
+def _criteria_trace_summary(criteria: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": criterion.get("id", ""),
+            "description": criterion.get("description", ""),
+            "target_source_types": list(criterion.get("target_source_types", []))[:5],
+            "required_source_types": list(criterion.get("required_source_types", []))[:5],
+            "status": criterion.get("status", ""),
+            "evidence_ids": list(criterion.get("evidence_ids", []))[:10],
+        }
+        for criterion in criteria[:10]
+        if isinstance(criterion, dict)
+    ]
+
+
+def _evidence_trace_summary(evidence_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item.get("id", ""),
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "source_type": item.get("source_type", ""),
+            "confidence": item.get("confidence"),
+            "excerpt_chars": len(str(item.get("excerpt") or "")),
+            "success_criterion_ids": list(item.get("success_criterion_ids", []))[:10],
+        }
+        for item in evidence_items[:10]
+    ]
+
+
+def _evidence_review_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    branch = inputs.get("branch") or {}
+    evidence_items = inputs.get("evidence_items") or []
+    return {
+        "branch": _branch_trace_summary(branch),
+        "evidence_count": len(evidence_items),
+        "evidence": _evidence_trace_summary(evidence_items),
+    }
+
+
+def _evidence_review_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+    findings = output.get("findings") or []
+    return {
+        "review_id": output.get("id", ""),
+        "branch_id": output.get("branch_id", ""),
+        "accepted": bool(output.get("accepted")),
+        "score": output.get("score"),
+        "required_action": output.get("required_action", ""),
+        "accepted_evidence_ids": list(output.get("accepted_evidence_ids", []))[:20],
+        "rejected_evidence_ids": list(output.get("rejected_evidence_ids", []))[:20],
+        "criterion_matches": list(output.get("criterion_matches", []))[:20],
+        "finding_count": len(findings),
+        "finding_codes": [
+            finding.get("code", "")
+            for finding in findings[:20]
+            if isinstance(finding, dict)
+        ],
+    }
 
 
 class EvidenceQualityReviewer:
@@ -12,6 +101,13 @@ class EvidenceQualityReviewer:
     def __init__(self, min_sources_per_branch: int = 2):
         self.min_sources_per_branch = min_sources_per_branch
 
+    @traceable(
+        name="rivalens_evidence_quality_review",
+        run_type="chain",
+        tags=["rivalens", "collection", "evidence-review"],
+        process_inputs=_evidence_review_trace_inputs,
+        process_outputs=_evidence_review_trace_outputs,
+    )
     def review(
         self,
         branch: ResearchBranch,
@@ -20,10 +116,40 @@ class EvidenceQualityReviewer:
         item_findings: list[EvidenceReviewFinding] = []
         accepted_evidence_ids: list[str] = []
         rejected_evidence_ids: list[str] = []
+        criterion_matches: list[dict[str, Any]] = []
+        success_criteria = normalize_success_criteria(
+            branch.get("success_criteria", []),
+        )
 
         for evidence in evidence_items:
             evidence_id = evidence.get("id", "")
             item_rejected = False
+            matched_criterion_ids = matched_success_criterion_ids(
+                evidence,
+                success_criteria,
+                branch,
+            )
+            if matched_criterion_ids:
+                evidence["success_criterion_ids"] = matched_criterion_ids
+                criterion_matches.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "criterion_ids": matched_criterion_ids,
+                    }
+                )
+            elif success_criteria:
+                item_findings.append(
+                    self._finding(
+                        branch,
+                        code="no_success_criterion_match",
+                        severity="medium",
+                        evidence_id=evidence_id,
+                        message="Evidence item does not answer the branch success criteria.",
+                        recommendation="Reject this source for this branch and narrow the follow-up query to missing criteria.",
+                    )
+                )
+                item_rejected = True
+
             if not evidence.get("url"):
                 item_findings.append(
                     self._finding(
@@ -101,6 +227,7 @@ class EvidenceQualityReviewer:
             "findings": findings,
             "accepted_evidence_ids": accepted_evidence_ids,
             "rejected_evidence_ids": rejected_evidence_ids,
+            "criterion_matches": criterion_matches,
             "required_action": required_action,
         }
 
@@ -219,6 +346,14 @@ class EvidenceQualityReviewer:
         if "missing_source_url" in high_codes and accepted_count == 0:
             return "retry"
         if "low_quality_text" in high_codes and accepted_count == 0:
+            return "retry"
+        if (
+            any(
+                finding.get("code") == "no_success_criterion_match"
+                for finding in item_findings
+            )
+            and accepted_count == 0
+        ):
             return "retry"
         return "expand"
 

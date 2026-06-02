@@ -302,6 +302,15 @@ class ClaimSupportReviewer:
                     ]
                 ),
                 "target_source_types": target_source_types,
+                "success_criteria": [
+                    {
+                        "id": "claim_verification",
+                        "description": f"Verify claim: {claim_text[:120]}",
+                        "target_source_types": target_source_types,
+                        "required_source_types": target_source_types,
+                        "kind": "claim_verification",
+                    }
+                ],
                 "generated_from_gap": f"verification:{claim.get('id', '')}",
                 "decision_action": "claim_verification",
                 "decision_subtype": "evidence_check",

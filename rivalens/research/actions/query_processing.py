@@ -1,15 +1,128 @@
 import json_repair
 
+from langsmith import traceable
+
 from rivalens.research.llm_provider.generic.base import ReasoningEfforts
 from ..utils.llm import create_chat_completion
 from ..prompts import PromptFamily
 from typing import Any, List, Dict
 from ..config import Config
+from ..trace_context import compact_trace_context, trace_context_from_researcher
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def get_search_results(query: str, retriever: Any, query_domains: List[str] = None, researcher=None) -> List[Dict[str, Any]]:
+
+def _retriever_name(retriever: Any) -> str:
+    return getattr(retriever, "__name__", retriever.__class__.__name__)
+
+
+def _search_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = trace_context_from_researcher(inputs.get("researcher"))
+    return {
+        "query": inputs.get("query", ""),
+        "retriever": _retriever_name(inputs.get("retriever")),
+        "query_domains": list(inputs.get("query_domains") or []),
+        "collection_task": trace_context,
+    }
+
+
+def _search_trace_outputs(output: Any) -> dict[str, Any]:
+    results = output if isinstance(output, list) else []
+    return {
+        "result_count": len(results),
+        "results": [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("href") or item.get("url") or item.get("link") or "",
+                "body_chars": len(str(item.get("body") or item.get("content") or "")),
+                "has_full_text": bool(item.get("content_is_full_text")),
+            }
+            for item in results[:10]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _parse_jsonish(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text or text[0] not in "[{\"":
+        return value
+
+    try:
+        return json_repair.loads(text)
+    except Exception:
+        return value
+
+
+def _clean_sub_query(query: str) -> str:
+    return " ".join(query.split()).strip().strip("\"'")
+
+
+def _dedupe_sub_queries(queries: list[str]) -> list[str]:
+    deduped = []
+    seen = set()
+    for query in queries:
+        cleaned = _clean_sub_query(query)
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _normalize_sub_queries_response(response: Any) -> List[str]:
+    parsed = _parse_jsonish(response)
+
+    if isinstance(parsed, dict):
+        for key in ("queries", "search_queries", "sub_queries", "query"):
+            if key in parsed:
+                return _normalize_sub_queries_response(parsed[key])
+        text = parsed.get("text")
+        if isinstance(text, str):
+            return _normalize_sub_queries_response(text)
+        return []
+
+    if isinstance(parsed, list):
+        queries = []
+        for item in parsed:
+            if isinstance(item, str):
+                queries.append(item)
+            elif isinstance(item, dict):
+                queries.extend(_normalize_sub_queries_response(item))
+        return _dedupe_sub_queries(queries)
+
+    if isinstance(parsed, str):
+        reparsed = _parse_jsonish(parsed)
+        if reparsed is not parsed:
+            return _normalize_sub_queries_response(reparsed)
+        return _dedupe_sub_queries([parsed])
+
+    return []
+
+
+@traceable(
+    name="rivalens_initial_search",
+    run_type="retriever",
+    tags=["rivalens", "collection", "search"],
+    process_inputs=_search_trace_inputs,
+    process_outputs=_search_trace_outputs,
+)
+async def get_search_results(
+    query: str,
+    retriever: Any,
+    query_domains: List[str] = None,
+    researcher=None,
+    trace_context: dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get web search results for a given query.
 
@@ -73,45 +186,21 @@ async def generate_sub_queries(
         context=context,
     )
 
-    try:
-        response = await create_chat_completion(
-            model=cfg.strategic_llm_model,
-            messages=[{"role": "user", "content": gen_queries_prompt}],
-            llm_provider=cfg.strategic_llm_provider,
-            max_tokens=None,
-            llm_kwargs=cfg.llm_kwargs,
-            reasoning_effort=ReasoningEfforts.Medium.value,
-            cost_callback=cost_callback,
-            **kwargs
-        )
-    except Exception as e:
-        logger.warning(f"Error with strategic LLM: {e}. Retrying with max_tokens={cfg.strategic_token_limit}.")
-        try:
-            response = await create_chat_completion(
-                model=cfg.strategic_llm_model,
-                messages=[{"role": "user", "content": gen_queries_prompt}],
-                max_tokens=cfg.strategic_token_limit,
-                llm_provider=cfg.strategic_llm_provider,
-                llm_kwargs=cfg.llm_kwargs,
-                cost_callback=cost_callback,
-                **kwargs
-            )
-            logger.warning(f"Retrying with max_tokens={cfg.strategic_token_limit} successful.")
-        except Exception as e:
-            logger.warning(f"Retrying with max_tokens={cfg.strategic_token_limit} failed.")
-            logger.warning(f"Error with strategic LLM: {e}. Falling back to smart LLM.")
-            response = await create_chat_completion(
-                model=cfg.smart_llm_model,
-                messages=[{"role": "user", "content": gen_queries_prompt}],
-                temperature=cfg.temperature,
-                max_tokens=cfg.smart_token_limit,
-                llm_provider=cfg.smart_llm_provider,
-                llm_kwargs=cfg.llm_kwargs,
-                cost_callback=cost_callback,
-                **kwargs
-            )
+    response = await create_chat_completion(
+        model=cfg.strategic_llm_model,
+        messages=[{"role": "user", "content": gen_queries_prompt}],
+        llm_provider=cfg.strategic_llm_provider,
+        max_tokens=None,
+        llm_kwargs=cfg.llm_kwargs,
+        reasoning_effort=ReasoningEfforts.Medium.value,
+        cost_callback=cost_callback,
+        **kwargs
+    )
 
-    return json_repair.loads(response)
+    sub_queries = _normalize_sub_queries_response(response)
+    if not sub_queries:
+        raise ValueError("Sub-query LLM returned no parseable queries.")
+    return sub_queries
 
 async def plan_research_outline(
     query: str,

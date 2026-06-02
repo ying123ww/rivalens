@@ -10,12 +10,72 @@ import logging
 import os
 import random
 
+from langsmith import traceable
+
 from ..actions.agent_creator import choose_agent
 from ..actions.query_processing import get_search_results, plan_research_outline
 from ..actions.utils import stream_output
 from ..document import DocumentLoader, LangChainDocumentLoader, OnlineDocumentLoader
+from ..trace_context import (
+    compact_trace_context,
+    langsmith_extra_for_trace_context,
+    trace_context_from_conductor,
+)
 from ..utils.enum import ReportSource, ReportType
 from ..utils.logging_config import get_json_handler
+
+
+def _retriever_name(retriever: object) -> str:
+    return getattr(retriever, "__name__", retriever.__class__.__name__)
+
+
+def _retriever_trace_inputs(inputs: dict) -> dict:
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = trace_context_from_conductor(inputs.get("self"))
+    return {
+        "query": inputs.get("query", ""),
+        "retriever": _retriever_name(inputs.get("retriever_class")),
+        "query_domains": list(inputs.get("query_domains") or []),
+        "max_results": inputs.get("max_results"),
+        "collection_task": trace_context,
+    }
+
+
+def _retriever_trace_outputs(output) -> dict:
+    results = output if isinstance(output, list) else []
+    return {
+        "result_count": len(results),
+        "results": [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("href") or item.get("url") or item.get("link") or "",
+                "body_chars": len(str(item.get("body") or item.get("content") or "")),
+                "has_full_text": bool(item.get("content_is_full_text")),
+            }
+            for item in results[:10]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _subquery_trace_inputs(inputs: dict) -> dict:
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = trace_context_from_conductor(inputs.get("self"))
+    return {
+        "sub_query": inputs.get("sub_query", ""),
+        "scraped_data_size": len(inputs.get("scraped_data") or []),
+        "query_domains": list(inputs.get("query_domains") or []),
+        "collection_task": trace_context,
+    }
+
+
+def _subquery_trace_outputs(output) -> dict:
+    return {
+        "has_context": bool(output),
+        "context_chars": len(str(output or "")),
+    }
 
 
 class ResearchConductor:
@@ -44,6 +104,11 @@ class ResearchConductor:
         self._mcp_results_cache = None
         # Track MCP query count for balanced mode
         self._mcp_query_count = 0
+        self.max_subquery_concurrency = _int_env(
+            "RIVALENS_MAX_SUBQUERY_CONCURRENCY",
+            2,
+            minimum=1,
+        )
 
     async def plan_research(self, query, query_domains=None):
         """Gets the sub-queries from the query
@@ -52,6 +117,20 @@ class ResearchConductor:
         Returns:
             List of queries
         """
+        preplanned_queries = self._rivalens_preplanned_search_queries()
+        if preplanned_queries:
+            self.logger.info(
+                "Using Rivalens preplanned branch search queries: %s",
+                preplanned_queries,
+            )
+            await stream_output(
+                "logs",
+                "planning_research",
+                f"🔎 Using Rivalens planned search queries for branch: {query}...",
+                self.researcher.websocket,
+            )
+            return preplanned_queries
+
         await stream_output(
             "logs",
             "planning_research",
@@ -86,6 +165,16 @@ class ResearchConductor:
         self.logger.info(f"Research outline planned: {outline}")
         return outline
 
+    def _rivalens_preplanned_search_queries(self):
+        preplanned_queries = self._dedupe_search_queries(
+            getattr(self.researcher, "rivalens_search_queries", []),
+        )
+        if preplanned_queries:
+            return preplanned_queries
+
+        trace_context = trace_context_from_conductor(self)
+        return self._dedupe_search_queries(trace_context.get("search_queries", []))
+
     async def _get_initial_search_results(self, query, query_domains=None):
         retrievers = list(self.researcher.retrievers or [])
         non_mcp_retrievers = [
@@ -101,6 +190,11 @@ class ResearchConductor:
                 retrievers[0],
                 query_domains,
                 researcher=self.researcher,
+                **self._trace_kwargs_for(
+                    get_search_results,
+                    "initial_search",
+                    query=query,
+                ),
             )
             return self._dedupe_initial_search_results(
                 results or [],
@@ -118,6 +212,11 @@ class ResearchConductor:
                     retriever,
                     query_domains,
                     researcher=self.researcher,
+                    **self._trace_kwargs_for(
+                        get_search_results,
+                        "initial_search",
+                        query=query,
+                    ),
                 )
             except Exception as exc:
                 self.logger.warning(
@@ -327,10 +426,10 @@ class ResearchConductor:
         self.logger.info(f"Starting vectorstore search for query: {query}")
         context = []
         # Generate Sub-Queries including original query
-        sub_queries = await self.plan_research(query)
+        sub_queries = self._dedupe_search_queries(await self.plan_research(query))
         # If this is not part of a sub researcher, add original query to research for better results
         if self.researcher.report_type != "subtopic_report":
-            sub_queries.append(query)
+            sub_queries = self._dedupe_search_queries([*sub_queries, query])
 
         if self.researcher.verbose:
             await stream_output(
@@ -343,9 +442,13 @@ class ResearchConductor:
             )
 
         # Using asyncio.gather to process the sub_queries asynchronously
+        subquery_semaphore = asyncio.Semaphore(self.max_subquery_concurrency)
         context = await asyncio.gather(
             *[
-                self._process_sub_query_with_vectorstore(sub_query, filter)
+                self._process_sub_query_with_limit(
+                    subquery_semaphore,
+                    self._process_sub_query_with_vectorstore(sub_query, filter),
+                )
                 for sub_query in sub_queries
             ]
         )
@@ -415,12 +518,14 @@ class ResearchConductor:
                 self.logger.info(f"MCP results cached: {len(mcp_context)} total context entries")
 
         # Generate Sub-Queries including original query
-        sub_queries = await self.plan_research(query, query_domains)
+        sub_queries = self._dedupe_search_queries(
+            await self.plan_research(query, query_domains),
+        )
         self.logger.info(f"Generated sub-queries: {sub_queries}")
         
         # If this is not part of a sub researcher, add original query to research for better results
         if self.researcher.report_type != "subtopic_report":
-            sub_queries.append(query)
+            sub_queries = self._dedupe_search_queries([*sub_queries, query])
 
         if self.researcher.verbose:
             await stream_output(
@@ -434,15 +539,33 @@ class ResearchConductor:
 
         # Using asyncio.gather to process the sub_queries asynchronously
         try:
+            subquery_semaphore = asyncio.Semaphore(self.max_subquery_concurrency)
             context = await asyncio.gather(
                 *[
-                    self._process_sub_query(sub_query, scraped_data, query_domains)
+                    self._process_sub_query_with_limit(
+                        subquery_semaphore,
+                        self._process_sub_query(
+                            sub_query,
+                            scraped_data,
+                            query_domains,
+                            **self._trace_kwargs_for(
+                                self._process_sub_query,
+                                "process_subquery",
+                                query=sub_query,
+                            ),
+                        ),
+                    )
                     for sub_query in sub_queries
                 ]
             )
-            self.logger.info(f"Gathered context from {len(context)} sub-queries")
             # Filter out empty results and join the context
+            processed_context_count = len(context)
             context = [c for c in context if c]
+            self.logger.info(
+                "Gathered context from %s/%s sub-queries",
+                len(context),
+                processed_context_count,
+            )
             if context:
                 combined_context = " ".join(context)
                 self.logger.info(f"Combined context size: {len(combined_context)}")
@@ -451,6 +574,26 @@ class ResearchConductor:
         except Exception as e:
             self.logger.error(f"Error during web search: {e}", exc_info=True)
             return []
+
+    async def _process_sub_query_with_limit(self, semaphore: asyncio.Semaphore, awaitable):
+        async with semaphore:
+            return await awaitable
+
+    def _dedupe_search_queries(self, queries):
+        deduped = []
+        seen = set()
+        for query in queries or []:
+            if not isinstance(query, str):
+                continue
+            cleaned = " ".join(query.split()).strip()
+            if not cleaned:
+                continue
+            key = cleaned.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(cleaned)
+        return deduped
 
     def _get_mcp_strategy(self) -> str:
         """
@@ -534,7 +677,20 @@ class ResearchConductor:
         
         return all_mcp_context
 
-    async def _process_sub_query(self, sub_query: str, scraped_data: list = [], query_domains: list = []):
+    @traceable(
+        name="rivalens_process_subquery",
+        run_type="chain",
+        tags=["rivalens", "collection", "subquery"],
+        process_inputs=_subquery_trace_inputs,
+        process_outputs=_subquery_trace_outputs,
+    )
+    async def _process_sub_query(
+        self,
+        sub_query: str,
+        scraped_data: list = [],
+        query_domains: list = [],
+        trace_context: dict | None = None,
+    ):
         """Takes in a sub query and scrapes urls based on it and gathers context."""
         if self.json_handler:
             self.json_handler.log_event("sub_query", {
@@ -608,7 +764,8 @@ class ResearchConductor:
             # Get web search context using non-MCP retrievers (if no scraped data provided)
             if not scraped_data:
                 scraped_data = await self._scrape_data_by_urls(sub_query, query_domains)
-                self.logger.info(f"Scraped data size: {len(scraped_data)}")
+                if scraped_data:
+                    self.logger.info(f"Scraped data size: {len(scraped_data)}")
 
             # Get similar content based on scraped data
             if scraped_data:
@@ -635,7 +792,7 @@ class ResearchConductor:
                         self.researcher.websocket,
                     )
             else:
-                self.logger.warning(f"No combined context found for sub-query: {sub_query}")
+                self.logger.info(f"No combined context found for sub-query: {sub_query}")
                 if self.researcher.verbose:
                     await stream_output(
                         "logs",
@@ -789,7 +946,7 @@ class ResearchConductor:
             self.logger.info(f"Combined context for '{sub_query}': {len(final_context)} total chars")
             return final_context
         else:
-            self.logger.warning(f"No context to combine for sub-query: {sub_query}")
+            self.logger.info(f"No context to combine for sub-query: {sub_query}")
             return ""
 
     async def _process_sub_query_with_vectorstore(self, sub_query: str, filter: dict | None = None):
@@ -836,6 +993,63 @@ class ResearchConductor:
 
         return new_urls
 
+    @traceable(
+        name="rivalens_retriever_search",
+        run_type="retriever",
+        tags=["rivalens", "collection", "search"],
+        process_inputs=_retriever_trace_inputs,
+        process_outputs=_retriever_trace_outputs,
+    )
+    async def _run_retriever_search(
+        self,
+        retriever_class,
+        query: str,
+        query_domains: list,
+        max_results: int,
+        trace_context: dict | None = None,
+    ):
+        retriever = retriever_class(
+            query,
+            headers=self.researcher.headers,
+            query_domains=query_domains,
+        )
+        return await asyncio.to_thread(retriever.search, max_results=max_results)
+
+    def _trace_extra(
+        self,
+        operation: str,
+        *,
+        query: str = "",
+        tags: list[str] | None = None,
+    ) -> dict:
+        trace_context = trace_context_from_conductor(self)
+        metadata = {"rivalens_actual_query": query} if query else None
+        return langsmith_extra_for_trace_context(
+            trace_context,
+            operation=operation,
+            tags=tags,
+            metadata=metadata,
+        )
+
+    def _trace_kwargs_for(
+        self,
+        callable_obj,
+        operation: str,
+        *,
+        query: str = "",
+        tags: list[str] | None = None,
+    ) -> dict:
+        if not getattr(callable_obj, "__langsmith_traceable__", False):
+            return {}
+        return {
+            "trace_context": trace_context_from_conductor(self),
+            "langsmith_extra": self._trace_extra(
+                operation,
+                query=query,
+                tags=tags,
+            )
+        }
+
     async def _search_relevant_source_urls(self, query, query_domains: list | None = None):
         new_search_urls = []
         prefetched_content = []
@@ -850,16 +1064,16 @@ class ResearchConductor:
                 continue
 
             try:
-                # Instantiate the retriever with the sub-query
-                retriever = retriever_class(
+                search_results = await self._run_retriever_search(
+                    retriever_class,
                     query,
-                    headers=self.researcher.headers,
-                    query_domains=query_domains,
-                )
-
-                # Perform the search using the current retriever
-                search_results = await asyncio.to_thread(
-                    retriever.search, max_results=self.researcher.cfg.max_search_results_per_query
+                    query_domains,
+                    self.researcher.cfg.max_search_results_per_query,
+                    **self._trace_kwargs_for(
+                        self._run_retriever_search,
+                        "retriever_search",
+                        query=query,
+                    ),
                 )
 
                 if not search_results:
@@ -920,6 +1134,17 @@ class ResearchConductor:
             query_domains = []
 
         new_search_urls, prefetched_content = await self._search_relevant_source_urls(sub_query, query_domains)
+
+        if not new_search_urls and not prefetched_content:
+            self.logger.info(f"No source URLs found for sub-query: {sub_query}; skipping scraping")
+            if self.researcher.verbose:
+                await stream_output(
+                    "logs",
+                    "no_sources_to_scrape",
+                    "No source candidates were found; skipping scraping for this query.",
+                    self.researcher.websocket,
+                )
+            return []
 
         # Log the research process if verbose mode is on
         if self.researcher.verbose:
@@ -1114,3 +1339,14 @@ class ResearchConductor:
                     "progress": progress
                 }
             )
+
+
+def _int_env(env_name: str, default: int, minimum: int = 0) -> int:
+    raw_value = os.getenv(env_name)
+    if raw_value in (None, ""):
+        return default
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)

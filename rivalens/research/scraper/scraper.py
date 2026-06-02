@@ -9,10 +9,16 @@ import importlib
 import logging
 import subprocess
 import sys
+from contextvars import copy_context
 
 import requests
 from colorama import Fore, init
+from langsmith import traceable
 
+from rivalens.research.trace_context import (
+    compact_trace_context,
+    langsmith_extra_for_trace_context,
+)
 from rivalens.research.utils.workers import WorkerPool
 
 from . import (
@@ -27,12 +33,43 @@ from . import (
 )
 
 
+def _scrape_trace_inputs(inputs: dict) -> dict:
+    scraper = inputs.get("self")
+    trace_context = compact_trace_context(inputs.get("trace_context"))
+    if not trace_context:
+        trace_context = compact_trace_context(getattr(scraper, "trace_context", {}))
+    return {
+        "url": inputs.get("link", ""),
+        "collection_task": trace_context,
+    }
+
+
+def _scrape_trace_outputs(output) -> dict:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+    raw_content = output.get("raw_content") or ""
+    return {
+        "url": output.get("url", ""),
+        "title": output.get("title", ""),
+        "content_chars": len(raw_content),
+        "image_count": len(output.get("image_urls") or []),
+        "success": bool(raw_content),
+    }
+
+
 class Scraper:
     """
     Scraper class to extract the content from the links
     """
 
-    def __init__(self, urls, user_agent, scraper, worker_pool: WorkerPool):
+    def __init__(
+        self,
+        urls,
+        user_agent,
+        scraper,
+        worker_pool: WorkerPool,
+        trace_context: dict | None = None,
+    ):
         """
         Initialize the Scraper class.
         Args:
@@ -52,6 +89,7 @@ class Scraper:
             self._check_pkg(self.scraper)
         self.logger = logging.getLogger(__name__)
         self.worker_pool = worker_pool
+        self.trace_context = compact_trace_context(trace_context)
 
         # Log deduplication results if duplicates were found
         if duplicates_removed > 0:
@@ -65,7 +103,19 @@ class Scraper:
         Extracts the content from the links
         """
         contents = await asyncio.gather(
-            *(self.extract_data_from_url(url, self.session) for url in self.urls)
+            *(
+                self.extract_data_from_url(
+                    url,
+                    self.session,
+                    trace_context=self.trace_context,
+                    langsmith_extra=langsmith_extra_for_trace_context(
+                        self.trace_context,
+                        operation="scrape_url",
+                        metadata={"rivalens_url": url},
+                    ),
+                )
+                for url in self.urls
+            )
         )
 
         res = [content for content in contents if content["raw_content"] is not None]
@@ -105,7 +155,14 @@ class Scraper:
                     f"`pip install -U {pkg_inst_name}`"
                 )
 
-    async def extract_data_from_url(self, link, session):
+    @traceable(
+        name="rivalens_scrape_url",
+        run_type="tool",
+        tags=["rivalens", "collection", "scrape"],
+        process_inputs=_scrape_trace_inputs,
+        process_outputs=_scrape_trace_outputs,
+    )
+    async def extract_data_from_url(self, link, session, trace_context: dict | None = None):
         """
         Extracts the data from the link with logging
         """
@@ -122,12 +179,14 @@ class Scraper:
                 if hasattr(scraper, "scrape_async"):
                     content, image_urls, title = await scraper.scrape_async()
                 else:
+                    context = copy_context()
                     (
                         content,
                         image_urls,
                         title,
                     ) = await asyncio.get_running_loop().run_in_executor(
-                        self.worker_pool.executor, scraper.scrape
+                        self.worker_pool.executor,
+                        lambda: context.run(scraper.scrape),
                     )
 
                 if len(content) < 100:

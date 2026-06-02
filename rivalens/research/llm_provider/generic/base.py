@@ -9,6 +9,7 @@ from typing import Any
 from colorama import Fore, Style, init
 import os
 from enum import Enum
+from contextvars import copy_context
 
 _SUPPORTED_PROVIDERS = {
     "openai",
@@ -286,8 +287,9 @@ class GenericLLMProvider:
             # Run in thread pool to avoid anyio TCP connect issues on Windows
             # when using non-OpenAI endpoints behind istio-envoy proxies.
             loop = asyncio.get_running_loop()
+            context = copy_context()
             output = await loop.run_in_executor(
-                None, lambda: self.llm.invoke(messages, **kwargs)
+                None, lambda: context.run(self.llm.invoke, messages, **kwargs)
             )
 
             res = output.content

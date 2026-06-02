@@ -18,26 +18,43 @@ interface AccessReportProps {
 const AccessReport: React.FC<AccessReportProps> = ({ accessData, chatBoxSettings, report, onShareClick }) => {
   const host = getHost();
 
-  const getReportLink = (dataType: 'pdf' | 'docx' | 'json' | 'html'): string => {
-    // Early return if path is not available
+  const getOutputPath = (dataType: 'pdf' | 'docx' | 'json' | 'html'): string => {
     if (!accessData?.[dataType]) {
       console.warn(`No ${dataType} path provided`);
-      return '#';
+      return '';
     }
 
     const path = accessData[dataType] as string;
-
-    // Clean the path - remove leading/trailing slashes and handle outputs/ prefix
     const cleanPath = path
       .trim()
-      .replace(/^\/+|\/+$/g, ''); // Remove leading/trailing slashes
+      .replace(/^\/+|\/+$/g, '');
 
-    // Only prepend outputs/ if it's not already there
-    const finalPath = cleanPath.startsWith('outputs/')
+    return cleanPath.startsWith('outputs/')
       ? cleanPath
       : `outputs/${cleanPath}`;
+  };
 
-    return `${host}/${finalPath}`;
+  const encodeOutputPath = (path: string): string => {
+    return path.split('/').map(encodeURIComponent).join('/');
+  };
+
+  const getReportLink = (dataType: 'pdf' | 'docx' | 'json' | 'html'): string => {
+    const outputPath = getOutputPath(dataType);
+    if (!outputPath) return '#';
+
+    return `${host}/${outputPath}`;
+  };
+
+  const getDownloadLink = (dataType: 'pdf' | 'docx' | 'json' | 'html'): string => {
+    const outputPath = getOutputPath(dataType);
+    if (!outputPath) return '#';
+
+    return `${host}/api/download/${encodeOutputPath(outputPath)}`;
+  };
+
+  const getDownloadName = (dataType: 'pdf' | 'docx' | 'json' | 'html'): string => {
+    const outputPath = getOutputPath(dataType);
+    return outputPath.split('/').pop() || `report.${dataType}`;
   };
 
   // Safety check for accessData
@@ -66,9 +83,9 @@ const AccessReport: React.FC<AccessReportProps> = ({ accessData, chatBoxSettings
 
           {accessData.docx && (
             <a
-              href={getReportLink('docx')}
+              href={getDownloadLink('docx')}
+              download={getDownloadName('docx')}
               className="bg-blue-500 text-white font-medium uppercase text-sm px-6 py-3 rounded-lg shadow-md hover:shadow-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-blue-400/50 transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-              target="_blank"
               rel="noopener noreferrer">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -79,9 +96,9 @@ const AccessReport: React.FC<AccessReportProps> = ({ accessData, chatBoxSettings
 
           {accessData.html && (
             <a
-              href={getReportLink('html')}
+              href={getDownloadLink('html')}
+              download={getDownloadName('html')}
               className="bg-purple-600 text-white font-medium uppercase text-sm px-6 py-3 rounded-lg shadow-md hover:shadow-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-              target="_blank"
               rel="noopener noreferrer">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -92,9 +109,9 @@ const AccessReport: React.FC<AccessReportProps> = ({ accessData, chatBoxSettings
 
           {accessData.json && (
             <a
-              href={getReportLink('json')}
+              href={getDownloadLink('json')}
+              download={getDownloadName('json')}
               className="bg-cyan-600 text-white font-medium uppercase text-sm px-6 py-3 rounded-lg shadow-md hover:shadow-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-              target="_blank"
               rel="noopener noreferrer">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />

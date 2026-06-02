@@ -111,6 +111,16 @@ class EvidenceItem(TypedDict, total=False):
     source_priority: int
     is_primary_source: bool
     confidence: float
+    success_criterion_ids: list[str]
+
+
+class SuccessCriterion(TypedDict, total=False):
+    id: str
+    description: str
+    required_source_types: list[EvidenceType]
+    target_source_types: list[EvidenceType]
+    evidence_ids: list[str]
+    status: Literal["satisfied", "partial", "missing"]
 
 
 class EvidenceCollectionTask(TypedDict, total=False):
@@ -134,7 +144,9 @@ class EvidenceCollectionTask(TypedDict, total=False):
     parent_dimension_id: str
     target_urls: list[str]
     query: str
+    research_goal: str
     search_queries: list[str]
+    success_criteria: list[SuccessCriterion]
     task_context: str
     file_rag_context: str
 
@@ -160,6 +172,7 @@ EvidenceReviewFindingCode = Literal[
     "competitor_mismatch",
     "dimension_mismatch",
     "low_quality_text",
+    "no_success_criterion_match",
 ]
 
 
@@ -183,6 +196,7 @@ class EvidenceReviewResult(TypedDict, total=False):
     findings: list[EvidenceReviewFinding]
     accepted_evidence_ids: list[str]
     rejected_evidence_ids: list[str]
+    criterion_matches: list[dict[str, Any]]
     required_action: EvidenceReviewAction
 
 
@@ -204,7 +218,9 @@ class ResearchBranch(TypedDict, total=False):
     dimension_type: str
     topic: str
     query: str
+    research_goal: str
     search_queries: list[str]
+    success_criteria: list[SuccessCriterion]
     task_context: str
     target_urls: list[str]
     search_stage: str
@@ -234,6 +250,7 @@ class ResearchBrief(TypedDict, total=False):
     dimension_id: str
     dimension_name: str
     objective: str
+    success_criteria: list[SuccessCriterion]
     guiding_questions: list[str]
     source_hints: list[str]
     minimum_coverage: list[str]
@@ -254,7 +271,9 @@ class ResearchTask(TypedDict, total=False):
     search_stage: SearchStage
     objective: str
     query: str
+    research_goal: str
     search_queries: list[str]
+    success_criteria: list[SuccessCriterion]
     task_context: str
     target_urls: list[str]
     source_hints: list[str]
@@ -268,6 +287,7 @@ class ResearchTask(TypedDict, total=False):
 class FollowUpTaskSpec(TypedDict, total=False):
     objective: str
     query: str
+    success_criteria: list[SuccessCriterion]
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     dimension_id: str
@@ -317,6 +337,10 @@ class CoverageAssessment(TypedDict, total=False):
     found_source_types: list[str]
     covered_questions: list[str]
     missing_questions: list[str]
+    satisfied_criteria: list[SuccessCriterion]
+    partial_criteria: list[SuccessCriterion]
+    missing_criteria: list[SuccessCriterion]
+    criterion_matches: list[dict[str, Any]]
     contradictions: list[str]
     next_action: CoverageNextAction
     follow_up_task_specs: list[FollowUpTaskSpec]

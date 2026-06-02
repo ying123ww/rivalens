@@ -4,12 +4,106 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from langsmith import traceable
+
+from rivalens.agents.evidence_review import (
+    _branch_trace_summary,
+    _criteria_trace_summary,
+    _evidence_trace_summary,
+)
+from rivalens.agents.success_criteria import (
+    evidence_matches_success_criterion,
+    normalize_success_criteria,
+)
 from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch
+
+
+def _follow_up_trace_summary(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "objective": spec.get("objective", ""),
+            "query": spec.get("query", ""),
+            "generated_from_gap": spec.get("generated_from_gap", ""),
+            "decision_action": spec.get("decision_action", ""),
+            "decision_subtype": spec.get("decision_subtype", ""),
+            "target_source_types": list(spec.get("target_source_types", []))[:5],
+            "success_criteria": _criteria_trace_summary(
+                spec.get("success_criteria", []),
+            ),
+        }
+        for spec in specs[:10]
+        if isinstance(spec, dict)
+    ]
+
+
+def _coverage_review_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    branch = inputs.get("branch") or {}
+    evidence_items = inputs.get("evidence_items") or []
+    evidence_review = inputs.get("evidence_review") or {}
+    return {
+        "branch": _branch_trace_summary(branch),
+        "research_task_ids": list(inputs.get("research_task_ids") or []),
+        "evidence_count": len(evidence_items),
+        "evidence": _evidence_trace_summary(evidence_items),
+        "evidence_review": {
+            "id": evidence_review.get("id", ""),
+            "accepted": bool(evidence_review.get("accepted")),
+            "required_action": evidence_review.get("required_action", ""),
+            "score": evidence_review.get("score"),
+            "accepted_evidence_ids": list(
+                evidence_review.get("accepted_evidence_ids", []),
+            )[:20],
+            "rejected_evidence_ids": list(
+                evidence_review.get("rejected_evidence_ids", []),
+            )[:20],
+            "criterion_matches": list(
+                evidence_review.get("criterion_matches", []),
+            )[:20],
+        },
+    }
+
+
+def _coverage_review_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+    return {
+        "coverage_id": output.get("id", ""),
+        "branch_id": output.get("branch_id", ""),
+        "next_action": output.get("next_action", ""),
+        "confidence": output.get("confidence"),
+        "decision": output.get("decision", {}),
+        "accepted_evidence_ids": list(output.get("accepted_evidence_ids", []))[:20],
+        "rejected_evidence_ids": list(output.get("rejected_evidence_ids", []))[:20],
+        "found_source_types": list(output.get("found_source_types", []))[:10],
+        "covered_questions": list(output.get("covered_questions", []))[:10],
+        "missing_questions": list(output.get("missing_questions", []))[:10],
+        "satisfied_criteria": _criteria_trace_summary(
+            output.get("satisfied_criteria", []),
+        ),
+        "partial_criteria": _criteria_trace_summary(
+            output.get("partial_criteria", []),
+        ),
+        "missing_criteria": _criteria_trace_summary(
+            output.get("missing_criteria", []),
+        ),
+        "criterion_matches": list(output.get("criterion_matches", []))[:20],
+        "selected_follow_up_specs": _follow_up_trace_summary(
+            output.get("selected_follow_up_specs", []),
+        ),
+        "arbitration": output.get("arbitration", {}),
+    }
 
 
 class CoverageReviewer:
     """Assess whether a branch has enough evidence coverage for analysis."""
 
+    @traceable(
+        name="rivalens_coverage_review",
+        run_type="chain",
+        tags=["rivalens", "collection", "coverage-review"],
+        process_inputs=_coverage_review_trace_inputs,
+        process_outputs=_coverage_review_trace_outputs,
+    )
     def review(
         self,
         branch: ResearchBranch,
@@ -30,20 +124,30 @@ class CoverageReviewer:
             branch.get("guiding_questions", [])
             or dimension_policy.get("guiding_questions", [])
         )
+        success_criteria = normalize_success_criteria(
+            branch.get("success_criteria", []),
+        )
         covered_questions, missing_questions = self._question_coverage(
             guiding_questions,
             accepted_evidence,
             dimension_policy,
         )
+        criterion_coverage = self._criterion_coverage(
+            success_criteria,
+            accepted_evidence,
+            branch,
+        )
         next_action = self._next_action(
             accepted_count=len(accepted_evidence),
             missing_questions=missing_questions,
+            missing_criteria=criterion_coverage["missing_criteria"],
             evidence_review=evidence_review,
         )
         follow_up_specs = (
             self._follow_up_task_specs(
                 branch,
                 missing_questions,
+                criterion_coverage["missing_criteria"],
                 evidence_review,
             )
             if next_action in {"collect_more", "refine_query"}
@@ -72,6 +176,10 @@ class CoverageReviewer:
             "found_source_types": found_source_types,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
+            "satisfied_criteria": criterion_coverage["satisfied_criteria"],
+            "partial_criteria": criterion_coverage["partial_criteria"],
+            "missing_criteria": criterion_coverage["missing_criteria"],
+            "criterion_matches": criterion_coverage["criterion_matches"],
             "contradictions": [],
             "next_action": next_action,
             "follow_up_task_specs": follow_up_specs,
@@ -140,13 +248,14 @@ class CoverageReviewer:
         self,
         accepted_count: int,
         missing_questions: list[str],
+        missing_criteria: list[dict[str, Any]],
         evidence_review: EvidenceReviewResult,
     ) -> str:
         if accepted_count == 0:
             if evidence_review.get("required_action") == "retry":
                 return "refine_query"
             return "collect_more"
-        if missing_questions:
+        if missing_questions or missing_criteria:
             return "collect_more"
         return "ready_for_analysis"
 
@@ -154,6 +263,7 @@ class CoverageReviewer:
         self,
         branch: ResearchBranch,
         missing_questions: list[str],
+        missing_criteria: list[dict[str, Any]],
         evidence_review: EvidenceReviewResult,
     ) -> list[dict[str, Any]]:
         specs = []
@@ -175,6 +285,34 @@ class CoverageReviewer:
             )
             return specs[:2]
 
+        if missing_criteria:
+            criterion = missing_criteria[0]
+            gap = (
+                "missing_guiding_question"
+                if criterion.get("kind") == "guiding_question"
+                else "missing_success_criterion"
+            )
+            description = str(criterion.get("description", "")).strip()
+            specs.append(
+                {
+                    "objective": f"Answer missing success criterion: {description}",
+                    "query": self._criterion_query(branch, criterion),
+                    "success_criteria": [criterion],
+                    "target_source_types": criterion.get("target_source_types", []),
+                    "generated_from_gap": gap,
+                    "decision_action": "source_discovery",
+                    "decision_subtype": "coverage_gap_search",
+                    "reason": "Coverage review found an unsatisfied success criterion.",
+                    "search_stage": "focused",
+                    "dimension_id": branch.get("dimension_id", ""),
+                    "dimension_name": branch.get("dimension_name", ""),
+                    "dimension_type": branch.get("dimension_type", ""),
+                    "parent_dimension_id": branch.get("parent_dimension_id", ""),
+                    "guiding_questions": [description] if criterion.get("kind") == "guiding_question" else [],
+                }
+            )
+            return specs[:3]
+
         if missing_questions:
             question = missing_questions[0]
             specs.append(
@@ -190,6 +328,7 @@ class CoverageReviewer:
                     "dimension_name": branch.get("dimension_name", ""),
                     "dimension_type": branch.get("dimension_type", ""),
                     "parent_dimension_id": branch.get("parent_dimension_id", ""),
+                    "guiding_questions": [question],
                 }
             )
         return specs[:3]
@@ -406,6 +545,20 @@ class CoverageReviewer:
             ]
         )
 
+    def _criterion_query(self, branch: ResearchBranch, criterion: dict[str, Any]) -> str:
+        target_source_types = criterion.get("target_source_types") or criterion.get(
+            "required_source_types",
+            [],
+        )
+        lines = [
+            self._base_query(branch, str(criterion.get("description", ""))),
+            f"Missing success criterion: {criterion.get('description', '')}",
+            "Return evidence that directly satisfies this criterion.",
+        ]
+        if target_source_types:
+            lines.append("Target source types: " + ", ".join(target_source_types))
+        return "\n".join(lines)
+
     def _base_query(self, branch: ResearchBranch, focus: str) -> str:
         return "\n".join(
             [
@@ -415,6 +568,68 @@ class CoverageReviewer:
                 "Prefer public, source-backed pages with stable URLs.",
             ]
         )
+
+    def _criterion_coverage(
+        self,
+        success_criteria: list[dict[str, Any]],
+        accepted_evidence: list[dict[str, Any]],
+        branch: ResearchBranch,
+    ) -> dict[str, list[dict[str, Any]]]:
+        satisfied = []
+        partial = []
+        missing = []
+        matches = []
+
+        for criterion in success_criteria:
+            matched_evidence = [
+                evidence
+                for evidence in accepted_evidence
+                if evidence_matches_success_criterion(evidence, criterion, branch)
+            ]
+            evidence_ids = [
+                evidence.get("id", "")
+                for evidence in matched_evidence
+                if evidence.get("id")
+            ]
+            required_source_types = set(criterion.get("required_source_types", []))
+            required_source_matched = (
+                not required_source_types
+                or any(
+                    evidence.get("source_type") in required_source_types
+                    for evidence in matched_evidence
+                )
+            )
+            status = "missing"
+            if evidence_ids and required_source_matched:
+                status = "satisfied"
+            elif evidence_ids:
+                status = "partial"
+
+            criterion_result = {
+                **criterion,
+                "evidence_ids": evidence_ids,
+                "status": status,
+            }
+            matches.append(
+                {
+                    "criterion_id": criterion.get("id", ""),
+                    "evidence_ids": evidence_ids,
+                    "status": status,
+                }
+            )
+            if status == "satisfied":
+                satisfied.append(criterion_result)
+            elif status == "partial":
+                partial.append(criterion_result)
+            else:
+                missing.append(criterion_result)
+
+        return {
+            "satisfied_criteria": satisfied,
+            "partial_criteria": partial,
+            "missing_criteria": missing,
+            "criterion_matches": matches,
+        }
 
     def _confidence(
         self,

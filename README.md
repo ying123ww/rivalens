@@ -121,8 +121,11 @@ competitor-by-dimension collection tasks and runs them concurrently through
 `ResearchEngineEvidenceCollector`, which wraps
 `rivalens.research.ResearchEngine` as a narrow evidence adapter. It normalizes
 research sources into `EvidenceItem` records with collection task and analysis
-dimension metadata, reviews each standard-search result, and stores accepted
-branch evidence for structuring and analysis. `KnowledgeStructuringAgent`
+dimension metadata, reviews each standard-search result against branch
+`success_criteria`, and stores accepted branch evidence for structuring and
+analysis. `CoverageReviewer` records which criteria are satisfied, partial, or
+missing, then narrows follow-up tasks to the missing criteria instead of
+throwing away partially useful evidence. `KnowledgeStructuringAgent`
 structures the accepted evidence into `CompetitorKnowledge`; `AnalysisAgent`
 then generates claims from structured knowledge and accepted evidence.
 `ClaimSupportReviewer` checks claim-level citation support before writing and
@@ -169,20 +172,20 @@ ResearchEngine wiring out of agent business logic:
 ```text
 CollectionAgent
   -> ResearchBranch frontier
-  -> ResearchBrief / ResearchTask queue
+  -> ResearchBrief / ResearchTask queue with success criteria
   -> focused / verification search_stage control
   -> ResearchEngineEvidenceCollector (explicit ResearchMode)
   -> ResearchEngine
   -> EvidenceItem[]
-  -> EvidenceQualityReviewer (source-level accepted/rejected evidence)
-  -> CoverageReviewer (coverage gaps and follow-up task specs)
+  -> EvidenceQualityReviewer (source-level accepted/rejected evidence and criterion matches)
+  -> CoverageReviewer (criterion coverage gaps and follow-up task specs)
 ```
 
 The collection path starts every confirmed competitor x dimension branch as
 focused evidence collection. Claim-support follow-up uses verification. Deep
 research recursion is not used as a black box inside `ResearchEngine`; instead,
 Rivalens keeps branch lineage, research briefs, research tasks, evidence
-reviews, coverage assessments, depth, and budget in
+reviews, criterion coverage assessments, depth, and budget in
 `CompetitorAnalysisState.research_branches`,
 `CompetitorAnalysisState.research_briefs`,
 `CompetitorAnalysisState.research_tasks`,
@@ -201,8 +204,9 @@ Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion
 budget applies only to child branches created from `CoverageReviewer`
 follow-up task specs, with
-`max_root_branch_hard_limit` acting as a defensive cap for unusually large
-schemas and `max_expansion_branches` controlling follow-up breadth.
+`max_root_branch_hard_limit` acting as a per-competitor defensive cap for
+unusually large schemas and `max_expansion_branches` controlling follow-up
+breadth.
 
 This keeps provider calls, source normalization, costs, and evidence metadata in
 one place while preserving the main Rivalens chain:
@@ -239,6 +243,52 @@ page content before evidence review and downstream analysis. When
 `SCRAPER=tavily_extract` is set, URLs discovered by either UniFuncs or Tavily are
 fetched through Tavily Extract.
 
+## LangSmith Tracing
+
+Rivalens uses LangGraph and LangChain components, so LangSmith tracing can be
+enabled with the official `LANGSMITH_*` environment variables. Traces are useful
+when debugging the `CollectionAgent`, because the top-level LangGraph run is
+tagged with `rivalens`, `competitive-analysis`, and metadata for retriever,
+branch budget, competitor count, and collection ownership.
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2-your-langsmith-key
+LANGSMITH_PROJECT=rivalens-local
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_WORKSPACE_ID=
+LANGCHAIN_CALLBACKS_BACKGROUND=false
+```
+
+Set `LANGSMITH_WORKSPACE_ID` only when the key can access more than one
+workspace, or when LangSmith asks you to choose a workspace. For EU, APAC,
+AWS-hosted, self-hosted, or hybrid LangSmith deployments, replace
+`LANGSMITH_ENDPOINT` with that deployment's API URL.
+
+The local smoke check submits one tiny trace to the configured project:
+
+```bash
+.venv/bin/python scripts/langsmith_smoke.py
+```
+
+The production Docker service passes the same variables through
+`docker-compose.yml`. The legacy `LANGCHAIN_*` aliases are still forwarded for
+older LangChain code paths, but new configuration should use `LANGSMITH_*`.
+When inspecting one `rivalens_competitive_analysis` run, expand
+`scope_planner` for the `rivalens_scope_planner` span, which summarizes the
+normalized competitor scope, selected industry, active schema, and final
+analysis directions. Then expand `source_collection` and look for child spans
+named `rivalens_collect_evidence`, `rivalens_process_subquery`,
+`rivalens_retriever_search`, `rivalens_scrape_url`,
+`rivalens_evidence_quality_review`, and `rivalens_coverage_review`. Rivalens collection uses
+the deterministic branch `search_queries` generated by `CollectionAgent`; when
+those are present, it skips the generic LLM sub-query rewrite step. Collection
+spans carry `rivalens_branch_id`, `rivalens_research_task_id`,
+`rivalens_dimension_id`, `rivalens_search_stage`, `rivalens_search_queries`, and
+`rivalens_actual_query` metadata so a branch can be followed from collection
+task, to each retriever query, to scraped URLs, evidence acceptance/rejection,
+success-criteria coverage, and follow-up collection decisions.
+
 ## Rivalens Collection Limits
 
 For `report_type=rivalens`, the competitor-analysis workflow creates collection
@@ -246,18 +296,24 @@ branches before calling the underlying search retrievers. Use these environment
 variables to reduce or expand that branch budget:
 
 ```env
-RIVALENS_MAX_ROOT_BRANCHES=40
+RIVALENS_MAX_ROOT_BRANCHES=20
 RIVALENS_MAX_BRANCH_DEPTH=0
 RIVALENS_MAX_EXPANSION_BRANCHES=0
+RIVALENS_MAX_CONCURRENT_COLLECTIONS=3
+RIVALENS_MAX_SUBQUERY_CONCURRENCY=2
 RIVALENS_ENABLE_CLAIM_VERIFICATION=false
 ```
 
-- `RIVALENS_MAX_ROOT_BRANCHES` caps the initial competitor x analysis-dimension
-  collection branches. Budget for `(competitor count) x (selected directions + 1
-  competitor_profile task)`.
+- `RIVALENS_MAX_ROOT_BRANCHES` caps the initial analysis-dimension collection
+  branches per competitor. Budget for `selected directions + 1
+  competitor_profile task` for each competitor.
 - `RIVALENS_MAX_BRANCH_DEPTH=0` disables follow-up collection branches.
 - `RIVALENS_MAX_EXPANSION_BRANCHES` caps follow-up branches created from
   coverage gaps.
+- `RIVALENS_MAX_CONCURRENT_COLLECTIONS` caps how many collection branches run at
+  once. Lower this when embedding or LLM providers return quota/rate errors.
+- `RIVALENS_MAX_SUBQUERY_CONCURRENCY` caps per-branch sub-query processing,
+  including scraped-content compression and embedding calls.
 - `RIVALENS_ENABLE_CLAIM_VERIFICATION=false` keeps weak/unverifiable claim
   review from launching a claim-driven verification collection pass.
 
@@ -279,10 +335,11 @@ previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and
 produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
-findings, score, and required action. `CoverageReviewer` consumes that result
-and remains responsible for branch-level coverage control: expected source
-types, missing guiding questions, next action, and gap-driven follow-up task
-specs. `CollectionAgent` owns depth and expansion budget enforcement directly.
+success-criterion matches, findings, score, and required action.
+`CoverageReviewer` consumes that result and remains responsible for branch-level
+coverage control: satisfied/partial/missing criteria, missing guiding questions,
+next action, and gap-driven follow-up task specs. `CollectionAgent` owns depth
+and expansion budget enforcement directly.
 `AnalysisAgent` runs after knowledge structuring and records `branch_id`,
 `evidence_review_id`, and `evidence_ids` on each generated `AnalysisClaim`.
 `ClaimSupportReviewer` marks claims as supported, weak, contradicted, or

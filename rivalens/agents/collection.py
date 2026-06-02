@@ -8,8 +8,11 @@ from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.search_query_builder import SearchQueryBuilder
+from rivalens.agents.success_criteria import normalize_success_criteria
 from rivalens.file_context import format_rag_context
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
+from rivalens.research.evidence_collector import _trace_collection_task
+from rivalens.research.trace_context import langsmith_extra_for_trace_context
 from rivalens.schema import (
     CompetitorAnalysisState,
     EvidenceCollectionResult,
@@ -32,6 +35,7 @@ class CollectionAgent:
         max_expansion_branches: int = 10,
         max_root_branch_hard_limit: int = 20,
         max_verification_concurrency: int | None = None,
+        max_concurrent_collections: int | None = None,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
@@ -40,13 +44,24 @@ class CollectionAgent:
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
-        self.max_verification_concurrency = (
-            max_verification_concurrency
-            if max_verification_concurrency is not None
-            else self._env_int("RIVALENS_MAX_VERIFICATION_CONCURRENCY", 3, minimum=1)
+        self.max_verification_concurrency = _int_env(
+            max_verification_concurrency,
+            "RIVALENS_MAX_VERIFICATION_CONCURRENCY",
+            3,
+            minimum=1,
+        )
+        self.max_concurrent_collections = _int_env(
+            max_concurrent_collections,
+            "RIVALENS_MAX_CONCURRENT_COLLECTIONS",
+            3,
+            minimum=1,
         )
 
-    async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
+    async def run(
+        self,
+        state: CompetitorAnalysisState,
+        config: Any | None = None,
+    ) -> CompetitorAnalysisState:
         task = state.get("task", {})
         schema_message = latest_message_for(
             state,
@@ -86,9 +101,9 @@ class CollectionAgent:
                 competitors,
                 active_schema,
             )
-            root_branch_limit_exceeded = len(root_branches) > self.max_root_branch_hard_limit
-            if root_branch_limit_exceeded:
-                root_branches = root_branches[: self.max_root_branch_hard_limit]
+            root_branches, root_branch_limit_exceeded = (
+                self._limit_root_branches_per_competitor(root_branches)
+            )
         frontier = root_branches
         research_branches.extend(root_branches)
         new_briefs = self._build_research_briefs(root_branches)
@@ -118,36 +133,31 @@ class CollectionAgent:
                 if file_rag_context:
                     collection_task["file_rag_context"] = file_rag_context
 
-            if verification_pass:
-                semaphore = asyncio.Semaphore(self.max_verification_concurrency)
-                results = await asyncio.gather(
-                    *[
-                        self._run_collection_task_limited(
-                            collection_task,
-                            verbose=verbose,
-                            semaphore=semaphore,
-                        )
-                        for collection_task in collection_tasks
-                    ],
-                    return_exceptions=True,
-                )
-            else:
-                results = await asyncio.gather(
-                    *[
-                        self._run_collection_task(collection_task, verbose=verbose)
-                        for collection_task in collection_tasks
-                    ],
-                    return_exceptions=True,
-                )
+            collection_limit = (
+                self.max_verification_concurrency
+                if verification_pass
+                else self.max_concurrent_collections
+            )
+            collection_semaphore = asyncio.Semaphore(collection_limit)
+            results = await asyncio.gather(
+                *[
+                    self._run_collection_task_with_limit(
+                        collection_semaphore,
+                        collection_task,
+                        verbose=verbose,
+                        trace_config=config,
+                    )
+                    for collection_task in collection_tasks
+                ],
+                return_exceptions=True,
+            )
 
             next_frontier: list[ResearchBranch] = []
-            for branch, research_task, collection_task, result in zip(
-                active_frontier,
-                planned_tasks,
-                collection_tasks,
-                results,
-                strict=True,
-            ):
+            for result_index in self._fair_branch_result_indexes(active_frontier):
+                branch = active_frontier[result_index]
+                research_task = planned_tasks[result_index]
+                collection_task = collection_tasks[result_index]
+                result = results[result_index]
                 if isinstance(result, Exception):
                     branch["status"] = "stopped"
                     failed_tasks.append(
@@ -299,7 +309,8 @@ class CollectionAgent:
                         "max_branch_depth": self.max_branch_depth,
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
                         "max_expansion_branches": self.max_expansion_branches,
-                        "max_root_branch_hard_limit": self.max_root_branch_hard_limit,
+                        "max_root_branches_per_competitor": self.max_root_branch_hard_limit,
+                        "max_concurrent_collections": self.max_concurrent_collections,
                         "dimensions": sorted(
                             {branch["dimension_id"] for branch in research_branches}
                         ),
@@ -322,42 +333,70 @@ class CollectionAgent:
             ],
         }
 
+    async def _run_collection_task_with_limit(
+        self,
+        semaphore: asyncio.Semaphore,
+        collection_task: EvidenceCollectionTask,
+        verbose: bool,
+        trace_config: Any | None = None,
+    ) -> EvidenceCollectionResult:
+        async with semaphore:
+            return await self._run_collection_task(
+                collection_task,
+                verbose=verbose,
+                trace_config=trace_config,
+            )
+
     async def _run_collection_task(
         self,
         collection_task: EvidenceCollectionTask,
         verbose: bool,
+        trace_config: Any | None = None,
     ) -> EvidenceCollectionResult:
-        return await self.evidence_collector.collect(
+        kwargs: dict[str, Any] = {}
+        collect = self.evidence_collector.collect
+        if getattr(collect, "__langsmith_traceable__", False):
+            trace_context = _trace_collection_task(collection_task)
+            kwargs["config"] = trace_config
+            kwargs["langsmith_extra"] = langsmith_extra_for_trace_context(
+                trace_context,
+                operation="collect_evidence",
+            )
+
+        return await collect(
             collection_task=collection_task,
             mode=self._research_mode_for_task(collection_task),
             source_urls=collection_task.get("target_urls", []),
             verbose=verbose,
+            **kwargs,
         )
-
-    async def _run_collection_task_limited(
-        self,
-        collection_task: EvidenceCollectionTask,
-        verbose: bool,
-        semaphore: asyncio.Semaphore,
-    ) -> EvidenceCollectionResult:
-        async with semaphore:
-            return await self._run_collection_task(collection_task, verbose=verbose)
-
-    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
-        raw_value = os.getenv(env_name)
-        if raw_value in (None, ""):
-            return default
-        try:
-            parsed = int(raw_value)
-        except (TypeError, ValueError):
-            return default
-        return max(minimum, parsed)
 
     def _research_mode_for_task(
         self,
         collection_task: EvidenceCollectionTask,
     ) -> ResearchMode:
         return ResearchMode.STANDARD_EVIDENCE
+
+    def _fair_branch_result_indexes(
+        self,
+        branches: list[ResearchBranch],
+    ) -> list[int]:
+        indexes_by_competitor: dict[str, list[int]] = {}
+        competitor_order: list[str] = []
+        for index, branch in enumerate(branches):
+            competitor = branch.get("competitor", "") or "unknown"
+            if competitor not in indexes_by_competitor:
+                indexes_by_competitor[competitor] = []
+                competitor_order.append(competitor)
+            indexes_by_competitor[competitor].append(index)
+
+        ordered_indexes: list[int] = []
+        while any(indexes_by_competitor.values()):
+            for competitor in competitor_order:
+                indexes = indexes_by_competitor[competitor]
+                if indexes:
+                    ordered_indexes.append(indexes.pop(0))
+        return ordered_indexes
 
     def _build_root_branches(
         self,
@@ -378,6 +417,8 @@ class CollectionAgent:
                     dimension=dimension,
                     active_schema=active_schema,
                 )
+                research_goal = self._research_goal(query, competitor, dimension)
+                success_criteria = self._success_criteria(query, competitor, dimension)
                 branches.append(
                     {
                         "id": branch_id,
@@ -392,7 +433,9 @@ class CollectionAgent:
                         "parent_dimension_id": dimension.get("parent_dimension_id", ""),
                         "topic": dimension["name"],
                         "query": query_plan.primary_query,
+                        "research_goal": research_goal,
                         "search_queries": query_plan.search_queries,
+                        "success_criteria": success_criteria,
                         "task_context": self._schema_aware_task_context(
                             query,
                             competitor,
@@ -412,6 +455,25 @@ class CollectionAgent:
                 )
 
         return branches
+
+    def _limit_root_branches_per_competitor(
+        self,
+        root_branches: list[ResearchBranch],
+    ) -> tuple[list[ResearchBranch], bool]:
+        branch_count_by_competitor: dict[str, int] = {}
+        limited_branches: list[ResearchBranch] = []
+        limit_exceeded = False
+
+        for branch in root_branches:
+            competitor = branch.get("competitor", "")
+            branch_count = branch_count_by_competitor.get(competitor, 0)
+            if branch_count >= self.max_root_branch_hard_limit:
+                limit_exceeded = True
+                continue
+            branch_count_by_competitor[competitor] = branch_count + 1
+            limited_branches.append(branch)
+
+        return limited_branches, limit_exceeded
 
     def _competitor_profile_dimension(self) -> dict[str, Any]:
         return {
@@ -469,6 +531,12 @@ class CollectionAgent:
                     "parent_dimension_id": task_spec.get("parent_dimension_id", ""),
                     "topic": task_spec.get("objective", "Claim verification"),
                     "query": query,
+                    "research_goal": task_spec.get(
+                        "objective",
+                        "Verify the target claim with direct public evidence.",
+                    ),
+                    "search_queries": task_spec.get("search_queries", [query]),
+                    "success_criteria": self._verification_success_criteria(task_spec),
                     "target_urls": task_spec.get("target_urls", []),
                     "search_stage": "verification",
                     "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
@@ -524,9 +592,11 @@ class CollectionAgent:
                     "dimension_id": branch.get("dimension_id", ""),
                     "dimension_name": dimension_name,
                     "objective": (
-                        f"Collect source-backed public evidence about {competitor} "
+                        branch.get("research_goal")
+                        or f"Collect source-backed public evidence about {competitor} "
                         f"for the {dimension_name} dimension."
                     ),
+                    "success_criteria": branch.get("success_criteria", []),
                     "guiding_questions": branch.get("guiding_questions", []),
                     "source_hints": branch.get("source_hints", []),
                     "minimum_coverage": branch.get("minimum_coverage", []),
@@ -568,12 +638,14 @@ class CollectionAgent:
             "search_stage": search_stage,
             "objective": brief.get("objective", branch.get("topic", "")),
             "query": branch.get("query", ""),
+            "research_goal": branch.get("research_goal", brief.get("objective", "")),
             "target_urls": branch.get("target_urls", []),
             "source_hints": branch.get("source_hints", []),
             "generated_from_gap": generated_from_gap,
             "decision_action": branch.get("decision_action", ""),
             "decision_subtype": branch.get("decision_subtype", ""),
             "search_queries": branch.get("search_queries", [branch.get("query", "")]),
+            "success_criteria": branch.get("success_criteria", []),
             "task_context": branch.get("task_context", ""),
             "reason": reason,
             "drift_risk": "low" if not generated_from_gap else "medium",
@@ -605,7 +677,12 @@ class CollectionAgent:
             "dimension_type": branch.get("dimension_type", ""),
             "parent_dimension_id": branch.get("parent_dimension_id", ""),
             "query": branch.get("query", ""),
+            "research_goal": research_task.get("research_goal", branch.get("research_goal", "")),
             "search_queries": branch.get("search_queries", [branch.get("query", "")]),
+            "success_criteria": research_task.get(
+                "success_criteria",
+                branch.get("success_criteria", []),
+            ),
             "task_context": branch.get("task_context", ""),
             "target_urls": branch.get("target_urls", []),
         }
@@ -626,6 +703,17 @@ class CollectionAgent:
             dimension_name = follow_up_spec.get("dimension_name", parent.get("dimension_name", ""))
             dimension_type = follow_up_spec.get("dimension_type", parent.get("dimension_type", ""))
             child_id = f"{parent['id']}_d{parent.get('depth', 0) + 1}_{index}"
+            success_criteria = follow_up_spec.get(
+                "success_criteria",
+                parent.get("success_criteria", []),
+            )
+            guiding_questions = follow_up_spec.get("guiding_questions")
+            if guiding_questions is None:
+                guiding_questions = [
+                    criterion.get("description", "")
+                    for criterion in success_criteria
+                    if criterion.get("kind") == "guiding_question"
+                ] or parent.get("guiding_questions", [])
             children.append(
                 {
                     "id": child_id,
@@ -643,6 +731,9 @@ class CollectionAgent:
                     ),
                     "topic": topic,
                     "query": query,
+                    "research_goal": topic,
+                    "search_queries": follow_up_spec.get("search_queries", [query]),
+                    "success_criteria": success_criteria,
                     "target_urls": follow_up_spec.get("target_urls", []),
                     "search_stage": follow_up_spec.get("search_stage", "focused"),
                     "generated_from_gap": follow_up_spec.get(
@@ -651,9 +742,12 @@ class CollectionAgent:
                     ),
                     "decision_action": follow_up_spec.get("decision_action", ""),
                     "decision_subtype": follow_up_spec.get("decision_subtype", ""),
-                    "source_hints": parent.get("source_hints", []),
+                    "source_hints": follow_up_spec.get(
+                        "target_source_types",
+                        parent.get("source_hints", []),
+                    ),
                     "minimum_coverage": parent.get("minimum_coverage", []),
-                    "guiding_questions": parent.get("guiding_questions", []),
+                    "guiding_questions": guiding_questions,
                     "evidence_ids": [],
                     "parent_task_id": parent_task_id,
                     "status": "active",
@@ -702,6 +796,7 @@ class CollectionAgent:
                         extension.get("source_hints", []),
                     ),
                     "guiding_questions": extension.get("guiding_questions", []),
+                    "success_criteria": extension.get("success_criteria", []),
                     "search_intent": extension.get("search_intent", ""),
                     "minimum_coverage": ["At least two source-backed public evidence items."],
                     "risk_level": "medium",
@@ -736,6 +831,9 @@ class CollectionAgent:
             f"Selected industry: {selected_industry}",
             f"Research focus: {dimension['name']} ({dimension['type']})",
             f"Focus definition: {dimension['description']}",
+            self._success_criteria_line(
+                self._success_criteria(query, competitor, dimension),
+            ),
             self._guiding_questions_line(dimension),
             dimension.get("search_intent", ""),
         ]
@@ -752,6 +850,57 @@ class CollectionAgent:
             "listings when relevant.",
         )
         return "\n".join(line for line in lines if line)
+
+    def _research_goal(
+        self,
+        query: str,
+        competitor: str,
+        dimension: dict[str, Any],
+    ) -> str:
+        return (
+            f"Collect source-backed public evidence about {competitor or 'the requested competitor'} "
+            f"for {dimension['name']} while staying aligned with the original request: {query}"
+        )
+
+    def _success_criteria(
+        self,
+        query: str,
+        competitor: str,
+        dimension: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        explicit_criteria = normalize_success_criteria(
+            dimension.get("success_criteria", []),
+        )
+        if explicit_criteria:
+            return explicit_criteria
+
+        criteria = []
+        for index, question in enumerate(dimension.get("guiding_questions", []), start=1):
+            criteria.append(
+                {
+                    "id": f"guiding_question_{index}",
+                    "description": str(question),
+                    "target_source_types": dimension.get("source_hints", []),
+                    "required_source_types": [],
+                    "kind": "guiding_question",
+                }
+            )
+        return normalize_success_criteria(criteria)
+
+    def _verification_success_criteria(
+        self,
+        task_spec: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return normalize_success_criteria(task_spec.get("success_criteria", []))
+
+    def _success_criteria_line(self, success_criteria: list[dict[str, Any]]) -> str:
+        if not success_criteria:
+            return ""
+        descriptions = [
+            f"{criterion.get('id')}: {criterion.get('description')}"
+            for criterion in success_criteria
+        ]
+        return "Success criteria: " + " | ".join(descriptions)
 
     def _guiding_questions_line(self, dimension: dict[str, Any]) -> str:
         guiding_questions = dimension.get("guiding_questions", [])
@@ -860,3 +1009,19 @@ class CollectionAgent:
         for review in evidence_reviews:
             rejected.extend(review.get("rejected_evidence_ids", []))
         return list(dict.fromkeys(rejected))
+
+
+def _int_env(
+    value: int | None,
+    env_name: str,
+    default: int,
+    minimum: int = 0,
+) -> int:
+    raw_value = value if value is not None else os.getenv(env_name)
+    if raw_value in (None, ""):
+        return default
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
