@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from rivalens.agents.industry_direction import IndustryDirectionSkill
+from rivalens.agents.industry_llm_fallback import IndustryFallbackResult
 from rivalens.agents.planning import (
     PlanningAgent,
     _planning_trace_inputs,
@@ -314,6 +315,86 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         self.assertNotIn("notion", plan["suggested_competitors"])
         self.assertNotIn("飞书", plan["suggested_competitors"])
 
+    def test_low_confidence_industry_uses_llm_fallback_plan(self):
+        class FakeFallback:
+            llm_spec = "anthropic:mimo-v2.5-pro"
+
+            def __init__(self):
+                self.called = False
+
+            def is_configured(self):
+                return True
+
+            async def classify(self, query, competitors, candidate_industries):
+                self.called = True
+                return IndustryFallbackResult(
+                    industry_id="smart_hardware_wearables",
+                    industry_name="智能硬件 / 可穿戴设备",
+                    confidence=0.78,
+                    reason="用户请求中的产品和竞品更接近可穿戴硬件，而非现有模板的明确命中。",
+                    suggested_competitors=["Garmin"],
+                    suggested_analysis_directions=[
+                        {
+                            "direction_id": "sensor_health_metrics",
+                            "name": "健康传感与指标",
+                            "reason": "可穿戴设备竞争依赖传感器、健康指标和数据解释能力。",
+                            "search_focus": "公开健康传感器和指标能力",
+                            "source_hints": ["official_site", "docs", "review"],
+                            "required": True,
+                        }
+                    ],
+                )
+
+        fake_fallback = FakeFallback()
+        plan = asyncio.run(
+            IndustryDirectionSkill(
+                llm_fallback=fake_fallback,
+                fallback_threshold=0.95,
+            ).build_plan_with_fallback(
+                query="对比 Oura 和 Whoop 的可穿戴健康追踪能力",
+                competitors=[{"name": "Oura"}, {"name": "Whoop"}],
+            )
+        )
+
+        self.assertTrue(fake_fallback.called)
+        self.assertEqual(plan["selection_method"], "llm_fallback")
+        self.assertEqual(plan["industry"]["industry_id"], "smart_hardware_wearables")
+        self.assertEqual(plan["fallback_model"], "anthropic:mimo-v2.5-pro")
+        self.assertEqual(
+            plan["default_directions"][0]["origin"],
+            "llm_fallback",
+        )
+        self.assertEqual(
+            plan["final_analysis_plan"]["final_directions"][0],
+            "sensor_health_metrics",
+        )
+        from rivalens.schema import IndustryDirectionPlanPayload
+
+        validated = IndustryDirectionPlanPayload(**plan)
+        self.assertEqual(validated.selection_method, "llm_fallback")
+
+    def test_high_confidence_industry_skips_llm_fallback(self):
+        class FailingFallback:
+            llm_spec = "anthropic:mimo-v2.5-pro"
+
+            def is_configured(self):
+                return True
+
+            async def classify(self, query, competitors, candidate_industries):
+                raise AssertionError("fallback should not be called")
+
+        plan = asyncio.run(
+            IndustryDirectionSkill(
+                llm_fallback=FailingFallback(),
+                fallback_threshold=0.35,
+            ).build_plan_with_fallback(
+                query="对比 Notion 和飞书的 SaaS 协作能力",
+            )
+        )
+
+        self.assertEqual(plan["selection_method"], "rule_template")
+        self.assertEqual(plan["industry"]["industry_id"], "saas_collaboration")
+
     def test_identifies_ai_tools_and_merges_user_directions(self):
         plan = IndustryDirectionSkill().build_plan(
             query="对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品竞争格局",
@@ -390,25 +471,21 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             plan["final_analysis_plan"]["final_directions"],
         )
 
-    def test_limited_scope_query_auto_selects_matching_directions(self):
+    def test_limit_keywords_no_longer_restrict_planner_directions(self):
         plan = IndustryDirectionSkill().build_plan(
             query="帮我对比钉钉和飞书，只看产品定位和定价，给出带来源的简短结论",
         )
 
         self.assertEqual(plan["industry"]["industry_id"], "saas_collaboration")
-        self.assertEqual(
-            plan["final_analysis_plan"]["final_directions"],
-            ["pricing_packaging", "strategic_positioning"],
-        )
-        self.assertTrue(plan["final_analysis_plan"]["scope_limited_by_query"])
-        self.assertTrue(plan["final_analysis_plan"]["planner_supplement_skipped"])
-        self.assertEqual(plan["planner_added_directions"], [])
-        self.assertNotIn(
+        self.assertFalse(plan["final_analysis_plan"]["scope_limited_by_query"])
+        self.assertFalse(plan["final_analysis_plan"]["planner_supplement_skipped"])
+        self.assertGreater(len(plan["planner_added_directions"]), 0)
+        self.assertIn(
             "security_admin_controls",
             plan["final_analysis_plan"]["final_directions"],
         )
 
-    def test_limited_scope_query_overrides_frontend_default_all_selection(self):
+    def test_full_selection_includes_all_directions_regardless_of_limit_keywords(self):
         preview_plan = IndustryDirectionSkill().build_plan(
             query="帮我对比钉钉和飞书，只关注产品定位和定价",
         )
@@ -426,17 +503,18 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             user_confirmed=True,
         )
 
-        self.assertEqual(
-            confirmed_plan["final_analysis_plan"]["final_directions"],
-            ["pricing_packaging", "strategic_positioning"],
-        )
+        self.assertFalse(confirmed_plan["final_analysis_plan"]["scope_limited_by_query"])
         self.assertEqual(
             confirmed_plan["final_analysis_plan"]["auto_selected_directions"],
-            ["pricing_packaging", "strategic_positioning"],
+            [],
         )
-        self.assertEqual(confirmed_plan["planner_added_directions"], [])
+        self.assertGreater(len(confirmed_plan["planner_added_directions"]), 0)
+        self.assertIn(
+            "security_admin_controls",
+            confirmed_plan["final_analysis_plan"]["final_directions"],
+        )
 
-    def test_planning_agent_skips_registry_extensions_for_limited_scope_query(self):
+    def test_planning_agent_always_includes_registry_extensions(self):
         state = {
             "task": {
                 "query": "帮我对比钉钉和飞书，只看产品定位和定价，给出带来源的简短结论",
@@ -451,12 +529,9 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             for extension in result["active_knowledge_schema"]["industry_extensions"]
         ]
 
-        self.assertEqual(
-            extension_ids,
-            ["direction_pricing_packaging", "direction_strategic_positioning"],
-        )
-        self.assertNotIn("security_compliance", extension_ids)
-        self.assertNotIn("direction_target_users", extension_ids)
+        self.assertIn("direction_pricing_packaging", extension_ids)
+        self.assertIn("direction_strategic_positioning", extension_ids)
+        self.assertIn("security_compliance", extension_ids)
 
     def test_planning_agent_injects_directions_into_schema_selection(self):
         plan = IndustryDirectionSkill().build_plan(

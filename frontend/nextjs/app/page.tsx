@@ -350,7 +350,12 @@ export default function Home() {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to prepare analysis directions: ${response.status}`);
+      let detail = `Failed to prepare analysis directions: ${response.status}`;
+      try {
+        const body = await response.json();
+        if (body.detail) detail = body.detail;
+      } catch {}
+      throw new Error(detail);
     }
 
     const data = await response.json();
@@ -400,8 +405,9 @@ export default function Home() {
       setShowCustomDirections(false);
     } catch (error) {
       console.error('Error preparing industry directions:', error);
-      toast.error('Could not prepare analysis directions. Starting with the default planner.');
-      startResearchWithPlan(newQuestion);
+      const message = error instanceof Error ? error.message : 'Could not prepare analysis directions.';
+      toast.error(message);
+      // Don't fall through to research — let the user correct their query.
     } finally {
       setIsPreparingPlan(false);
     }

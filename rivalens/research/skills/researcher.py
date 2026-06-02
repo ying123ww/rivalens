@@ -160,6 +160,7 @@ class ResearchConductor:
             report_type=self.researcher.report_type,
             cost_callback=self.researcher.add_costs,
             retriever_names=retriever_names,  # Pass retriever names for MCP optimization
+            trace_context=trace_context_from_conductor(self),
             **self.researcher.kwargs
         )
         self.logger.info(f"Research outline planned: {outline}")
@@ -169,11 +170,14 @@ class ResearchConductor:
         preplanned_queries = self._dedupe_search_queries(
             getattr(self.researcher, "rivalens_search_queries", []),
         )
-        if preplanned_queries:
+        if len(preplanned_queries) > 1:
             return preplanned_queries
 
         trace_context = trace_context_from_conductor(self)
-        return self._dedupe_search_queries(trace_context.get("search_queries", []))
+        trace_queries = self._dedupe_search_queries(trace_context.get("search_queries", []))
+        if len(trace_queries) > 1:
+            return trace_queries
+        return []
 
     async def _get_initial_search_results(self, query, query_domains=None):
         retrievers = list(self.researcher.retrievers or [])

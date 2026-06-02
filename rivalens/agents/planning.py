@@ -105,6 +105,10 @@ def _planning_trace_outputs(output: Any) -> dict[str, Any]:
         "planner_supplement_skipped": bool(
             final_analysis_plan.get("planner_supplement_skipped"),
         ),
+        "industry_selection_method": industry_direction_plan.get(
+            "selection_method",
+            "",
+        ),
         "message_type": messages[-1].get("type", "") if messages else "",
         "research_artifact_count": len(output.get("research_artifacts") or []),
         "agent_event_count": len(output.get("agent_events") or []),
@@ -178,7 +182,7 @@ class PlanningAgent:
         )
         planning_query = self._planning_query(query, file_context)
         normalized = self._normalize_competitors(competitors)
-        industry_direction_plan = self._industry_direction_plan(
+        industry_direction_plan = await self._industry_direction_plan(
             task,
             planning_query,
             normalized,
@@ -287,6 +291,14 @@ class PlanningAgent:
                         "confidence": active_schema.get("selected_industry", {}).get(
                             "confidence",
                         ),
+                        "industry_selection_method": industry_direction_plan.get(
+                            "selection_method",
+                            "",
+                        ),
+                        "industry_fallback_reason": industry_direction_plan.get(
+                            "fallback_reason",
+                            "",
+                        ),
                         "extension_count": len(industry_extensions),
                     },
                 }
@@ -326,17 +338,9 @@ class PlanningAgent:
             selected_industry,
             candidate_industries,
         )
-        scope_limited_by_query = bool(
-            (industry_direction_plan.get("final_analysis_plan") or {}).get(
-                "scope_limited_by_query",
-            )
-        )
-        industry_extensions = (
-            []
-            if scope_limited_by_query
-            else self.schema_registry.get_extensions(
-                selected_industry["industry_id"],
-            )
+        selection_method = industry_direction_plan.get("selection_method", "rule_template")
+        industry_extensions = self.schema_registry.get_extensions(
+            selected_industry["industry_id"],
         )
         industry_extensions = self._dedupe_extensions(
             industry_extensions
@@ -353,20 +357,19 @@ class PlanningAgent:
             "industry_extensions": industry_extensions,
             "candidate_extensions": self._file_candidate_extensions(file_context),
             "rationale": (
-                "Selected from the schema registry during planning using query, competitor, "
-                "alias, example-query, known-competitor, and local file-context signals."
-                " IndustryDirectionSkill runs first to turn the selected industry "
-                "and any user-confirmed additions into collection dimensions."
-                + (
-                    " Query-limited scope is active, so registry extensions were "
-                    "skipped and only the confirmed directions are collected."
-                    if scope_limited_by_query
-                    else ""
+                (
+                    "Selected by LLM fallback because deterministic industry rules "
+                    "were below the confidence threshold."
+                    if selection_method == "llm_fallback"
+                    else "Selected from the schema registry during planning using query, competitor, "
+                    "alias, example-query, known-competitor, and local file-context signals."
                 )
+                + " IndustryDirectionSkill runs first to turn the selected industry "
+                "and any user-confirmed additions into collection dimensions."
             ),
         }
 
-    def _industry_direction_plan(
+    async def _industry_direction_plan(
         self,
         task: dict[str, Any],
         planning_query: str,
@@ -376,7 +379,7 @@ class PlanningAgent:
         if isinstance(provided, dict) and provided.get("final_directions"):
             return provided
 
-        return self.industry_direction_skill.build_plan(
+        return await self.industry_direction_skill.build_plan_with_fallback(
             query=planning_query,
             competitors=competitors,
             user_directions=task.get("custom_analysis_directions", []),

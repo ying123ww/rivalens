@@ -382,7 +382,12 @@ class AnalysisDirection(TypedDict, total=False):
     search_focus: str
     source_hints: list[str]
     required: bool
-    origin: Literal["industry_template", "planner_suggested", "user_requested"]
+    origin: Literal[
+        "industry_template",
+        "planner_suggested",
+        "user_requested",
+        "llm_fallback",
+    ]
 
 
 class IndustryDirectionPlan(TypedDict, total=False):
@@ -398,6 +403,9 @@ class IndustryDirectionPlan(TypedDict, total=False):
     user_added_directions: list[AnalysisDirection]
     final_directions: list[AnalysisDirection]
     final_analysis_plan: dict[str, Any]
+    selection_method: str
+    fallback_reason: str
+    fallback_model: str
     user_confirmed: bool
     created_at: str
 
@@ -583,7 +591,12 @@ class AnalysisDirectionPayload(StrictPayloadModel):
     search_focus: str = ""
     source_hints: list[str] = Field(default_factory=list)
     required: bool = True
-    origin: Literal["industry_template", "planner_suggested", "user_requested"]
+    origin: Literal[
+        "industry_template",
+        "planner_suggested",
+        "user_requested",
+        "llm_fallback",
+    ]
 
 
 class IndustryDirectionPlanPayload(StrictPayloadModel):
@@ -601,6 +614,9 @@ class IndustryDirectionPlanPayload(StrictPayloadModel):
     user_added_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     final_directions: list[AnalysisDirectionPayload] = Field(default_factory=list)
     final_analysis_plan: dict[str, Any] = Field(default_factory=dict)
+    selection_method: str = "rule_template"
+    fallback_reason: str = ""
+    fallback_model: str = ""
     user_confirmed: bool = False
     created_at: str
 

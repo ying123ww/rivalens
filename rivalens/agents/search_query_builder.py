@@ -14,9 +14,9 @@ class SearchQueryPlan:
 
 
 class SearchQueryBuilder:
-    """Build short bilingual search seeds without competitor-specific aliases."""
+    """Build one short seed query and leave expansion to ResearchEngine."""
 
-    max_queries = 5
+    max_queries = 1
     max_query_words = 15
 
     _dimension_rules: tuple[tuple[tuple[str, ...], tuple[list[str], list[str]]], ...] = (
@@ -81,19 +81,10 @@ class SearchQueryBuilder:
         active_schema: dict[str, Any],
     ) -> SearchQueryPlan:
         subject = self._subject(competitor, original_query)
-        zh_terms, en_terms = self._dimension_terms(dimension)
-        zh_sources, en_sources = self._source_terms(dimension.get("source_hints", []))
-        zh_industry, en_industry = self._industry_terms(active_schema)
-
-        candidates = [
-            self._query([subject, *zh_terms[:2], *zh_sources[:2]]),
-            self._query([subject, *en_terms[:2], *en_sources[:2]]),
-            self._query([subject, *zh_terms[:1], *zh_sources[:2]]),
-            self._query([subject, *en_terms[:1], *en_sources[:2]]),
-            self._query([subject, *zh_industry[:1], *zh_terms[:1]]),
-            self._query([subject, *en_industry[:1], *en_terms[:1]]),
+        seed_focus = self._dimension_seed(dimension)
+        search_queries = self._dedupe([self._query([subject, seed_focus])])[
+            : self.max_queries
         ]
-        search_queries = self._dedupe(candidates)[: self.max_queries]
         if not search_queries:
             search_queries = [self._query([original_query])]
         return SearchQueryPlan(
@@ -122,6 +113,13 @@ class SearchQueryBuilder:
         if not en_terms:
             en_terms = self._fallback_en_terms(dimension)
         return self._dedupe(zh_terms), self._dedupe(en_terms)
+
+    def _dimension_seed(self, dimension: dict[str, Any]) -> str:
+        for key in ("search_focus", "name", "search_intent", "description", "id"):
+            value = self._clean(dimension.get(key, ""))
+            if value:
+                return self._truncate_words(value)
+        return "public evidence"
 
     def _source_terms(self, source_hints: list[str]) -> tuple[list[str], list[str]]:
         zh_terms: list[str] = []
