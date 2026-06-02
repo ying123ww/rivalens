@@ -708,7 +708,29 @@ export default function Home() {
    */
   useEffect(() => {
     const groupedData = preprocessOrderedData(orderedData);
-    const statusReports = ["agent_generated", "starting_research", "planning_research", "error"];
+    const statusReports = [
+      "agent_generated",
+      "starting_research",
+      "planning_research",
+      "run_started",
+      "heartbeat",
+      "log_batch",
+      "websocket_disconnected",
+      "run_cancelled",
+      "error",
+    ];
+    const logText = (data: any) => {
+      if (data.content !== "log_batch") {
+        return data.output;
+      }
+      const latest = data.metadata?.latest;
+      if (!Array.isArray(latest) || latest.length === 0) {
+        return data.output;
+      }
+      return latest
+        .map((item: any) => `${item.content || "log"}: ${item.output || ""}`)
+        .join("\n");
+    };
     
     const newLogs = groupedData.reduce((acc: any[], data) => {
       // Process accordion blocks (grouped data)
@@ -725,7 +747,7 @@ export default function Home() {
       else if (statusReports.includes(data.content)) {
         return [...acc, {
           header: data.content,
-          text: data.output,
+          text: logText(data),
           metadata: data.metadata,
           key: `${data.type}-${data.content}`,
         }];

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -25,16 +26,32 @@ class ReportStore:
 
     async def _write_all_unlocked(self, data: Dict[str, Dict[str, Any]]) -> None:
         await self._ensure_parent_dir()
-        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        task_id = id(asyncio.current_task())
+        tmp_path = self._path.with_name(
+            f"{self._path.name}.{os.getpid()}.{task_id}.tmp"
+        )
         serialized = json.dumps(data, ensure_ascii=False)
         tmp_path.write_text(serialized, encoding="utf-8")
+        last_error: OSError | None = None
+        for attempt in range(5):
+            try:
+                tmp_path.replace(self._path)
+                return
+            except OSError as exc:
+                last_error = exc
+                if attempt < 4:
+                    await asyncio.sleep(0.05 * (attempt + 1))
+
         try:
-            tmp_path.replace(self._path)
-        except PermissionError:
             self._path.write_text(serialized, encoding="utf-8")
+        except OSError:
+            if last_error is not None:
+                raise last_error
+            raise
+        finally:
             try:
                 tmp_path.unlink(missing_ok=True)
-            except PermissionError:
+            except OSError:
                 pass
 
     async def list_reports(self, report_ids: List[str] | None = None) -> List[Dict[str, Any]]:

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -37,6 +38,8 @@ class CustomLogsHandler:
         self.websocket = websocket
         self._send_lock = _get_websocket_send_lock(websocket)
         self.websocket_closed = False
+        self.log_batch_size = self._env_int("RIVALENS_WS_LOG_BATCH_SIZE", 10, minimum=1)
+        self.pending_log_batch: list[Dict[str, Any]] = []
         self.research_id = research_id or sanitize_filename(f"task_{int(time.time())}_{task}")
         self.ordered_data: list[Dict[str, Any]] = []
         self.log_file = os.path.join("outputs", f"{self.research_id}.json")
@@ -59,37 +62,121 @@ class CustomLogsHandler:
     async def send_json(self, data: Dict[str, Any]) -> None:
         """Store log data and send to websocket when it is still connected."""
         async with self._send_lock:
-            self._append_ordered_data(data)
             self._write_log_data(data)
+
+            if data.get("type") == "logs":
+                self.pending_log_batch.append(data)
+                if len(self.pending_log_batch) >= self.log_batch_size:
+                    await self._flush_log_batch_locked()
+                return
+
+            if data.get("type") != "report":
+                await self._flush_log_batch_locked()
+                self._append_ordered_data(data)
 
             if not self.websocket or self.websocket_closed:
                 return
 
-            try:
-                await self.websocket.send_json(data)
-            except Exception as exc:
-                self.websocket_closed = True
-                self.websocket = None
-                self._record_websocket_disconnect(exc, data)
-                log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
-                log_method(
-                    "WebSocket send failed; live updates stopped but server-side logging will continue: %s: %s",
-                    type(exc).__name__,
-                    exc,
-                    exc_info=not _is_websocket_disconnect_error(exc),
-                )
+            await self._send_websocket_locked(data)
 
     async def detach_websocket(self, output: str, metadata: Dict[str, Any] | None = None) -> None:
         """Stop live streaming while keeping server-side JSON logging active."""
         async with self._send_lock:
             self.websocket_closed = True
             self.websocket = None
-            self._write_log_data({
+            self.pending_log_batch = []
+            disconnect_event = {
                 "type": "logs",
                 "content": "websocket_disconnected",
                 "output": output,
                 "metadata": metadata or {},
-            })
+            }
+            self._write_log_data(disconnect_event)
+            self._append_ordered_data(disconnect_event)
+
+    async def flush_log_batch(self) -> None:
+        async with self._send_lock:
+            await self._flush_log_batch_locked()
+
+    async def _flush_log_batch_locked(self) -> None:
+        if not self.pending_log_batch or not self.websocket or self.websocket_closed:
+            self.pending_log_batch = []
+            return
+
+        batch = self.pending_log_batch
+        self.pending_log_batch = []
+        summary = self._log_batch_summary(batch)
+        self._append_ordered_data(summary)
+        if not self.websocket or self.websocket_closed:
+            return
+
+        try:
+            await self.websocket.send_json(summary)
+        except Exception as exc:
+            self.websocket_closed = True
+            self.websocket = None
+            self._record_websocket_disconnect(exc, summary)
+            log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+            log_method(
+                "WebSocket log batch send failed; server-side logging will continue: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=not _is_websocket_disconnect_error(exc),
+            )
+
+    async def _send_websocket_locked(self, data: Dict[str, Any]) -> None:
+        try:
+            await self.websocket.send_json(data)
+        except Exception as exc:
+            self.websocket_closed = True
+            self.websocket = None
+            self.pending_log_batch = []
+            self._record_websocket_disconnect(exc, data)
+            log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+            log_method(
+                "WebSocket send failed; live updates stopped but server-side logging will continue: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=not _is_websocket_disconnect_error(exc),
+            )
+
+    def _log_batch_summary(self, batch: list[Dict[str, Any]]) -> Dict[str, Any]:
+        content_counts: dict[str, int] = {}
+        for item in batch:
+            content = str(item.get("content", "log"))
+            content_counts[content] = content_counts.get(content, 0) + 1
+
+        latest = [
+            {
+                "content": item.get("content"),
+                "output": self._truncate(str(item.get("output", "")), 180),
+            }
+            for item in batch[-5:]
+        ]
+        return {
+            "type": "logs",
+            "content": "log_batch",
+            "output": f"{len(batch)} log events batched on the server.",
+            "metadata": {
+                "batched": True,
+                "count": len(batch),
+                "content_counts": content_counts,
+                "latest": latest,
+            },
+        }
+
+    def _truncate(self, value: str, limit: int) -> str:
+        return value if len(value) <= limit else value[: limit - 3] + "..."
+
+    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
 
     def _write_log_data(self, data: Dict[str, Any]) -> None:
         # Read current log file
@@ -307,35 +394,65 @@ async def handle_start_command(
     if on_log_handler:
         on_log_handler(logs_handler)
 
+    report_store_lock = asyncio.Lock()
+
     async def upsert_run_report(
         status: str,
         report: str = "",
         artifacts: Dict[str, str] | None = None,
+        structured_response: Dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
         if report_store is None:
             return
-        existing = await report_store.get_report(research_id) or {}
-        now_ms = int(time.time() * 1000)
-        ordered_data = [
-            {"type": "question", "content": task},
-            *logs_handler.ordered_data,
-        ]
-        updated = {
-            **existing,
-            "id": research_id,
-            "question": task,
-            "answer": report or existing.get("answer", ""),
-            "orderedData": ordered_data,
-            "chatMessages": existing.get("chatMessages") or [],
-            "status": status,
-            "timestamp": now_ms,
-        }
-        if artifacts is not None:
-            updated["artifacts"] = artifacts
-        if error is not None:
-            updated["error"] = error
-        await report_store.upsert_report(research_id, updated)
+        async with report_store_lock:
+            existing = await report_store.get_report(research_id) or {}
+            if status == "running" and existing.get("status") in {
+                "completed",
+                "error",
+                "cancelled",
+            }:
+                return
+            now_ms = int(time.time() * 1000)
+            max_ordered_events = logs_handler._env_int(
+                "RIVALENS_REPORT_STORE_MAX_ORDERED_EVENTS",
+                200,
+                minimum=1,
+            )
+            ordered_data = [
+                {"type": "question", "content": task},
+                *logs_handler.ordered_data[-max_ordered_events:],
+            ]
+            updated = {
+                **existing,
+                "id": research_id,
+                "question": task,
+                "answer": report or existing.get("answer", ""),
+                "orderedData": ordered_data,
+                "chatMessages": existing.get("chatMessages") or [],
+                "status": status,
+                "timestamp": now_ms,
+            }
+            if artifacts is not None:
+                updated["artifacts"] = artifacts
+            if structured_response is not None:
+                updated.update(
+                    _structured_report_store_fields(
+                        structured_response,
+                        generated_artifacts=artifacts,
+                    )
+                )
+            if error is not None:
+                updated["error"] = error
+            try:
+                await report_store.upsert_report(research_id, updated)
+            except OSError as exc:
+                logger.warning(
+                    "Failed to update report store for run %s with status %s: %s",
+                    research_id,
+                    status,
+                    exc,
+                )
 
     await upsert_run_report("running")
     await logs_handler.send_json({
@@ -355,9 +472,37 @@ async def handle_start_command(
         "context": [],
         "report": ""
     })
+    await upsert_run_report("running")
 
+    async def send_progress_heartbeat() -> None:
+        heartbeat_interval = logs_handler._env_int(
+            "RIVALENS_WS_HEARTBEAT_INTERVAL_SECONDS",
+            15,
+            minimum=5,
+        )
+        while True:
+            await asyncio.sleep(heartbeat_interval)
+            try:
+                await logs_handler.send_json({
+                    "type": "logs",
+                    "content": "heartbeat",
+                    "output": "Task is still running.",
+                    "metadata": {
+                        "research_id": research_id,
+                        "status": "running",
+                    },
+                })
+                await upsert_run_report("running")
+            except Exception as exc:
+                logger.warning(
+                    "Progress heartbeat failed for run %s; task will continue: %s",
+                    research_id,
+                    exc,
+                )
+
+    heartbeat_task = asyncio.create_task(send_progress_heartbeat())
     try:
-        report = await manager.start_streaming(
+        report_payload = await manager.start_streaming(
             task,
             report_type,
             report_source,
@@ -373,7 +518,11 @@ async def handle_start_command(
             max_search_results,
             industry_direction_plan,
         )
-        report = str(report)
+        report = (
+            str(report_payload.get("report", ""))
+            if isinstance(report_payload, dict)
+            else str(report_payload)
+        )
         await logs_handler.send_json({
             "type": "report_complete",
             "content": "report_complete",
@@ -389,7 +538,12 @@ async def handle_start_command(
         file_paths["json"] = os.path.relpath(logs_handler.log_file)
         file_paths["research_id"] = research_id
         await send_file_paths(logs_handler, file_paths)
-        await upsert_run_report("completed", report=report, artifacts=file_paths)
+        await upsert_run_report(
+            "completed",
+            report=report,
+            artifacts=file_paths,
+            structured_response=report_payload if isinstance(report_payload, dict) else None,
+        )
     except Exception as exc:
         await logs_handler.send_json({
             "type": "logs",
@@ -397,6 +551,10 @@ async def handle_start_command(
             "output": f"Error: {exc}",
         })
         await upsert_run_report("error", error=str(exc))
+    finally:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
 
 
 async def handle_human_feedback(data: str):
@@ -476,6 +634,36 @@ async def handle_chat_command(websocket, data: str):
 
 async def send_file_paths(websocket, file_paths: Dict[str, str]):
     await websocket.send_json({"type": "path", "output": file_paths})
+
+
+def _structured_report_store_fields(
+    response: Dict[str, Any],
+    generated_artifacts: Dict[str, str] | None = None,
+) -> Dict[str, Any]:
+    fields: Dict[str, Any] = {}
+    for key in (
+        "run_id",
+        "research_information",
+        "trace_summary",
+        "assessments",
+        "evidence_index",
+        "analysis_claims",
+        "competitor_knowledge",
+        "state",
+    ):
+        if key in response:
+            fields[key] = response[key]
+
+    report_artifacts = response.get("report_artifacts")
+    if isinstance(report_artifacts, dict):
+        fields["report_artifacts"] = {
+            **report_artifacts,
+            **(generated_artifacts or {}),
+        }
+    elif generated_artifacts:
+        fields["report_artifacts"] = dict(generated_artifacts)
+
+    return fields
 
 
 def get_config_dict(

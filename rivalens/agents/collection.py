@@ -34,6 +34,7 @@ class CollectionAgent:
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
         max_root_branch_hard_limit: int = 20,
+        max_verification_concurrency: int | None = None,
         max_concurrent_collections: int | None = None,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
@@ -43,6 +44,12 @@ class CollectionAgent:
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
         self.max_root_branch_hard_limit = max_root_branch_hard_limit
+        self.max_verification_concurrency = _int_env(
+            max_verification_concurrency,
+            "RIVALENS_MAX_VERIFICATION_CONCURRENCY",
+            3,
+            minimum=1,
+        )
         self.max_concurrent_collections = _int_env(
             max_concurrent_collections,
             "RIVALENS_MAX_CONCURRENT_COLLECTIONS",
@@ -126,7 +133,12 @@ class CollectionAgent:
                 if file_rag_context:
                     collection_task["file_rag_context"] = file_rag_context
 
-            collection_semaphore = asyncio.Semaphore(self.max_concurrent_collections)
+            collection_limit = (
+                self.max_verification_concurrency
+                if verification_pass
+                else self.max_concurrent_collections
+            )
+            collection_semaphore = asyncio.Semaphore(collection_limit)
             results = await asyncio.gather(
                 *[
                     self._run_collection_task_with_limit(
@@ -292,6 +304,7 @@ class CollectionAgent:
                         "active_schema_id": active_schema.get("id"),
                         "collection_phase": "verification" if verification_pass else "initial_or_gap_collection",
                         "verification_task_count": len(verification_queue),
+                        "max_verification_concurrency": self.max_verification_concurrency,
                         "root_branch_count": len(root_branches),
                         "max_branch_depth": self.max_branch_depth,
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,

@@ -101,7 +101,12 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Frontend directory not found: {frontend_path}")
     
     persistence_config = get_persistence_config()
-    if persistence_config.auto_create_tables:
+    if not persistence_config.enabled:
+        logger.info(
+            "Rivalens persistence is disabled; set "
+            "RIVALENS_PERSISTENCE_ENABLED=true to enable PostgreSQL persistence."
+        )
+    elif persistence_config.auto_create_tables:
         try:
             initialize_database()
             logger.info("Rivalens persistence tables are ready")
@@ -112,11 +117,14 @@ async def lifespan(app: FastAPI):
             "Rivalens automatic table creation is disabled; set "
             "RIVALENS_AUTO_CREATE_TABLES=true to enable it."
         )
-    logger.info(
-        "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
-        redact_url(persistence_config.database_url),
-        persistence_config.redis_url,
-    )
+    if persistence_config.enabled:
+        logger.info(
+            "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
+            redact_url(persistence_config.database_url),
+            persistence_config.redis_url,
+        )
+    else:
+        logger.info("Rivalens API ready - persistence targets are not active.")
     yield
     # Shutdown
     logger.info("Research API shutting down")
@@ -174,6 +182,115 @@ def _extract_rivalens_report_text(report_information: Any) -> str:
     if isinstance(report_information, (tuple, list)):
         return str(report_information[0]) if report_information else ""
     return str(report_information)
+
+
+def _build_report_store_record(
+    research_id: str,
+    research_request: ResearchRequest,
+    status: str,
+    *,
+    response: Dict[str, Any] | None = None,
+    existing: Dict[str, Any] | None = None,
+    error: str | None = None,
+) -> Dict[str, Any]:
+    now_ms = int(time.time() * 1000)
+    existing = existing or {}
+    response = response or {}
+    report_text = str(response.get("report") or existing.get("answer") or "")
+
+    ordered_data = existing.get("orderedData")
+    if not isinstance(ordered_data, list):
+        ordered_data = []
+    if status == "completed" and not ordered_data:
+        ordered_data = [
+            {"type": "question", "content": research_request.task},
+            {"type": "basic", "content": report_text},
+        ]
+
+    chat_messages = existing.get("chatMessages")
+    if not isinstance(chat_messages, list):
+        chat_messages = []
+
+    record = {
+        **existing,
+        "id": research_id,
+        "question": existing.get("question") or research_request.task,
+        "answer": report_text,
+        "orderedData": ordered_data,
+        "chatMessages": chat_messages,
+        "timestamp": now_ms,
+        "status": status,
+        "report_type": research_request.report_type,
+        "report_source": research_request.report_source,
+        "tone": research_request.tone,
+    }
+
+    for key in (
+        "run_id",
+        "research_information",
+        "docx_path",
+        "pdf_path",
+        "markdown_path",
+        "html_path",
+        "artifacts",
+        "report_artifacts",
+        "trace_summary",
+        "assessments",
+        "evidence_index",
+        "analysis_claims",
+        "competitor_knowledge",
+        "state",
+    ):
+        if key in response:
+            record[key] = response[key]
+
+    if error is not None:
+        record["error"] = error
+    elif "error" in record:
+        record.pop("error")
+
+    return record
+
+
+async def _upsert_report_generation_record(
+    research_id: str,
+    research_request: ResearchRequest,
+    status: str,
+    *,
+    response: Dict[str, Any] | None = None,
+    error: str | None = None,
+) -> Dict[str, Any]:
+    existing = await report_store.get_report(research_id)
+    record = _build_report_store_record(
+        research_id,
+        research_request,
+        status,
+        response=response,
+        existing=existing,
+        error=error,
+    )
+    await report_store.upsert_report(research_id, record)
+    return record
+
+
+async def write_report_and_store(research_request: ResearchRequest, research_id: str) -> Dict[str, Any]:
+    try:
+        response = await write_report(research_request, research_id)
+        await _upsert_report_generation_record(
+            research_id,
+            research_request,
+            "completed",
+            response=response,
+        )
+        return response
+    except Exception as exc:
+        await _upsert_report_generation_record(
+            research_id,
+            research_request,
+            "failed",
+            error=str(exc),
+        )
+        raise
 
 # Startup event
 
@@ -247,6 +364,22 @@ async def get_report_by_id(research_id: str):
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return {"report": report}
+
+
+@app.get("/api/reports/{research_id}/status")
+async def get_report_status(research_id: str):
+    report = await report_store.get_report(research_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {
+        "research_id": research_id,
+        "status": report.get("status") or ("completed" if report.get("answer") else "unknown"),
+        "timestamp": report.get("timestamp"),
+        "error": report.get("error"),
+        "artifacts": report.get("artifacts"),
+        "report_artifacts": report.get("report_artifacts"),
+        "trace_summary": report.get("trace_summary"),
+    }
 
 
 @app.post("/api/reports")
@@ -352,7 +485,8 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
         headers=research_request.headers,
         query_domains=[],
         config_path="",
-        return_researcher=True
+        return_researcher=True,
+        run_id=research_id,
     )
 
     if research_request.report_type != "rivalens":
@@ -387,14 +521,24 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
             quote_paths=True,
             include_legacy_md_key=True,
         )
+        report_artifacts = dict(report_information.get("report_artifacts") or {}) if isinstance(report_information, dict) else {}
+        report_artifacts.update(artifacts)
         response = {
             "research_id": research_id,
+            "run_id": report_information.get("run_id", research_id) if isinstance(report_information, dict) else research_id,
             "report": report,
             "docx_path": artifacts["docx"],
             "pdf_path": artifacts["pdf"],
             "markdown_path": artifacts["markdown"],
             "html_path": artifacts["html"],
             "artifacts": artifacts,
+            "report_artifacts": report_artifacts,
+            "trace_summary": report_information.get("trace_summary", {}) if isinstance(report_information, dict) else {},
+            "assessments": report_information.get("assessments", {}) if isinstance(report_information, dict) else {},
+            "evidence_index": report_information.get("evidence_index", []) if isinstance(report_information, dict) else [],
+            "analysis_claims": report_information.get("analysis_claims", []) if isinstance(report_information, dict) else [],
+            "competitor_knowledge": report_information.get("competitor_knowledge", []) if isinstance(report_information, dict) else [],
+            "state": report_information.get("state", {}) if isinstance(report_information, dict) else {},
         }
 
     return response
@@ -402,13 +546,16 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
 @app.post("/report/")
 async def generate_report(research_request: ResearchRequest, background_tasks: BackgroundTasks):
     research_id = sanitize_filename(f"task_{int(time.time())}_{research_request.task}")
+    await _upsert_report_generation_record(research_id, research_request, "running")
 
     if research_request.generate_in_background:
-        background_tasks.add_task(write_report, research_request=research_request, research_id=research_id)
+        background_tasks.add_task(write_report_and_store, research_request=research_request, research_id=research_id)
         return {"message": "Your report is being generated in the background. Please check back later.",
-                "research_id": research_id}
+                "research_id": research_id,
+                "status": "running",
+                "status_url": f"/api/reports/{research_id}/status"}
     else:
-        response = await write_report(research_request, research_id)
+        response = await write_report_and_store(research_request, research_id)
         return response
 
 
@@ -516,39 +663,3 @@ async def chat(chat_request: ChatRequest):
         logger.error(f"Error processing chat request: {str(e)}", exc_info=True)
         return {"error": str(e)}
 
-@app.post("/api/reports/{research_id}/chat")
-async def research_report_chat(research_id: str, request: Request):
-    """Handle chat requests for a specific research report.
-    Directly processes the raw request data to avoid validation errors.
-    """
-    try:
-        # Get raw JSON data from request
-        data = await request.json()
-        
-        # Create chat agent with the report
-        chat_agent = ChatAgentWithMemory(
-            report=data.get("report", ""),
-            config_path="default",
-            headers=None
-        )
-
-        # Process the chat and get response with metadata
-        response_content, tool_calls_metadata = await chat_agent.chat(data.get("messages", []), None)
-        
-        if tool_calls_metadata:
-            logger.info(f"Tool calls used: {json.dumps(tool_calls_metadata)}")
-
-        # Format response as a ChatMessage object
-        response_message = {
-            "role": "assistant",
-            "content": response_content,
-            "timestamp": int(time.time() * 1000),
-            "metadata": {
-                "tool_calls": tool_calls_metadata
-            } if tool_calls_metadata else None
-        }
-
-        return {"response": response_message}
-    except Exception as e:
-        logger.error(f"Error in research report chat: {str(e)}", exc_info=True)
-        return {"error": str(e)}

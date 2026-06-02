@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import traceback
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from fastapi import WebSocket
 
@@ -17,6 +17,63 @@ from .rivalens_runner import run_rivalens_task
 from .server_utils import CustomLogsHandler
 
 logger = logging.getLogger(__name__)
+
+
+def _list_field(state: dict[str, Any], key: str) -> list[Any]:
+    value = state.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _dict_field(state: dict[str, Any], key: str) -> dict[str, Any]:
+    value = state.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _json_safe(value: Any) -> Any:
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:
+        return str(value)
+
+
+def build_rivalens_structured_response(
+    state: dict[str, Any],
+    *,
+    fallback_run_id: str | None = None,
+) -> dict[str, Any]:
+    task = _dict_field(state, "task")
+    run_id = str(task.get("run_id") or fallback_run_id or "")
+    evidence_items = _list_field(state, "evidence_items")
+    coverage_assessments = _list_field(state, "coverage_assessments")
+    evidence_reviews = _list_field(state, "evidence_reviews")
+    claim_support_reviews = _list_field(state, "claim_support_reviews")
+    analysis_claims = _list_field(state, "analysis_claims")
+    agent_events = _list_field(state, "agent_events")
+    published_artifacts = _dict_field(state, "published_artifacts")
+
+    return {
+        "run_id": run_id,
+        "report": str(state.get("report", "")),
+        "report_artifacts": published_artifacts,
+        "trace_summary": {
+            "event_count": len(agent_events),
+            "agents": [event.get("agent", "") for event in agent_events if isinstance(event, dict)],
+            "latest_events": _json_safe(agent_events[-10:]),
+            "research_branch_count": len(_list_field(state, "research_branches")),
+            "research_task_count": len(_list_field(state, "research_tasks")),
+            "evidence_count": len(evidence_items),
+            "claim_count": len(analysis_claims),
+        },
+        "assessments": {
+            "coverage": _json_safe(coverage_assessments),
+            "evidence_reviews": _json_safe(evidence_reviews),
+            "claim_support_reviews": _json_safe(claim_support_reviews),
+        },
+        "evidence_index": _json_safe(evidence_items),
+        "analysis_claims": _json_safe(analysis_claims),
+        "competitor_knowledge": _json_safe(_list_field(state, "competitor_knowledge")),
+        "state": _json_safe(state),
+    }
 
 class WebSocketManager:
     """Manage websockets"""
@@ -114,7 +171,7 @@ class WebSocketManager:
         )
         return report
 
-async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None):
+async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, run_id=None):
     """Run the agent."""    
     # Reuse the request-scoped log handler when the WebSocket entrypoint already
     # created one, otherwise create one for direct/backend-only calls.
@@ -144,7 +201,7 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
 
     # Initialize researcher based on report type
     if report_type == "rivalens":
-        report = await run_rivalens_task(
+        state = await run_rivalens_task(
             query=task, 
             websocket=logs_handler,  # Use logs_handler instead of raw websocket
             stream_output=stream_output, 
@@ -152,8 +209,12 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
             headers=headers,
             industry_direction_plan=industry_direction_plan,
             industry_directions_confirmed=bool(industry_direction_plan),
+            run_id=run_id,
         )
-        report = report.get("report", "")
+        report = build_rivalens_structured_response(
+            state if isinstance(state, dict) else {"report": str(state)},
+            fallback_run_id=run_id,
+        )
 
     elif report_type == ReportType.DetailedReport.value:
         researcher = DetailedReport(

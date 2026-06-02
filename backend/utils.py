@@ -2,6 +2,7 @@ import aiofiles
 import urllib
 import mistune
 import os
+import warnings
 from pathlib import Path
 
 async def write_to_file(filename: str, text: str) -> None:
@@ -99,6 +100,7 @@ async def write_md_to_word(text: str, filename: str = "") -> str:
     file_path = f"outputs/{filename[:60]}.docx"
 
     try:
+        from bs4 import MarkupResemblesLocatorWarning
         from docx import Document
         from htmldocx import HtmlToDocx
         # Convert report markdown to HTML
@@ -106,7 +108,12 @@ async def write_md_to_word(text: str, filename: str = "") -> str:
         # Create a document object
         doc = Document()
         # Convert the html generated from the report to document format
-        HtmlToDocx().add_html_to_document(html, doc)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=MarkupResemblesLocatorWarning,
+            )
+            HtmlToDocx().add_html_to_document(html, doc)
 
         # Saving the docx document to file_path
         doc.save(file_path)

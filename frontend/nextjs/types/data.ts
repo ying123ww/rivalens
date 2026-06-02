@@ -102,6 +102,16 @@ export interface ResearchHistoryItem {
   question: string;
   answer: string;
   timestamp: number;
+  status?: "running" | "completed" | "failed" | "error" | "cancelled" | "unknown";
+  error?: string;
+  artifacts?: Record<string, string>;
+  report_artifacts?: Record<string, string>;
+  trace_summary?: Record<string, any>;
+  assessments?: Record<string, any>;
+  evidence_index?: Record<string, any>[];
+  analysis_claims?: Record<string, any>[];
+  competitor_knowledge?: Record<string, any>[];
+  state?: Record<string, any>;
   orderedData: Data[];
   chatMessages?: ChatMessage[];
 }

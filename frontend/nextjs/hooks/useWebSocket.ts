@@ -45,6 +45,18 @@ export const useWebSocket = (
       setCurrentResearchId?.(report.id);
     }
 
+    if (status === 'running') {
+      if (Array.isArray(report.orderedData)) {
+        setOrderedData(report.orderedData as Data[]);
+      }
+      if (typeof report.answer === 'string' && report.answer) {
+        setAnswer(report.answer);
+      }
+      researchActiveRef.current = true;
+      setLoading(true);
+      return false;
+    }
+
     if (status === 'completed' || status === 'error' || status === 'cancelled') {
       if (Array.isArray(report.orderedData)) {
         setOrderedData(report.orderedData as Data[]);
@@ -90,7 +102,7 @@ export const useWebSocket = (
     stopRecoveryPolling();
     recoveryPollTimeout.current = window.setTimeout(async () => {
       try {
-        const response = await fetch(`/api/reports/${researchId}`);
+        const response = await fetch(`${getHost()}/api/reports/${researchId}`);
         if (response.ok) {
           const data = await response.json();
           if (applyRecoveredReport(data.report)) {

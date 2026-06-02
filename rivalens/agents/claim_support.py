@@ -13,11 +13,20 @@ from rivalens.schema import ClaimSupportReview, CompetitorAnalysisState
 class ClaimSupportReviewer:
     """Check whether claims are sufficiently supported by accepted evidence."""
 
-    def __init__(self, enable_verification: bool | None = None) -> None:
+    def __init__(
+        self,
+        enable_verification: bool | None = None,
+        max_verification_tasks: int | None = None,
+    ) -> None:
         self.enable_verification = (
             enable_verification
             if enable_verification is not None
             else self._env_flag("RIVALENS_ENABLE_CLAIM_VERIFICATION", False)
+        )
+        self.max_verification_tasks = (
+            max_verification_tasks
+            if max_verification_tasks is not None
+            else self._env_int("RIVALENS_MAX_CLAIM_VERIFICATION_TASKS", 8, minimum=1)
         )
 
     def review(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
@@ -41,7 +50,7 @@ class ClaimSupportReviewer:
         weak_count = 0
         verification_rounds = int(state.get("verification_rounds", 0) or 0)
         verification_enabled = self.enable_verification and verification_rounds == 0
-        verification_task_queue: list[dict[str, Any]] = []
+        verification_task_candidates: list[dict[str, Any]] = []
 
         for claim in claims:
             claim_id = claim.get("id", "")
@@ -69,7 +78,7 @@ class ClaimSupportReviewer:
                 evidence_items,
                 allow_verification=verification_enabled,
             )
-            verification_task_queue.extend(follow_up_tasks)
+            verification_task_candidates.extend(follow_up_tasks)
             reviews.append(
                 {
                     "id": f"claim_support_{claim_id or len(reviews) + 1}",
@@ -84,6 +93,18 @@ class ClaimSupportReviewer:
                     "confidence": confidence,
                 }
             )
+
+        verification_task_queue = self._merge_prioritized_follow_up_tasks(
+            verification_task_candidates,
+        )
+        tasks_by_claim_id = {
+            claim_id: task
+            for task in verification_task_queue
+            for claim_id in task.get("claim_ids", [])
+        }
+        for review in reviews:
+            claim_task = tasks_by_claim_id.get(review.get("claim_id", ""))
+            review["required_follow_up_tasks"] = [claim_task] if claim_task else []
 
         message = create_agent_message(
             sender="claim_support",
@@ -123,6 +144,8 @@ class ClaimSupportReviewer:
                         "supported_count": supported_count,
                         "weak_count": weak_count,
                         "verification_task_count": len(verification_task_queue),
+                        "verification_task_candidate_count": len(verification_task_candidates),
+                        "max_verification_tasks": self.max_verification_tasks,
                     },
                 }
             ],
@@ -133,6 +156,16 @@ class ClaimSupportReviewer:
         if raw_value in (None, ""):
             return default
         return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
 
     def _support_status(
         self,
@@ -286,8 +319,118 @@ class ClaimSupportReviewer:
                 "competitor": competitor,
                 "dimension_id": dimension,
                 "parent_branch_id": claim.get("branch_id", ""),
+                "claim_ids": [claim.get("id", "")],
+                "support_statuses": [support_status],
+                "unsupported_phrases": unsupported_phrases,
+                "priority": self._verification_priority(support_status),
             }
         ]
+
+    def _merge_prioritized_follow_up_tasks(
+        self,
+        tasks: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for task in tasks:
+            source_type = self._primary_source_type(task)
+            key = (
+                str(task.get("competitor", "")),
+                str(task.get("dimension_id", "")),
+                source_type,
+            )
+            if key not in grouped:
+                grouped[key] = self._new_merged_task(task, source_type)
+            else:
+                self._add_to_merged_task(grouped[key], task)
+
+        ranked = sorted(
+            grouped.values(),
+            key=lambda task: (
+                int(task.get("priority", 99)),
+                -len(task.get("claim_ids", [])),
+                str(task.get("competitor", "")),
+                str(task.get("dimension_id", "")),
+            ),
+        )
+        return ranked[: self.max_verification_tasks]
+
+    def _new_merged_task(self, task: dict[str, Any], source_type: str) -> dict[str, Any]:
+        merged = dict(task)
+        claim_ids = [claim_id for claim_id in task.get("claim_ids", []) if claim_id]
+        merged["claim_ids"] = claim_ids
+        merged["support_statuses"] = list(task.get("support_statuses", []) or [])
+        merged["unsupported_phrases"] = list(task.get("unsupported_phrases", []) or [])
+        merged["target_source_types"] = list(
+            dict.fromkeys([source_type] + list(task.get("target_source_types", []) or []))
+        )
+        merged["source_type"] = source_type
+        merged["merged_claim_count"] = len(claim_ids)
+        return merged
+
+    def _add_to_merged_task(self, merged: dict[str, Any], task: dict[str, Any]) -> None:
+        claim_ids = list(merged.get("claim_ids", []) or [])
+        for claim_id in task.get("claim_ids", []) or []:
+            if claim_id and claim_id not in claim_ids:
+                claim_ids.append(claim_id)
+        merged["claim_ids"] = claim_ids
+        merged["merged_claim_count"] = len(claim_ids)
+
+        merged["support_statuses"] = list(
+            dict.fromkeys(
+                list(merged.get("support_statuses", []) or [])
+                + list(task.get("support_statuses", []) or [])
+            )
+        )
+        merged["unsupported_phrases"] = list(
+            dict.fromkeys(
+                list(merged.get("unsupported_phrases", []) or [])
+                + list(task.get("unsupported_phrases", []) or [])
+            )
+        )[:8]
+        merged["target_source_types"] = list(
+            dict.fromkeys(
+                list(merged.get("target_source_types", []) or [])
+                + list(task.get("target_source_types", []) or [])
+            )
+        )
+        merged["priority"] = min(
+            int(merged.get("priority", 99)),
+            int(task.get("priority", 99)),
+        )
+
+        objectives = [str(merged.get("objective", "")), str(task.get("objective", ""))]
+        queries = [str(merged.get("query", "")), str(task.get("query", ""))]
+        merged["objective"] = self._merged_text("Verify grouped claims", objectives, limit=220)
+        merged["query"] = self._merged_text(
+            "Search for public evidence that directly supports or contradicts these grouped claims.",
+            queries,
+            limit=900,
+        )
+        merged["generated_from_gap"] = self._merged_gap_id(merged)
+        merged["reason"] = "Claim support review grouped multiple weak claims for one verification collection."
+
+    def _primary_source_type(self, task: dict[str, Any]) -> str:
+        source_types = task.get("target_source_types", []) or []
+        return str(source_types[0]) if source_types else "other"
+
+    def _verification_priority(self, support_status: str) -> int:
+        return {
+            "contradicted": 0,
+            "unverifiable": 1,
+            "weak": 2,
+        }.get(support_status, 9)
+
+    def _merged_gap_id(self, task: dict[str, Any]) -> str:
+        competitor = re.sub(r"[^a-zA-Z0-9]+", "_", str(task.get("competitor", "")).strip()).strip("_")
+        dimension = re.sub(r"[^a-zA-Z0-9]+", "_", str(task.get("dimension_id", "")).strip()).strip("_")
+        source_type = re.sub(r"[^a-zA-Z0-9]+", "_", str(task.get("source_type", "")).strip()).strip("_")
+        parts = [part for part in [competitor, dimension, source_type] if part]
+        return "verification_batch:" + ":".join(parts or ["claims"])
+
+    def _merged_text(self, prefix: str, values: list[str], limit: int) -> str:
+        deduped = [value for value in dict.fromkeys(values) if value]
+        text = "\n\n".join([prefix, *deduped])
+        return text[:limit]
 
     def _target_source_types(
         self,
