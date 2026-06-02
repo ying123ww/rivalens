@@ -233,6 +233,7 @@ async def create_or_update_report(request: Request):
             timestamp = max(timestamp, existing["timestamp"])
 
         report = {
+            **(existing or {}),
             "id": research_id,
             "question": data.get("question"),
             "answer": data.get("answer"),
@@ -431,7 +432,7 @@ async def delete_file(filename: str):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        await handle_websocket_communication(websocket, manager)
+        await handle_websocket_communication(websocket, manager, report_store=report_store)
     except WebSocketDisconnect as e:
         # Disconnect with more detailed logging about the WebSocket disconnect reason
         logger.info(f"WebSocket disconnected with code {e.code} and reason: '{e.reason}'")
@@ -521,4 +522,3 @@ async def research_report_chat(research_id: str, request: Request):
     except Exception as e:
         logger.error(f"Error in research report chat: {str(e)}", exc_info=True)
         return {"error": str(e)}
-

@@ -118,17 +118,15 @@ export default function Home() {
     getChatMessages
   } = useResearchHistoryContext();
 
-  // Only initialize the WebSocket hook reference, don't connect automatically
-  const websocketRef = useRef(useWebSocket(
+  // Initialize the WebSocket hook without connecting until a run starts.
+  const { socket, initializeWebSocket } = useWebSocket(
     setOrderedData,
     setAnswer,
     setLoading,
     setShowHumanFeedback,
-    setQuestionForHuman
-  ));
-  
-  // Use the reference to access websocket functions
-  const { socket, initializeWebSocket } = websocketRef.current;
+    setQuestionForHuman,
+    setCurrentResearchId
+  );
 
   const handleFeedbackSubmit = (feedback: string | null) => {
     if (socket) {
@@ -588,13 +586,18 @@ export default function Home() {
    */
   const handleStopResearch = () => {
     if (socket) {
-      socket.close();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send("stop");
+        window.setTimeout(() => socket.close(1000, "User stopped research"), 50);
+      } else {
+        socket.close();
+      }
     }
     setLoading(false);
     setIsStopped(true);
     
     // Reload the page to completely reset the socket connection
-    window.location.reload();
+    window.setTimeout(() => window.location.reload(), 100);
   };
 
   /**

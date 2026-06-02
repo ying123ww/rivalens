@@ -50,6 +50,33 @@ class DisconnectingWebSocket:
         self.closed = True
 
 
+class StoppingWebSocket:
+    def __init__(self):
+        self._messages = iter(["start {}", "stop"])
+        self.closed = False
+        self.sent = []
+
+    async def receive_text(self):
+        import asyncio
+
+        try:
+            message = next(self._messages)
+            if message == "stop":
+                await asyncio.sleep(0)
+            return message
+        except StopIteration:
+            raise WebSocketDisconnect()
+
+    async def send_json(self, data):
+        self.sent.append(data)
+
+    async def send_text(self, data):
+        return None
+
+    async def close(self):
+        self.closed = True
+
+
 class StubWebSocketManager:
     def __init__(self):
         self.disconnected = False
@@ -124,21 +151,28 @@ class CustomLogsHandlerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(websocket.send_attempts, 1)
         self.assertEqual(len(disconnect_events), 1)
 
-    async def test_websocket_disconnect_cancels_running_task(self):
+    async def test_websocket_disconnect_keeps_running_task_alive(self):
         import asyncio
 
         started = asyncio.Event()
-        cancelled_event = asyncio.Event()
+        allow_complete = asyncio.Event()
+        completed = asyncio.Event()
         cancelled = False
 
-        async def fake_handle_start_command(websocket, data, manager, on_log_handler=None):
+        async def fake_handle_start_command(
+            websocket,
+            data,
+            manager,
+            on_log_handler=None,
+            report_store=None,
+        ):
             nonlocal cancelled
             started.set()
             try:
-                await asyncio.sleep(10)
+                await allow_complete.wait()
+                completed.set()
             except asyncio.CancelledError:
                 cancelled = True
-                cancelled_event.set()
                 raise
 
         websocket = DisconnectingWebSocket()
@@ -151,9 +185,49 @@ class CustomLogsHandlerTest(unittest.IsolatedAsyncioTestCase):
             await handle_websocket_communication(websocket, manager)
 
         await asyncio.wait_for(started.wait(), timeout=1)
-        await asyncio.wait_for(cancelled_event.wait(), timeout=1)
+        self.assertFalse(cancelled)
 
-        self.assertTrue(cancelled)
+        allow_complete.set()
+        await asyncio.wait_for(completed.wait(), timeout=1)
+
+        self.assertTrue(manager.disconnected)
+        self.assertTrue(websocket.closed)
+
+    async def test_stop_command_cancels_running_task(self):
+        import asyncio
+
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def fake_handle_start_command(
+            websocket,
+            data,
+            manager,
+            on_log_handler=None,
+            report_store=None,
+        ):
+            started.set()
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        websocket = StoppingWebSocket()
+        manager = StubWebSocketManager()
+
+        with patch(
+            "backend.server.server_utils.handle_start_command",
+            fake_handle_start_command,
+        ):
+            await handle_websocket_communication(websocket, manager)
+
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+        self.assertTrue(
+            any(message.get("content") == "run_cancelled" for message in websocket.sent)
+        )
         self.assertTrue(manager.disconnected)
         self.assertTrue(websocket.closed)
 

@@ -1,17 +1,113 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
-import { Data, ChatBoxSettings, QuestionData } from '../types/data';
+import { Dispatch, SetStateAction, useRef, useState, useEffect, useCallback } from 'react';
+import { Data, ChatBoxSettings } from '../types/data';
 import { getHost } from '../helpers/getHost';
 
 export const useWebSocket = (
-  setOrderedData: React.Dispatch<React.SetStateAction<Data[]>>,
-  setAnswer: React.Dispatch<React.SetStateAction<string>>, 
-  setLoading: React.Dispatch<React.SetStateAction<boolean>>,
-  setShowHumanFeedback: React.Dispatch<React.SetStateAction<boolean>>,
-  setQuestionForHuman: React.Dispatch<React.SetStateAction<boolean | true>>
+  setOrderedData: Dispatch<SetStateAction<Data[]>>,
+  setAnswer: Dispatch<SetStateAction<string>>, 
+  setLoading: Dispatch<SetStateAction<boolean>>,
+  setShowHumanFeedback: Dispatch<SetStateAction<boolean>>,
+  setQuestionForHuman: Dispatch<SetStateAction<boolean | true>>,
+  setCurrentResearchId?: Dispatch<SetStateAction<string | null>>
 ) => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const heartbeatInterval = useRef<number>();
+  const recoveryPollTimeout = useRef<number>();
   const researchActiveRef = useRef(false);
+  const activeResearchIdRef = useRef<string | null>(null);
+
+  const stopRecoveryPolling = useCallback(() => {
+    if (recoveryPollTimeout.current) {
+      clearTimeout(recoveryPollTimeout.current);
+      recoveryPollTimeout.current = undefined;
+    }
+  }, []);
+
+  const appendLog = useCallback((content: string, output: string, metadata?: any) => {
+    setOrderedData((prevOrder) => [
+      ...prevOrder,
+      {
+        type: 'logs',
+        content,
+        output,
+        metadata,
+        contentAndType: `${content}-logs`
+      } as unknown as Data
+    ]);
+  }, [setOrderedData]);
+
+  const applyRecoveredReport = useCallback((report: any): boolean => {
+    if (!report) return false;
+    const status = report.status;
+
+    if (report.id) {
+      activeResearchIdRef.current = report.id;
+      setCurrentResearchId?.(report.id);
+    }
+
+    if (status === 'completed' || status === 'error' || status === 'cancelled') {
+      if (Array.isArray(report.orderedData)) {
+        setOrderedData(report.orderedData as Data[]);
+      }
+      if (typeof report.answer === 'string') {
+        setAnswer(report.answer);
+      }
+    }
+
+    if (status === 'completed') {
+      researchActiveRef.current = false;
+      setLoading(false);
+      localStorage.removeItem('activeResearchId');
+      stopRecoveryPolling();
+      return true;
+    }
+
+    if (status === 'error') {
+      researchActiveRef.current = false;
+      setLoading(false);
+      appendLog(
+        'run_error',
+        report.error ? `Run failed: ${report.error}` : 'Run failed before a final report was available.',
+        { research_id: report.id }
+      );
+      localStorage.removeItem('activeResearchId');
+      stopRecoveryPolling();
+      return true;
+    }
+
+    if (status === 'cancelled') {
+      researchActiveRef.current = false;
+      setLoading(false);
+      localStorage.removeItem('activeResearchId');
+      stopRecoveryPolling();
+      return true;
+    }
+
+    return false;
+  }, [appendLog, setAnswer, setCurrentResearchId, setLoading, setOrderedData, stopRecoveryPolling]);
+
+  const pollRecoveredReport = useCallback((researchId: string, attempt = 0) => {
+    stopRecoveryPolling();
+    recoveryPollTimeout.current = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/reports/${researchId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (applyRecoveredReport(data.report)) {
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error polling recovered report:', error);
+      }
+
+      const nextDelay = Math.min(15000, 3000 + attempt * 1000);
+      recoveryPollTimeout.current = window.setTimeout(
+        () => pollRecoveredReport(researchId, attempt + 1),
+        nextDelay
+      );
+    }, attempt === 0 ? 1000 : 0);
+  }, [applyRecoveredReport, stopRecoveryPolling]);
 
   // Cleanup function for heartbeat and socket on unmount
   useEffect(() => {
@@ -20,6 +116,7 @@ export const useWebSocket = (
       if (heartbeatInterval.current) {
         clearInterval(heartbeatInterval.current);
       }
+      stopRecoveryPolling();
       
       // Close socket on unmount if it exists and is open
       if (socket && socket.readyState === WebSocket.OPEN) {
@@ -28,7 +125,7 @@ export const useWebSocket = (
         socket.close(1000, "Component unmounted");
       }
     };
-  }, [socket]);
+  }, [socket, stopRecoveryPolling]);
 
   const startHeartbeat = (ws: WebSocket) => {
     // Clear any existing heartbeat
@@ -54,9 +151,10 @@ export const useWebSocket = (
       researchActiveRef.current = false;
       socket.close(1000, "New connection requested");
     }
-
-    const storedConfig = localStorage.getItem('apiVariables');
-    const apiVariables = storedConfig ? JSON.parse(storedConfig) : {};
+    stopRecoveryPolling();
+    activeResearchIdRef.current = null;
+    localStorage.removeItem('activeResearchId');
+    setCurrentResearchId?.(null);
 
     if (typeof window !== 'undefined') {
       
@@ -88,7 +186,9 @@ export const useWebSocket = (
         // Start a new research
         try {
           console.log(`Starting new research for: ${promptValue}`);
+          const researchId = `task_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
           const dataToSend = { 
+            research_id: researchId,
             task: promptValue,
             report_type, 
             report_source, 
@@ -104,6 +204,9 @@ export const useWebSocket = (
           const message = `start ${JSON.stringify(dataToSend)}`;
           console.log(`Sending start message, length: ${message.length}`);
           researchActiveRef.current = true;
+          activeResearchIdRef.current = researchId;
+          localStorage.setItem('activeResearchId', researchId);
+          setCurrentResearchId?.(researchId);
           newSocket.send(message);
         } catch (error) {
           console.error("Error preparing start message:", error);
@@ -128,6 +231,12 @@ export const useWebSocket = (
             setQuestionForHuman(data.output);
             setShowHumanFeedback(true);
           } else {
+            const researchId = data.metadata?.research_id || data.output?.research_id || data.research_id;
+            if (researchId) {
+              activeResearchIdRef.current = researchId;
+              localStorage.setItem('activeResearchId', researchId);
+              setCurrentResearchId?.(researchId);
+            }
             const contentAndType = `${data.content}-${data.type}`;
             setOrderedData((prevOrder) => [...prevOrder, { ...data, contentAndType }]);
 
@@ -140,6 +249,7 @@ export const useWebSocket = (
             } else if (data.type === 'path') {
               researchActiveRef.current = false;
               setLoading(false);
+              localStorage.removeItem('activeResearchId');
             }
           }
         } catch (error) {
@@ -156,20 +266,23 @@ export const useWebSocket = (
         }
         if (wasResearchActive) {
           const reason = event.reason ? `, reason: ${event.reason}` : '';
+          const recoveryId = activeResearchIdRef.current || localStorage.getItem('activeResearchId');
           const output = (
             `WebSocket disconnected while research was still running ` +
             `(code: ${event.code || 'unknown'}${reason}). ` +
-            `Live report streaming was interrupted; please restart this run.`
+            (
+              recoveryId
+                ? `Live report streaming was interrupted; the page will keep polling for the final report.`
+                : `Live report streaming was interrupted; please restart this run.`
+            )
           );
-          const disconnectData = {
-            type: 'logs',
-            content: 'websocket_disconnected',
-            output,
-            contentAndType: 'websocket_disconnected-logs'
-          } as unknown as Data;
-
-          setOrderedData((prevOrder) => [...prevOrder, disconnectData]);
-          setLoading(false);
+          appendLog('websocket_disconnected', output, { research_id: recoveryId });
+          if (recoveryId) {
+            setLoading(true);
+            pollRecoveredReport(recoveryId);
+          } else {
+            setLoading(false);
+          }
         }
         setSocket(null);
       };
@@ -181,7 +294,18 @@ export const useWebSocket = (
         }
       };
     }
-  }, [socket, setOrderedData, setAnswer, setLoading, setShowHumanFeedback, setQuestionForHuman]);
+  }, [
+    socket,
+    setOrderedData,
+    setAnswer,
+    setLoading,
+    setShowHumanFeedback,
+    setQuestionForHuman,
+    setCurrentResearchId,
+    appendLog,
+    pollRecoveredReport,
+    stopRecoveryPolling,
+  ]);
 
   return { socket, setSocket, initializeWebSocket };
 };

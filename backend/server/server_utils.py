@@ -32,13 +32,14 @@ logger = logging.getLogger(__name__)
 
 class CustomLogsHandler:
     """Custom handler to capture streaming logs from the research process"""
-    def __init__(self, websocket, task: str):
+    def __init__(self, websocket, task: str, research_id: str | None = None):
         self.logs = []
         self.websocket = websocket
         self._send_lock = _get_websocket_send_lock(websocket)
         self.websocket_closed = False
-        sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
-        self.log_file = os.path.join("outputs", f"{sanitized_filename}.json")
+        self.research_id = research_id or sanitize_filename(f"task_{int(time.time())}_{task}")
+        self.ordered_data: list[Dict[str, Any]] = []
+        self.log_file = os.path.join("outputs", f"{self.research_id}.json")
         self.timestamp = datetime.now().isoformat()
         # Initialize log file with metadata
         os.makedirs("outputs", exist_ok=True)
@@ -58,6 +59,7 @@ class CustomLogsHandler:
     async def send_json(self, data: Dict[str, Any]) -> None:
         """Store log data and send to websocket when it is still connected."""
         async with self._send_lock:
+            self._append_ordered_data(data)
             self._write_log_data(data)
 
             if not self.websocket or self.websocket_closed:
@@ -112,6 +114,14 @@ class CustomLogsHandler:
         # Save updated log file
         with open(self.log_file, 'w') as f:
             json.dump(log_data, f, indent=2)
+
+    def _append_ordered_data(self, data: Dict[str, Any]) -> None:
+        data_type = data.get("type")
+        if not data_type:
+            return
+        item = dict(data)
+        item.setdefault("contentAndType", f"{item.get('content', '')}-{data_type}")
+        self.ordered_data.append(item)
 
     def _record_websocket_disconnect(self, exc: Exception, failed_data: Dict[str, Any]) -> None:
         failed_type = failed_data.get("type")
@@ -255,7 +265,13 @@ def sanitize_filename(filename: str) -> str:
     return re.sub(r"[^\w\s-]", "", sanitized).strip()
 
 
-async def handle_start_command(websocket, data: str, manager, on_log_handler=None):
+async def handle_start_command(
+    websocket,
+    data: str,
+    manager,
+    on_log_handler=None,
+    report_store=None,
+):
     json_data = json.loads(data[6:])
     (
         task,
@@ -277,10 +293,61 @@ async def handle_start_command(websocket, data: str, manager, on_log_handler=Non
         print("Error: Missing task or report_type")
         return
 
+    requested_research_id = str(json_data.get("research_id") or "").strip()
+    research_id = (
+        re.sub(r"[^\w\s-]", "", requested_research_id).strip()
+        if requested_research_id
+        else sanitize_filename(f"task_{int(time.time())}_{task}")
+    )
+    if not research_id:
+        research_id = sanitize_filename(f"task_{int(time.time())}_{task}")
+
     # Create logs handler with websocket and task
-    logs_handler = CustomLogsHandler(websocket, task)
+    logs_handler = CustomLogsHandler(websocket, task, research_id=research_id)
     if on_log_handler:
         on_log_handler(logs_handler)
+
+    async def upsert_run_report(
+        status: str,
+        report: str = "",
+        artifacts: Dict[str, str] | None = None,
+        error: str | None = None,
+    ) -> None:
+        if report_store is None:
+            return
+        existing = await report_store.get_report(research_id) or {}
+        now_ms = int(time.time() * 1000)
+        ordered_data = [
+            {"type": "question", "content": task},
+            *logs_handler.ordered_data,
+        ]
+        updated = {
+            **existing,
+            "id": research_id,
+            "question": task,
+            "answer": report or existing.get("answer", ""),
+            "orderedData": ordered_data,
+            "chatMessages": existing.get("chatMessages") or [],
+            "status": status,
+            "timestamp": now_ms,
+        }
+        if artifacts is not None:
+            updated["artifacts"] = artifacts
+        if error is not None:
+            updated["error"] = error
+        await report_store.upsert_report(research_id, updated)
+
+    await upsert_run_report("running")
+    await logs_handler.send_json({
+        "type": "logs",
+        "content": "run_started",
+        "output": f"Run {research_id} started.",
+        "metadata": {
+            "research_id": research_id,
+            "status": "running",
+        },
+    })
+
     # Initialize log content with query
     await logs_handler.send_json({
         "query": task,
@@ -289,34 +356,47 @@ async def handle_start_command(websocket, data: str, manager, on_log_handler=Non
         "report": ""
     })
 
-    sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
-
-    report = await manager.start_streaming(
-        task,
-        report_type,
-        report_source,
-        source_urls,
-        document_urls,
-        tone,
-        logs_handler,
-        headers,
-        query_domains,
-        mcp_enabled,
-        mcp_strategy,
-        mcp_configs,
-        max_search_results,
-        industry_direction_plan,
-    )
-    report = str(report)
-    file_paths = await generate_report_files(
-        report,
-        sanitized_filename,
-        quote_paths=True,
-        include_legacy_md_key=True,
-    )
-    # Add JSON log path to file_paths
-    file_paths["json"] = os.path.relpath(logs_handler.log_file)
-    await send_file_paths(logs_handler, file_paths)
+    try:
+        report = await manager.start_streaming(
+            task,
+            report_type,
+            report_source,
+            source_urls,
+            document_urls,
+            tone,
+            logs_handler,
+            headers,
+            query_domains,
+            mcp_enabled,
+            mcp_strategy,
+            mcp_configs,
+            max_search_results,
+            industry_direction_plan,
+        )
+        report = str(report)
+        await logs_handler.send_json({
+            "type": "report_complete",
+            "content": "report_complete",
+            "output": report,
+        })
+        file_paths = await generate_report_files(
+            report,
+            research_id,
+            quote_paths=True,
+            include_legacy_md_key=True,
+        )
+        # Add JSON log path to file_paths
+        file_paths["json"] = os.path.relpath(logs_handler.log_file)
+        file_paths["research_id"] = research_id
+        await send_file_paths(logs_handler, file_paths)
+        await upsert_run_report("completed", report=report, artifacts=file_paths)
+    except Exception as exc:
+        await logs_handler.send_json({
+            "type": "logs",
+            "content": "error",
+            "output": f"Error: {exc}",
+        })
+        await upsert_run_report("error", error=str(exc))
 
 
 async def handle_human_feedback(data: str):
@@ -475,13 +555,30 @@ async def execute_rivalens_workflow(manager) -> Any:
         return JSONResponse(status_code=400, content={"message": "No active WebSocket connection"})
 
 
-async def handle_websocket_communication(websocket, manager):
+async def handle_websocket_communication(websocket, manager, report_store=None):
     running_task: asyncio.Task | None = None
     active_log_handler: CustomLogsHandler | None = None
 
     def set_active_log_handler(log_handler: CustomLogsHandler) -> None:
         nonlocal active_log_handler
         active_log_handler = log_handler
+
+    async def mark_active_run_cancelled() -> None:
+        if report_store is None or active_log_handler is None:
+            return
+        research_id = getattr(active_log_handler, "research_id", "")
+        if not research_id:
+            return
+        existing = await report_store.get_report(research_id) or {}
+        await report_store.upsert_report(
+            research_id,
+            {
+                **existing,
+                "id": research_id,
+                "status": "cancelled",
+                "timestamp": int(time.time() * 1000),
+            },
+        )
 
     def run_long_running_task(awaitable: Awaitable) -> asyncio.Task:
         async def safe_run():
@@ -508,9 +605,33 @@ async def handle_websocket_communication(websocket, manager):
             try:
                 data = await websocket.receive_text()
                 logger.info(f"Received WebSocket message: {data[:50]}..." if len(data) > 50 else data)
+                stripped_data = data.strip()
                 
                 if data == "ping":
                     await _safe_websocket_send_text(websocket, "pong")
+                elif stripped_data == "stop":
+                    logger.info("Processing stop command")
+                    if running_task and not running_task.done():
+                        if active_log_handler:
+                            await active_log_handler.detach_websocket(
+                                "Run was stopped by the user.",
+                                metadata={"running_task_cancelled": True},
+                            )
+                        await mark_active_run_cancelled()
+                        running_task.cancel()
+                        try:
+                            await running_task
+                        except asyncio.CancelledError:
+                            pass
+                        running_task = None
+                    await _safe_websocket_send_json(
+                        websocket,
+                        {
+                            "type": "logs",
+                            "content": "run_cancelled",
+                            "output": "Run stopped.",
+                        },
+                    )
                 elif running_task and not running_task.done():
                     # discard any new request if a task is already running
                     logger.warning(
@@ -525,7 +646,7 @@ async def handle_websocket_communication(websocket, manager):
                         }
                     )
                 # Normalize command detection by checking startswith after stripping whitespace
-                elif data.strip().startswith("start"):
+                elif stripped_data.startswith("start"):
                     logger.info(f"Processing start command")
                     running_task = run_long_running_task(
                         handle_start_command(
@@ -533,12 +654,13 @@ async def handle_websocket_communication(websocket, manager):
                             data,
                             manager,
                             on_log_handler=set_active_log_handler,
+                            report_store=report_store,
                         )
                     )
-                elif data.strip().startswith("human_feedback"):
+                elif stripped_data.startswith("human_feedback"):
                     logger.info(f"Processing human_feedback command")
                     running_task = run_long_running_task(handle_human_feedback(data))
-                elif data.strip().startswith("chat"):
+                elif stripped_data.startswith("chat"):
                     logger.info(f"Processing chat command")
                     running_task = run_long_running_task(handle_chat_command(websocket, data))
                 else:
@@ -563,17 +685,13 @@ async def handle_websocket_communication(websocket, manager):
                 await active_log_handler.detach_websocket(
                     (
                         "WebSocket disconnected before this run completed. "
-                        "The active server task was cancelled, so a final report may not be available."
+                        "The active server task will continue without live streaming."
                     ),
                     metadata={
-                        "running_task_cancelled": True,
+                        "running_task_continues": True,
                     },
                 )
-            running_task.cancel()
-            try:
-                await running_task
-            except asyncio.CancelledError:
-                pass
+            logger.info("WebSocket disconnected; active task will continue without live streaming.")
         await manager.disconnect(websocket)
 
 def extract_command_data(json_data: Dict) -> tuple:
