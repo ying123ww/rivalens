@@ -33,7 +33,7 @@ class CollectionAgent:
         search_query_builder: SearchQueryBuilder | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
-        max_root_branch_hard_limit: int = 20,
+        max_root_branch_hard_limit: int | None = None,
         max_verification_concurrency: int | None = None,
         max_concurrent_collections: int | None = None,
     ):
@@ -43,7 +43,12 @@ class CollectionAgent:
         self.search_query_builder = search_query_builder or SearchQueryBuilder()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
-        self.max_root_branch_hard_limit = max_root_branch_hard_limit
+        self.max_root_branch_hard_limit = _int_env(
+            max_root_branch_hard_limit,
+            "RIVALENS_MAX_ROOT_BRANCHES",
+            20,
+            minimum=1,
+        )
         self.max_verification_concurrency = _int_env(
             max_verification_concurrency,
             "RIVALENS_MAX_VERIFICATION_CONCURRENCY",

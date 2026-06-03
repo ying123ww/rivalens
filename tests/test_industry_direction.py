@@ -8,136 +8,84 @@ from rivalens.agents.planning import (
     _planning_trace_inputs,
     _planning_trace_outputs,
 )
-from rivalens.industry_templates import INDUSTRY_DIRECTION_TEMPLATES
+from rivalens.industry_templates import (
+    INDUSTRY_DIRECTION_TEMPLATES,
+    L0_COMMON_DIRECTIONS,
+    L1_ARCHETYPE_DIRECTIONS,
+    L2_REGULATED_DOMAIN_DIRECTIONS,
+)
 from rivalens.schema.competitive import EvidenceType, SOURCE_TYPE_PRIORITY
 from rivalens.schema_registry.registry import SchemaRegistry
 
 
 class IndustryDirectionSkillTest(unittest.TestCase):
-    def test_uses_user_maintained_industry_templates(self):
-        cases = [
-            (
-                "对比 Notion 和飞书的 SaaS 协作能力",
-                "saas_collaboration",
-                [
-                    "pricing_packaging",
-                    "collaboration_workflows",
-                    "integrations_ecosystem",
-                    "ai_assistance",
-                    "security_admin_controls",
-                    "reliability_status_sla",
-                    "templates_use_cases",
-                    "user_sentiment_reviews",
-                    "mobile_offline_experience",
-                    "data_portability_migration",
-                ],
-            ),
-            (
-                "分析 Stripe 和 PayPal 的金融支付竞品",
-                "financial_services",
-                [
-                    "licenses_compliance",
-                    "payment_security",
-                    "fraud_risk_controls",
-                    "pricing_fee_transparency",
-                    "consumer_complaints",
-                    "ecosystem_integrations",
-                    "disclosure_transparency",
-                    "merchant_developer_api",
-                    "payment_success_settlement",
-                    "aml_kyc_sanctions",
-                    "fund_safeguarding",
-                ],
-            ),
-            (
-                "分析 Shopify 和 Amazon 的电商零售竞争",
-                "ecommerce_retail",
-                [
-                    "pricing_fees",
-                    "fulfillment_returns",
-                    "assortment_catalog",
-                    "seller_tools",
-                    "trust_reviews",
-                    "promotion_loyalty",
-                    "ads_search_ranking",
-                    "live_content_commerce",
-                ],
-            ),
-            (
-                "分析 微医 和 平安好医生 的医疗健康竞品",
-                "healthcare",
-                [
-                    "regulatory_clearance",
-                    "clinical_evidence",
-                    "privacy_phi_security",
-                    "patient_safety_quality",
-                    "provider_network_access",
-                    "pricing_insurance",
-                    "care_operations",
-                    "pharmaceutical_supply_chain",
-                    "interoperability_ehr_fhir",
-                ],
-            ),
-            (
-                "对比 OpenAI API、Claude API 和 Gemini API 的模型平台能力",
-                "ai_model_platform",
-                [
-                    "model_capabilities",
-                    "benchmarks_evaluations",
-                    "context_window_long_context",
-                    "inference_speed_latency",
-                    "multimodal_capabilities",
-                    "developer_experience",
-                    "finetuning_rag_customization",
-                    "deployment_options",
-                    "reliability_rate_limits",
-                ],
-            ),
-            (
-                "对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品体验",
-                "ai_product_application",
-                [
-                    "strategic_positioning",
-                    "target_users_personas",
-                    "core_feature_matrix",
-                    "signature_features",
-                    "product_flow_experience",
-                    "ai_output_quality",
-                    "pricing_business_model",
-                    "data_privacy_trust",
-                    "ecosystem_integrations",
-                    "user_sentiment_pain_points",
-                    "platform_device_coverage",
-                    "safety_content_limits",
-                    "growth_retention_strategy",
-                    "team_funding_momentum",
-                ],
-            ),
+    def test_templates_are_facet_composed(self):
+        self.assertEqual(len(INDUSTRY_DIRECTION_TEMPLATES), 15)
+
+        template_by_id = {
+            template["industry_id"]: template
+            for template in INDUSTRY_DIRECTION_TEMPLATES
+        }
+        financial = template_by_id["financial_services"]
+        ecommerce = template_by_id["ecommerce_retail"]
+
+        self.assertEqual(financial["gics_sector"], "financials")
+        self.assertEqual(
+            financial["archetypes"],
+            ["api_infrastructure", "saas_subscription"],
+        )
+        self.assertEqual(financial["regulated_domains"], ["finance"])
+        self.assertEqual(
+            len(financial["directions"]),
+            len(L0_COMMON_DIRECTIONS)
+            + len(L1_ARCHETYPE_DIRECTIONS["api_infrastructure"])
+            + len(L1_ARCHETYPE_DIRECTIONS["saas_subscription"])
+            + len(L2_REGULATED_DOMAIN_DIRECTIONS["finance"]),
+        )
+        self.assertEqual(
+            len(ecommerce["directions"]),
+            len(L0_COMMON_DIRECTIONS)
+            + len(L1_ARCHETYPE_DIRECTIONS["two_sided_platform"])
+            + len(L1_ARCHETYPE_DIRECTIONS["transaction_fulfillment"]),
+        )
+
+    def test_rule_plan_returns_l0_l1_l2_direction_stack(self):
+        plan = IndustryDirectionSkill().build_plan(
+            query="分析 Stripe 和 PayPal 的金融支付竞品",
+        )
+        direction_ids = [
+            direction["direction_id"] for direction in plan["suggested_directions"]
         ]
 
-        skill = IndustryDirectionSkill()
-        for query, expected_industry, expected_directions in cases:
-            with self.subTest(query=query):
-                plan = skill.build_plan(query=query)
-                self.assertEqual(plan["industry"]["industry_id"], expected_industry)
-                self.assertEqual(
-                    [
-                        direction["direction_id"]
-                        for direction in plan["suggested_directions"]
-                    ],
-                    expected_directions,
-                )
-                self.assertFalse(
-                    any("id" in direction for direction in plan["suggested_directions"])
-                )
+        self.assertEqual(plan["industry"]["industry_id"], "financial_services")
+        self.assertEqual(plan["selection_method"], "rule_facet_template")
+        self.assertIn("strategic_positioning", direction_ids)
+        self.assertIn("performance_rate_limits", direction_ids)
+        self.assertIn("integrations_ecosystem", direction_ids)
+        self.assertIn("financial_licenses_qualifications", direction_ids)
+        self.assertIn("aml_kyc_sanctions", direction_ids)
+        self.assertEqual(plan["planner_added_directions"], [])
+        self.assertEqual(
+            plan["final_analysis_plan"]["direction_composition"],
+            {
+                "model": "facet_l0_l1_l2",
+                "gics_sector": "financials",
+                "archetypes": ["api_infrastructure", "saas_subscription"],
+                "regulated_domains": ["finance"],
+                "layers": {
+                    "l0": "common_business_analysis",
+                    "l1": ["api_infrastructure", "saas_subscription"],
+                    "l2": ["finance"],
+                },
+            },
+        )
 
     def test_templates_define_source_hints_and_required_flags(self):
-        self.assertEqual(len(INDUSTRY_DIRECTION_TEMPLATES), 15)
         valid_source_hints = set(EvidenceType.__args__)
 
         for template in INDUSTRY_DIRECTION_TEMPLATES:
             directions = template.get("default_directions") or template.get("directions")
-            self.assertGreaterEqual(len(directions), 6, template["industry_id"])
+            self.assertGreaterEqual(len(directions), len(L0_COMMON_DIRECTIONS))
             for direction in directions:
                 with self.subTest(
                     industry=template["industry_id"],
@@ -187,17 +135,14 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         sample = next(
             row
             for row in rows
-            if row["industry_id"] == "ai_product_application"
-            and row["direction_id"] == "pricing_business_model"
+            if row["industry_id"] == "financial_services"
+            and row["direction_id"] == "financial_licenses_qualifications"
         )
 
         self.assertEqual(len(rows), expected_count)
-        self.assertEqual(sample["industry_name"], "AI 产品 / 智能应用")
+        self.assertEqual(sample["industry_name"], "金融 / 支付 / Fintech")
         self.assertEqual(sample["required"], "是")
-        self.assertEqual(
-            sample["source_hints"],
-            "pricing_page, official_site, review, news",
-        )
+        self.assertIn("regulator_database", sample["source_hints"])
         self.assertIn("人工备注", sample)
         self.assertIn("动作", sample)
 
@@ -226,66 +171,6 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             SOURCE_TYPE_PRIORITY["review"],
         )
 
-    def test_template_source_hints_are_preserved_in_plan(self):
-        plan = IndustryDirectionSkill().build_plan(
-            query="对比 ChatGPT、Kimi 和 Perplexity 的 AI 产品竞争格局",
-            competitors=[{"name": "ChatGPT"}, {"name": "Kimi"}],
-        )
-
-        pricing_direction = next(
-            direction
-            for direction in plan["default_directions"]
-            if direction["direction_id"] == "pricing_business_model"
-        )
-        self.assertEqual(
-            pricing_direction["source_hints"],
-            ["pricing_page", "official_site", "review", "news"],
-        )
-
-    def test_planner_additions_do_not_change_industry_default_directions(self):
-        plan = IndustryDirectionSkill().build_plan(
-            query="对比 Notion 和飞书的 SaaS 协作能力",
-            competitors=[{"name": "Notion"}, {"name": "飞书"}],
-        )
-        default_ids = [
-            direction["direction_id"] for direction in plan["default_directions"]
-        ]
-        planner_added_ids = [
-            direction["direction_id"]
-            for direction in plan["planner_added_directions"]
-        ]
-
-        self.assertEqual(
-            default_ids,
-            [
-                "pricing_packaging",
-                "collaboration_workflows",
-                "integrations_ecosystem",
-                "ai_assistance",
-                "security_admin_controls",
-                "reliability_status_sla",
-                "templates_use_cases",
-                "user_sentiment_reviews",
-                "mobile_offline_experience",
-                "data_portability_migration",
-            ],
-        )
-        self.assertIn("strategic_positioning", planner_added_ids)
-        self.assertTrue(set(default_ids).isdisjoint(planner_added_ids))
-        self.assertTrue(
-            all(
-                direction["origin"] == "planner_suggested"
-                for direction in plan["planner_added_directions"]
-            )
-        )
-        self.assertEqual(
-            [
-                direction["direction_id"]
-                for direction in plan["suggested_directions"]
-            ],
-            default_ids,
-        )
-
     def test_plan_suggests_competitors_when_query_has_no_pair(self):
         from rivalens.schema import IndustryDirectionPlanPayload
 
@@ -302,7 +187,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             [],
         )
         self.assertIn(
-            "suggested_competitors",
+            "direction_composition",
             validated.final_analysis_plan,
         )
 
@@ -392,7 +277,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(plan["selection_method"], "rule_template")
+        self.assertEqual(plan["selection_method"], "rule_facet_template")
         self.assertEqual(plan["industry"]["industry_id"], "saas_collaboration")
 
     def test_identifies_ai_tools_and_merges_user_directions(self):
@@ -405,24 +290,13 @@ class IndustryDirectionSkillTest(unittest.TestCase):
 
         self.assertEqual(plan["industry"]["industry_id"], "ai_product_application")
         self.assertTrue(plan["user_confirmed"])
-        self.assertEqual(
+        self.assertIn(
+            "ai_capability_application",
             [direction["direction_id"] for direction in plan["default_directions"]],
-            [
-                "strategic_positioning",
-                "target_users_personas",
-                "core_feature_matrix",
-                "signature_features",
-                "product_flow_experience",
-                "ai_output_quality",
-                "pricing_business_model",
-                "data_privacy_trust",
-                "ecosystem_integrations",
-                "user_sentiment_pain_points",
-                "platform_device_coverage",
-                "safety_content_limits",
-                "growth_retention_strategy",
-                "team_funding_momentum",
-            ],
+        )
+        self.assertIn(
+            "integrations_ecosystem",
+            [direction["direction_id"] for direction in plan["default_directions"]],
         )
         self.assertEqual(
             [direction["direction_id"] for direction in plan["user_added_directions"]],
@@ -440,35 +314,30 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             plan["final_analysis_plan"]["direction_count"],
             len(plan["final_directions"]),
         )
-        self.assertIn("planner_added_directions", plan["final_analysis_plan"])
 
     def test_can_remove_optional_default_directions_before_collection(self):
         plan = IndustryDirectionSkill().build_plan(
             query="对比 Notion 和飞书的 SaaS 协作能力",
-            selected_direction_ids=["pricing_packaging", "collaboration_workflows"],
+            selected_direction_ids=["strategic_positioning", "integrations_ecosystem"],
             user_directions=["私有化部署能力"],
             user_confirmed=True,
         )
 
-        self.assertEqual(
-            plan["final_analysis_plan"]["final_directions"],
-            [
-                "pricing_packaging",
-                "collaboration_workflows",
-                "integrations_ecosystem",
-                "ai_assistance",
-                "security_admin_controls",
-                "reliability_status_sla",
-                "private_deployment",
-            ],
-        )
-        self.assertNotIn(
-            "templates_use_cases",
-            plan["final_analysis_plan"]["final_directions"],
-        )
-        self.assertNotIn(
+        self.assertIn(
             "strategic_positioning",
             plan["final_analysis_plan"]["final_directions"],
+        )
+        self.assertIn(
+            "integrations_ecosystem",
+            plan["final_analysis_plan"]["final_directions"],
+        )
+        self.assertIn(
+            "private_deployment",
+            plan["final_analysis_plan"]["final_directions"],
+        )
+        self.assertNotIn(
+            "planner_suggested",
+            {direction["origin"] for direction in plan["final_directions"]},
         )
 
     def test_limit_keywords_no_longer_restrict_planner_directions(self):
@@ -479,39 +348,10 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         self.assertEqual(plan["industry"]["industry_id"], "saas_collaboration")
         self.assertFalse(plan["final_analysis_plan"]["scope_limited_by_query"])
         self.assertFalse(plan["final_analysis_plan"]["planner_supplement_skipped"])
-        self.assertGreater(len(plan["planner_added_directions"]), 0)
+        self.assertEqual(len(plan["planner_added_directions"]), 0)
         self.assertIn(
-            "security_admin_controls",
+            "baseline_trust_security_compliance",
             plan["final_analysis_plan"]["final_directions"],
-        )
-
-    def test_full_selection_includes_all_directions_regardless_of_limit_keywords(self):
-        preview_plan = IndustryDirectionSkill().build_plan(
-            query="帮我对比钉钉和飞书，只关注产品定位和定价",
-        )
-        frontend_default_ids = [
-            direction["direction_id"]
-            for direction in (
-                preview_plan["suggested_directions"]
-                + preview_plan["planner_added_directions"]
-            )
-        ]
-
-        confirmed_plan = IndustryDirectionSkill().build_plan(
-            query="帮我对比钉钉和飞书，只关注产品定位和定价",
-            selected_direction_ids=frontend_default_ids,
-            user_confirmed=True,
-        )
-
-        self.assertFalse(confirmed_plan["final_analysis_plan"]["scope_limited_by_query"])
-        self.assertEqual(
-            confirmed_plan["final_analysis_plan"]["auto_selected_directions"],
-            [],
-        )
-        self.assertGreater(len(confirmed_plan["planner_added_directions"]), 0)
-        self.assertIn(
-            "security_admin_controls",
-            confirmed_plan["final_analysis_plan"]["final_directions"],
         )
 
     def test_planning_agent_always_includes_registry_extensions(self):
@@ -529,7 +369,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             for extension in result["active_knowledge_schema"]["industry_extensions"]
         ]
 
-        self.assertIn("direction_pricing_packaging", extension_ids)
+        self.assertIn("direction_business_model_pricing", extension_ids)
         self.assertIn("direction_strategic_positioning", extension_ids)
         self.assertIn("security_compliance", extension_ids)
 
@@ -562,18 +402,22 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             "ecommerce_retail",
         )
         self.assertIn("direction_user_direction_1", direction_extension_ids)
+        self.assertIn(
+            "direction_platform_supply_demand_liquidity",
+            direction_extension_ids,
+        )
         self.assertEqual(result["messages"][-1]["type"], "schema_selection")
         self.assertIn(
             "industry_direction_plan",
             result["messages"][-1]["payload"],
         )
-        promotion_extension = next(
+        platform_extension = next(
             extension
             for extension in direction_extensions
-            if extension["id"] == "direction_promotion_loyalty"
+            if extension["id"] == "direction_take_rate_monetization_governance"
         )
-        self.assertIn("source_hints", promotion_extension)
-        self.assertIn("pricing_page", promotion_extension["source_hints"])
+        self.assertIn("source_hints", platform_extension)
+        self.assertIn("pricing_page", platform_extension["source_hints"])
 
     def test_planning_agent_uses_detected_competitors_when_none_are_explicit(self):
         state = {
@@ -615,96 +459,6 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         self.assertEqual(outputs["message_type"], "schema_selection")
         self.assertIn("final_direction_ids", outputs)
         self.assertIn("user_direction_1", outputs["user_added_direction_ids"])
-
-    def test_priority_directions_are_required_and_use_specific_sources(self):
-        required_direction_ids = {
-            "promotion_loyalty",
-            "ads_search_ranking",
-            "ecosystem_integrations",
-            "learner_outcomes_reviews",
-            "privacy_accessibility_compliance",
-            "care_operations",
-            "interoperability_ehr_fhir",
-            "search_packaging",
-            "merchant_qualification_safety",
-            "discovery_reviews_ranking",
-            "safety_moderation_compliance",
-            "ownership_cost",
-            "ota_cybersecurity",
-            "proof_and_trust",
-            "sla_support_reliability",
-            "food_safety_labeling_claims",
-            "fair_housing_advertising_compliance",
-            "technology_visibility",
-            "context_window_long_context",
-            "inference_speed_latency",
-            "reliability_rate_limits",
-            "strategic_positioning",
-            "target_users_personas",
-            "core_feature_matrix",
-            "signature_features",
-            "product_flow_experience",
-            "ai_output_quality",
-            "pricing_business_model",
-            "data_privacy_trust",
-            "user_sentiment_pain_points",
-        }
-        direction_index = {
-            direction["direction_id"]: direction
-            for template in INDUSTRY_DIRECTION_TEMPLATES
-            for direction in template.get("directions", [])
-        }
-
-        for direction_id in required_direction_ids:
-            with self.subTest(direction_id=direction_id):
-                self.assertIn(direction_id, direction_index)
-                self.assertTrue(direction_index[direction_id]["required"])
-
-        expected_source_hints = {
-            "consumer_complaints": "complaint_database",
-            "benchmarks_evaluations": "benchmark",
-            "proof_and_trust": "case_study",
-            "safety_recalls": "regulator_database",
-            "operating_authority": "public_registry",
-            "reliability_status_sla": "status_page",
-            "food_safety_labeling_claims": "regulator_database",
-        }
-        for direction_id, source_hint in expected_source_hints.items():
-            with self.subTest(direction_id=direction_id):
-                self.assertIn(
-                    source_hint,
-                    direction_index[direction_id]["source_hints"],
-                )
-
-    def test_scenario_specific_directions_are_optional_defaults(self):
-        optional_direction_ids = {
-            "live_content_commerce",
-            "merchant_developer_api",
-            "payment_success_settlement",
-            "ai_personalization_learning",
-            "disruption_support_insurance",
-            "merchant_marketing_tools",
-            "smart_cockpit_system",
-            "sales_volume_market_share",
-            "multimodal_capabilities",
-            "developer_experience",
-            "finetuning_rag_customization",
-            "deployment_options",
-            "platform_device_coverage",
-            "safety_content_limits",
-            "growth_retention_strategy",
-            "team_funding_momentum",
-        }
-        direction_index = {
-            direction["direction_id"]: direction
-            for template in INDUSTRY_DIRECTION_TEMPLATES
-            for direction in template.get("directions", [])
-        }
-
-        for direction_id in optional_direction_ids:
-            with self.subTest(direction_id=direction_id):
-                self.assertIn(direction_id, direction_index)
-                self.assertFalse(direction_index[direction_id]["required"])
 
 
 if __name__ == "__main__":

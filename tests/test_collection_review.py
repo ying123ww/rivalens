@@ -20,6 +20,7 @@ from rivalens.agents.evidence_review import (
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import (
     OPENING_CONTEXT_CHAR_LIMIT,
+    PRODUCT_ANALYSIS_SECTIONS,
     SECTION_CONTEXT_CHAR_LIMIT,
     SUMMARY_CONTEXT_CHAR_LIMIT,
     ReportWriterAgent,
@@ -95,6 +96,17 @@ class CollectionReviewTest(unittest.TestCase):
                 _int_budget(5, "RIVALENS_MAX_EXPANSION_BRANCHES", 24),
                 5,
             )
+
+    def test_collection_agent_reads_root_branch_limit_from_env(self):
+        with patch.dict("os.environ", {"RIVALENS_MAX_ROOT_BRANCHES": "2"}):
+            self.assertEqual(CollectionAgent().max_root_branch_hard_limit, 2)
+            self.assertEqual(
+                CollectionAgent(max_root_branch_hard_limit=5).max_root_branch_hard_limit,
+                5,
+            )
+
+        with patch.dict("os.environ", {"RIVALENS_MAX_ROOT_BRANCHES": "bad"}):
+            self.assertEqual(CollectionAgent().max_root_branch_hard_limit, 20)
 
     def test_workflow_run_config_tags_collection_trace_metadata(self):
         task = {
@@ -2312,8 +2324,9 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("# 竞品分析报告", result["report"])
         self.assertIn("Acme publishes a starter pricing plan. [1]", result["report"])
         self.assertIn("## 第三章：竞品分析", result["report"])
-        self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", result["report"])
-        self.assertIn("| 3.3 商业模式 | 这个产品怎么赚钱？定价策略是什么？ | 定价页、公开财务信息 |", result["report"])
+        self.assertIn("| 章节 | 引导问题 |", result["report"])
+        self.assertNotIn("数据来源约束", result["report"])
+        self.assertIn("| 3.3 商业模式 | 这个产品怎么赚钱？定价策略是什么？ |", result["report"])
         self.assertIn("## 附录：信息索引表格", result["report"])
         self.assertIn("| 引用标号 | 信息 ID |", result["report"])
         self.assertIn("| [1] | ev_1 | claim_1 |", result["report"])
@@ -2436,7 +2449,7 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("## 第一章：分析目的", result["report"])
         self.assertIn("## 第二章：确定竞品", result["report"])
         self.assertIn("## 第三章：竞品分析", result["report"])
-        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ | 官网首页、公开采访、品牌宣传 |", result["report"])
+        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ |", result["report"])
         self.assertIn("### 3.3 商业模式", result["report"])
         self.assertIn("### 3.10 用户口碑", result["report"])
         self.assertIn("## 第四章：总结", result["report"])
@@ -2494,8 +2507,8 @@ class CollectionReviewTest(unittest.TestCase):
         )
 
         self.assertNotIn("Random Dimension", result["report"])
-        self.assertIn("| 章节 | 引导问题 | 数据来源约束 |", result["report"])
-        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ | 官网首页、公开采访、品牌宣传 |", result["report"])
+        self.assertIn("| 章节 | 引导问题 |", result["report"])
+        self.assertIn("| 3.1 战略定位 | 这个产品把自己定位成什么？和竞品的定位差异在哪？ |", result["report"])
         self.assertIn("### 3.10 用户口碑", result["report"])
         self.assertIn("Acme publishes a starter pricing plan. [1]", result["report"])
         self.assertIn("## 第四章：总结", result["report"])
@@ -2545,6 +2558,131 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("主要引用：[1]", result["report"])
         self.assertIn("| 淘宝 | 淘宝 | 零售 / 电商 | https://www.taobao.com", result["report"])
         self.assertIn("ev_1", result["report"])
+
+    def test_writer_validates_competitor_website_domain_before_reporting(self):
+        agent = ReportWriterAgent()
+        state = {
+            "task": {
+                "query": "对比钉钉和企业微信",
+                "competitors": [
+                    {
+                        "name": "钉钉",
+                        "product": "钉钉",
+                        "website": "https://work.weixin.qq.com",
+                    }
+                ],
+            },
+            "competitors": [
+                {
+                    "name": "钉钉",
+                    "product": "DingTalk",
+                    "website": "https://work.weixin.qq.com",
+                    "category": "协同办公",
+                    "notes": "企业协同办公产品",
+                    "evidence_ids": ["ev_1"],
+                }
+            ],
+            "messages": [],
+        }
+
+        opening_context = agent._build_opening_context(state, {"ev_1": "[1]"})
+        opening_fallback = agent._fallback_opening_chapters(state, {"ev_1": "[1]"})
+        report_fallback = agent._fallback_report(state, [], [], [])
+
+        self.assertNotIn("work.weixin.qq.com", opening_context)
+        self.assertNotIn("work.weixin.qq.com", opening_fallback)
+        self.assertNotIn("work.weixin.qq.com", report_fallback)
+        self.assertIn('"website": ""', opening_context)
+        self.assertIn("官网：公开资料不足", opening_fallback)
+        self.assertIn("| 钉钉 | DingTalk | 协同办公 | 公开资料不足 |", report_fallback)
+
+        valid_state = {
+            "task": {"query": "分析钉钉", "competitors": []},
+            "competitors": [
+                {
+                    "name": "钉钉",
+                    "product": "DingTalk",
+                    "website": "https://www.dingtalk.com",
+                }
+            ],
+        }
+
+        valid_context = agent._build_opening_context(valid_state, {})
+        self.assertIn("https://www.dingtalk.com", valid_context)
+
+    def test_writer_fairly_samples_product_section_claims_by_competitor(self):
+        agent = ReportWriterAgent()
+        product_feature_section = next(
+            section
+            for section in PRODUCT_ANALYSIS_SECTIONS
+            if section["id"] == "product_features"
+        )
+        claims = [
+            {
+                "id": f"claim_feishu_{index}",
+                "dimension": "direction_core_product_supply",
+                "claim": f"飞书功能证据 {index}",
+                "competitors": ["飞书"],
+                "evidence_ids": [f"ev_feishu_{index}"],
+            }
+            for index in range(11)
+        ] + [
+            {
+                "id": f"claim_dingtalk_{index}",
+                "dimension": "direction_core_product_supply",
+                "claim": f"钉钉功能证据 {index}",
+                "competitors": ["钉钉"],
+                "evidence_ids": [f"ev_dingtalk_{index}"],
+            }
+            for index in range(6)
+        ]
+
+        sampled_claims = agent._claims_for_product_section(
+            claims,
+            product_feature_section,
+            limit=12,
+        )
+
+        self.assertEqual(len(sampled_claims), 12)
+        sampled_competitors = [
+            claim["competitors"][0]
+            for claim in sampled_claims
+        ]
+        self.assertGreaterEqual(sampled_competitors.count("飞书"), 1)
+        self.assertGreaterEqual(sampled_competitors.count("钉钉"), 1)
+        self.assertEqual(sampled_competitors[:4], ["飞书", "钉钉", "飞书", "钉钉"])
+
+    def test_writer_maps_industry_directions_to_product_sections(self):
+        agent = ReportWriterAgent()
+        sections_by_id = {
+            section["id"]: section
+            for section in PRODUCT_ANALYSIS_SECTIONS
+        }
+
+        self.assertTrue(
+            agent._matches_product_section(
+                {"dimension": "direction_core_product_supply"},
+                sections_by_id["product_features"],
+            )
+        )
+        self.assertTrue(
+            agent._matches_product_section(
+                {"dimension": "direction_product_experience"},
+                sections_by_id["interaction_design"],
+            )
+        )
+        self.assertTrue(
+            agent._matches_product_section(
+                {"dimension": "direction_operations_fulfillment"},
+                sections_by_id["product_flow"],
+            )
+        )
+        self.assertFalse(
+            agent._matches_product_section(
+                {"dimension": "direction_user_reputation"},
+                sections_by_id["business_model"],
+            )
+        )
 
     def test_writer_keeps_weak_claims_with_evidence_bindings(self):
         class EmptyReportGenerator:
