@@ -2,7 +2,6 @@
 
 import json
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState
@@ -12,127 +11,13 @@ from rivalens.research.skills.writer import ReportGenerator
 from rivalens.research.utils.enum import ReportSource, ReportType, Tone
 
 
-PRODUCT_ANALYSIS_SECTIONS: list[dict[str, Any]] = [
-    {
-        "number": "3.1",
-        "id": "strategic_positioning",
-        "title": "战略定位",
-        "guiding_question": "这个产品把自己定位成什么？和竞品的定位差异在哪？",
-        "source_constraints": "官网首页、公开采访、品牌宣传",
-        "aliases": ["strategic_positioning", "positioning", "战略定位", "市场卡位", "品牌宣传"],
-    },
-    {
-        "number": "3.2",
-        "id": "target_users",
-        "title": "目标用户",
-        "guiding_question": "这个产品主要服务谁？用户画像是什么？",
-        "source_constraints": "官网描述、定价页暗示、公开报道",
-        "aliases": ["target_users", "target_users_personas", "user_personas", "persona", "目标用户", "用户画像", "使用场景"],
-    },
-    {
-        "number": "3.3",
-        "id": "business_model",
-        "title": "商业模式",
-        "guiding_question": "这个产品怎么赚钱？定价策略是什么？",
-        "source_constraints": "定价页、公开财务信息",
-        "aliases": ["business_model", "pricing_model", "pricing_business_model", "monetization", "商业模式", "定价", "收费"],
-    },
-    {
-        "number": "3.4",
-        "id": "operation_strategy",
-        "title": "运营策略",
-        "guiding_question": "这个产品怎么获客、怎么留存、怎么做增长？",
-        "source_constraints": "可观察的公开运营动作",
-        "aliases": ["operation_strategy", "market_growth", "growth", "go_to_market", "运营", "获客", "留存", "增长"],
-    },
-    {
-        "number": "3.5",
-        "id": "product_features",
-        "title": "产品功能",
-        "guiding_question": "核心功能有哪些？和竞品功能差异在哪？",
-        "source_constraints": "官方文档、功能页、帮助中心",
-        "aliases": ["product_features", "feature_tree", "feature", "capability", "产品功能", "核心功能", "功能差异"],
-    },
-    {
-        "number": "3.6",
-        "id": "product_flow",
-        "title": "产品流程",
-        "guiding_question": "用户的核心使用路径是什么？",
-        "source_constraints": "官方文档、教程、演示视频",
-        "aliases": ["product_flow", "workflow", "onboarding", "tutorial", "产品流程", "使用路径", "教程", "演示"],
-    },
-    {
-        "number": "3.7",
-        "id": "product_structure",
-        "title": "产品结构",
-        "guiding_question": "产品的模块划分和信息架构是什么？",
-        "source_constraints": "帮助中心目录、功能导航",
-        "aliases": ["product_structure", "architecture", "module", "navigation", "产品结构", "信息架构", "模块", "导航"],
-    },
-    {
-        "number": "3.8",
-        "id": "interaction_design",
-        "title": "交互设计",
-        "guiding_question": "交互有什么特点？体验亮点和不足？",
-        "source_constraints": "产品截图、评测文章",
-        "aliases": ["interaction_design", "interaction", "experience", "ux", "ui", "交互设计", "体验亮点", "体验不足"],
-    },
-    {
-        "number": "3.9",
-        "id": "signature_features",
-        "title": "特色功能",
-        "guiding_question": "有什么独有的、竞品没有的能力？",
-        "source_constraints": "官方宣传重点、对比评测",
-        "aliases": ["signature_features", "differentiation", "unique", "特色功能", "差异化", "独有", "竞品没有"],
-    },
-    {
-        "number": "3.10",
-        "id": "user_reputation",
-        "title": "用户口碑",
-        "guiding_question": "用户怎么评价？好评和差评集中在哪？",
-        "source_constraints": "搜索API可索引的公开评价（尽力而为）",
-        "aliases": ["user_reputation", "customer_proof", "review", "reviews", "用户口碑", "用户评价", "好评", "差评", "评论"],
-    },
-]
-
-PRODUCT_SECTION_DIRECTION_MAP: dict[str, tuple[str, ...]] = {
-    "direction_strategic_positioning": ("strategic_positioning",),
-    "direction_market_trends_opportunities": ("strategic_positioning",),
-    "direction_target_users_segments": ("target_users",),
-    "direction_business_model_pricing": ("business_model",),
-    "direction_growth_channels": ("operation_strategy",),
-    "direction_operations_fulfillment": ("operation_strategy", "product_flow"),
-    "direction_core_product_supply": ("product_features", "product_structure"),
-    "direction_integrations_ecosystem": ("product_features", "product_structure"),
-    "direction_ai_capability_application": ("product_features", "signature_features"),
-    "direction_product_experience": ("product_flow", "product_structure", "interaction_design"),
-    "direction_baseline_trust_security_compliance": ("product_features", "signature_features"),
-    "direction_sla_reliability": ("product_features",),
-    "direction_moat_resources_team": ("strategic_positioning", "signature_features"),
-    "direction_migration_switching_cost": ("product_flow", "user_reputation"),
-    "direction_user_reputation": ("user_reputation",),
-}
-
 SECTION_CLAIM_LIMIT = 12
+DYNAMIC_ANALYSIS_SECTION_LIMIT = 8
 SUMMARY_CLAIM_LIMIT = 30
 OPENING_CONTEXT_CHAR_LIMIT = 6000
+ANALYSIS_OVERVIEW_CONTEXT_CHAR_LIMIT = 6000
 SECTION_CONTEXT_CHAR_LIMIT = 8000
 SUMMARY_CONTEXT_CHAR_LIMIT = 9000
-
-OFFICIAL_WEBSITE_DOMAIN_RULES: tuple[dict[str, tuple[str, ...]], ...] = (
-    {
-        "aliases": ("钉钉", "dingtalk", "ding talk"),
-        "domains": ("dingtalk.com", "dingtalk-global.com"),
-    },
-    {
-        "aliases": ("企业微信", "企微", "wecom", "work weixin", "work.weixin"),
-        "domains": ("work.weixin.qq.com", "wecom.work"),
-    },
-    {
-        "aliases": ("飞书", "feishu", "lark", "larksuite"),
-        "domains": ("feishu.cn", "feishu.com", "larksuite.com"),
-    },
-)
 
 
 class _ReportResearcherAdapter:
@@ -242,7 +127,12 @@ class ReportWriterAgent:
             claims,
             citation_refs_by_evidence_id,
         )
-        report = self._ensure_product_analysis_chapter(report, claims, evidence_items)
+        report = self._ensure_dynamic_analysis_chapter(
+            report,
+            claims,
+            evidence_items,
+            analysis_dimensions,
+        )
         report = self._apply_inline_citations(
             report,
             claims,
@@ -295,7 +185,8 @@ class ReportWriterAgent:
                         "segment_count": generation["segment_count"],
                         "segment_context_char_limits": {
                             "opening": OPENING_CONTEXT_CHAR_LIMIT,
-                            "product_section": SECTION_CONTEXT_CHAR_LIMIT,
+                            "dynamic_overview": ANALYSIS_OVERVIEW_CONTEXT_CHAR_LIMIT,
+                            "dynamic_section": SECTION_CONTEXT_CHAR_LIMIT,
                             "summary": SUMMARY_CONTEXT_CHAR_LIMIT,
                         },
                         "custom_prompt_length": len(custom_prompt),
@@ -329,7 +220,6 @@ class ReportWriterAgent:
         )
 
     def _report_format_prompt(self, analysis_dimensions: list[dict[str, Any]]) -> str:
-        product_checklist = self._product_analysis_checklist_markdown()
         return f"""
 你将收到 Rivalens 结构化竞品分析上下文。请只基于 Context 写 Markdown 报告正文。
 
@@ -345,7 +235,7 @@ class ReportWriterAgent:
 ### 竞品信息卡片
 - 为每个竞品输出一个简短信息卡片。
 - 卡片字段优先使用 competitors 中的 name、product、website、category、notes、evidence_ids。
-- 官网字段必须使用已校验的 competitors.website；不要从混合对比证据中推断官网。若为空或与竞品身份不匹配，写“公开资料不足”。
+- 官网字段使用 competitors.website；若为空，写“公开资料不足”。不要在写报告阶段自行猜测或替换官网。
 - 如果字段由公开证据推导，必须展示对应 citation_ref，例如 [1]；不要无证据扩写。
 
 ### 竞品分类表格
@@ -353,29 +243,15 @@ class ReportWriterAgent:
 - 推荐列：竞品、产品/品牌、分类、官网、备注、主要证据 ID。
 
 ## 第三章：竞品分析
-必须先输出以下产品分析调研清单 Markdown 表格，表头和 10 行章节名称必须保持一致：
-
-{product_checklist}
-
-随后必须按清单顺序输出以下 10 个小节，小节标题必须分别是：
-- 3.1 战略定位
-- 3.2 目标用户
-- 3.3 商业模式
-- 3.4 运营策略
-- 3.5 产品功能
-- 3.6 产品流程
-- 3.7 产品结构
-- 3.8 交互设计
-- 3.9 特色功能
-- 3.10 用户口碑
-
-每个小节都必须包含：
-1. 一个正式对比表格。
-2. 一段对应的分析文字。
-3. 表格或段落中要保留相关 citation_ref，例如 [1]。
-4. 只要 Context 中存在与该小节问题相关、可追溯的 claim 或 evidence，就可以引用；不要因为来源类型不是“定价页/帮助中心/截图”等优先来源而弃用。
-5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
-6. 如果 Context 缺少该小节相关证据，结论写“公开证据不足”，不要编造。
+- 不要使用预设产品维度模板。
+- 基于 Context 中已采到的 analysis_claims、analysis_dimensions、evidence_items 和用户问题，动态归纳最有证据支撑的分析维度。
+- 必须先输出“### 分析维度总览”表格，推荐列：章节、动态维度、证据覆盖、主要竞品、主要引用。
+- 随后按总览顺序输出小节，标题格式为“### 3.x 动态维度名称”。
+- 每个小节必须包含一个正式对比表格和一段分析文字。
+- 表格或段落中要保留相关 citation_ref，例如 [1]。
+- 只要 Context 中存在与该小节问题相关、可追溯的 claim 或 evidence，就可以引用；不要因为来源类型不是某类优先来源而弃用。
+- 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
+- 如果用户明确要求的维度证据不足，可以在小节或末尾写“未覆盖/证据不足维度”，不要把整章填满固定模板式“公开证据不足”。
 
 ## 第四章：总结
 
@@ -479,12 +355,13 @@ class ReportWriterAgent:
                 citation_refs_by_evidence_id,
             )
 
-        product_chapter = await self._generate_product_chapter_segmented(
+        analysis_chapter = await self._generate_dynamic_analysis_chapter_segmented(
             state=state,
             query=query,
             cfg=cfg,
             claims=claims,
             evidence_items=evidence_items,
+            analysis_dimensions=analysis_dimensions,
             citation_refs_by_evidence_id=citation_refs_by_evidence_id,
             generation=generation,
         )
@@ -510,33 +387,56 @@ class ReportWriterAgent:
 
         generation["report"] = "\n\n".join(
             segment.strip()
-            for segment in (opening, product_chapter, summary)
+            for segment in (opening, analysis_chapter, summary)
             if segment.strip()
         )
         return generation
 
-    async def _generate_product_chapter_segmented(
+    async def _generate_dynamic_analysis_chapter_segmented(
         self,
         state: CompetitorAnalysisState,
         query: str,
         cfg: Config,
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
         citation_refs_by_evidence_id: dict[str, str],
         generation: dict[str, Any],
     ) -> str:
+        sections = self._dynamic_analysis_sections(
+            claims,
+            evidence_items,
+            analysis_dimensions,
+        )
         lines = [
             "## 第三章：竞品分析",
             "",
-            self._product_analysis_checklist_markdown(),
         ]
-        for section in PRODUCT_ANALYSIS_SECTIONS:
-            section_claims = self._claims_for_product_section(
+        overview = await self._generate_dynamic_analysis_overview_segmented(
+            state=state,
+            query=query,
+            cfg=cfg,
+            sections=sections,
+            claims=claims,
+            citation_refs_by_evidence_id=citation_refs_by_evidence_id,
+            generation=generation,
+        )
+        lines.append(
+            overview
+            or self._dynamic_analysis_overview_markdown(
+                sections,
+                claims,
+                evidence_items,
+                citation_refs_by_evidence_id,
+            )
+        )
+        for section in sections:
+            section_claims = self._claims_for_dynamic_section(
                 claims,
                 section,
                 SECTION_CLAIM_LIMIT,
             )
-            section_context = self._build_product_section_context(
+            section_context = self._build_dynamic_section_context(
                 state,
                 section,
                 section_claims,
@@ -545,19 +445,19 @@ class ReportWriterAgent:
             section_body = ""
             if section_claims:
                 generated = await self._generate_report_segment(
-                    segment_id=f"product_{section['id']}",
+                    segment_id=f"analysis_{section['id']}",
                     query=query,
                     context=section_context,
-                    custom_prompt=self._product_section_prompt(section),
+                    custom_prompt=self._dynamic_section_prompt(section),
                     cfg=cfg,
                     generation=generation,
                 )
-                section_body = self._clean_product_section_body(generated)
+                section_body = self._clean_dynamic_section_body(generated)
 
             if not section_body:
                 if section_claims:
                     generation["fallback_used"] = True
-                section_lines = self._product_analysis_section_lines(
+                section_lines = self._dynamic_analysis_section_lines(
                     section,
                     section_claims,
                     [],
@@ -566,6 +466,36 @@ class ReportWriterAgent:
             else:
                 lines.extend(["", f"### {section['number']} {section['title']}", "", section_body])
         return "\n".join(lines)
+
+    async def _generate_dynamic_analysis_overview_segmented(
+        self,
+        state: CompetitorAnalysisState,
+        query: str,
+        cfg: Config,
+        sections: list[dict[str, Any]],
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        generation: dict[str, Any],
+    ) -> str:
+        context = self._build_dynamic_overview_context(
+            state,
+            sections,
+            claims,
+            citation_refs_by_evidence_id,
+        )
+        generated = await self._generate_report_segment(
+            segment_id="analysis_overview",
+            query=query,
+            context=context,
+            custom_prompt=self._dynamic_overview_prompt(),
+            cfg=cfg,
+            generation=generation,
+        )
+        overview = self._clean_dynamic_overview_body(generated)
+        if overview:
+            return overview
+        generation["fallback_used"] = True
+        return ""
 
     async def _generate_report_segment(
         self,
@@ -623,7 +553,19 @@ class ReportWriterAgent:
 必须保留可用的 citation_ref，例如 [1]。不要输出第三章、第四章或附录。
 """
 
-    def _product_section_prompt(self, section: dict[str, Any]) -> str:
+    def _dynamic_overview_prompt(self) -> str:
+        return """
+请只基于 Context 输出第三章开头的“### 分析维度总览” Markdown 表格，不要输出任何其他章节。
+
+要求：
+1. 第一行必须是“### 分析维度总览”。
+2. 由你根据 dynamic_analysis_sections、analysis_claims 和用户问题组织清单文字，不要套用预设产品维度模板。
+3. 推荐列：章节、动态维度、证据覆盖、主要竞品、主要引用。
+4. 章节编号和动态维度名称必须来自 dynamic_analysis_sections。
+5. 证据覆盖和主要引用必须基于 Context 中的 claim/citation_ref；没有引用就写“公开证据不足”。
+"""
+
+    def _dynamic_section_prompt(self, section: dict[str, Any]) -> str:
         return f"""
 请只基于 Context 输出“{section['number']} {section['title']}”小节正文，不要输出章节标题。
 
@@ -631,11 +573,12 @@ class ReportWriterAgent:
 1. 一个正式对比表格。
 2. 一段对应的分析文字。
 3. 表格或段落中保留相关 citation_ref，例如 [1]。
-4. 只要 Context 中存在与本小节问题相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
+4. 只要 Context 中存在与本动态维度相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
 5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
 6. 如果 Context 缺少相关证据，结论写“公开证据不足”，不要编造。
 
-引导问题：{section['guiding_question']}
+动态维度：{section['title']}
+维度说明：{section['guiding_question']}
 """
 
     def _summary_prompt(self) -> str:
@@ -677,13 +620,22 @@ class ReportWriterAgent:
             segment = segment[summary_start:]
         return self._truncate_before_any_heading(segment, ("## 附录",)).strip()
 
-    def _clean_product_section_body(self, report: str) -> str:
+    def _clean_dynamic_section_body(self, report: str) -> str:
         body = self._strip_leading_markdown_heading(report)
         if not body:
             return ""
         if any(line.lstrip().startswith("#") for line in body.splitlines()):
             return ""
         return body
+
+    def _clean_dynamic_overview_body(self, report: str) -> str:
+        body = (report or "").strip()
+        if not body or "### 分析维度总览" not in body:
+            return ""
+        return self._truncate_before_any_heading(
+            body,
+            ("### 3.", "## 第四章", "## 附录"),
+        ).strip()
 
     def _truncate_before_any_heading(
         self,
@@ -706,8 +658,9 @@ class ReportWriterAgent:
             "reporting_constraints": [
                 "Only write chapters one and two.",
                 "Use competitor fields and citation_ref values already attached to competitors.",
-                "Use only validated competitors.website values; write 公开资料不足 if website is empty.",
-                "Do not write product analysis, summary, or appendix.",
+                "Use competitors.website as provided; write 公开资料不足 only if website is empty.",
+                "Do not guess or replace competitor websites during report writing.",
+                "Do not write chapter three, summary, or appendix.",
             ],
             "task": self._task_for_report_context(state, citation_refs_by_evidence_id),
             "competitors": self._compact_competitors_for_context(
@@ -717,7 +670,7 @@ class ReportWriterAgent:
         }
         return self._dump_context_with_budget(payload, OPENING_CONTEXT_CHAR_LIMIT)
 
-    def _build_product_section_context(
+    def _build_dynamic_section_context(
         self,
         state: CompetitorAnalysisState,
         section: dict[str, Any],
@@ -727,7 +680,7 @@ class ReportWriterAgent:
         report_evidence_ids = set(citation_refs_by_evidence_id)
         payload = {
             "reporting_constraints": [
-                "Only write this product-analysis subsection.",
+                "Only write this dynamic analysis subsection.",
                 "Use the provided claims as the main claim set.",
                 "Use citation_ref values like [1] for material claims.",
                 "Use any relevant citation-backed claim for this section regardless of source type.",
@@ -745,6 +698,7 @@ class ReportWriterAgent:
                 "id": section["id"],
                 "title": section["title"],
                 "guiding_question": section["guiding_question"],
+                "source_dimension_ids": section.get("source_dimension_ids", []),
             },
             "analysis_claims": [
                 self._compact_claim(
@@ -759,6 +713,38 @@ class ReportWriterAgent:
             ],
         }
         return self._dump_context_with_budget(payload, SECTION_CONTEXT_CHAR_LIMIT)
+
+    def _build_dynamic_overview_context(
+        self,
+        state: CompetitorAnalysisState,
+        sections: list[dict[str, Any]],
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        report_evidence_ids = set(citation_refs_by_evidence_id)
+        payload = {
+            "reporting_constraints": [
+                "Only write the dynamic analysis overview table.",
+                "Use dynamic_analysis_sections as the section set.",
+                "Do not use a preset product-dimension checklist.",
+                "Use citation_ref values like [1] where available.",
+            ],
+            "task_query": state.get("task", {}).get("query", ""),
+            "competitors": self._compact_competitors_for_context(
+                state.get("competitors") or state.get("task", {}).get("competitors", []),
+                citation_refs_by_evidence_id,
+            ),
+            "dynamic_analysis_sections": sections,
+            "analysis_claims": [
+                self._compact_claim(
+                    claim,
+                    report_evidence_ids,
+                    citation_refs_by_evidence_id,
+                )
+                for claim in claims[:SUMMARY_CLAIM_LIMIT]
+            ],
+        }
+        return self._dump_context_with_budget(payload, ANALYSIS_OVERVIEW_CONTEXT_CHAR_LIMIT)
 
     def _build_summary_context(
         self,
@@ -814,7 +800,7 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
-                    website = self._validated_competitor_website(competitor)
+                    website = self._competitor_website(competitor)
                     evidence_refs = self._citation_refs_for_evidence_ids(
                         competitor.get("evidence_ids", []),
                         citation_refs_by_evidence_id,
@@ -842,7 +828,7 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
-                    website = self._validated_competitor_website(competitor)
+                    website = self._competitor_website(competitor)
                     evidence_refs = ", ".join(
                         self._citation_refs_for_evidence_ids(
                             competitor.get("evidence_ids", []),
@@ -950,7 +936,7 @@ class ReportWriterAgent:
                 {
                     "name": competitor.get("name", ""),
                     "product": competitor.get("product", ""),
-                    "website": self._validated_competitor_website(competitor),
+                    "website": self._competitor_website(competitor),
                     "category": competitor.get("category", ""),
                     "notes": competitor.get("notes", ""),
                     "evidence_ids": evidence_ids,
@@ -976,41 +962,8 @@ class ReportWriterAgent:
             )
         return task
 
-    def _validated_competitor_website(self, competitor: dict[str, Any]) -> str:
-        website = str(competitor.get("website") or "").strip()
-        if not website:
-            return ""
-        hostname = self._website_hostname(website)
-        if not hostname:
-            return ""
-        allowed_domains = self._official_domains_for_competitor(competitor)
-        if allowed_domains and not self._hostname_matches_any(hostname, allowed_domains):
-            return ""
-        return website
-
-    def _official_domains_for_competitor(self, competitor: dict[str, Any]) -> tuple[str, ...]:
-        identity = " ".join(
-            str(competitor.get(field) or "").lower()
-            for field in ("name", "product")
-        )
-        if not identity.strip():
-            return ()
-        for rule in OFFICIAL_WEBSITE_DOMAIN_RULES:
-            if any(alias in identity for alias in rule["aliases"]):
-                return rule["domains"]
-        return ()
-
-    def _website_hostname(self, website: str) -> str:
-        value = website.strip()
-        parsed = urlparse(value if "://" in value else f"https://{value}")
-        hostname = (parsed.hostname or "").lower()
-        return hostname[4:] if hostname.startswith("www.") else hostname
-
-    def _hostname_matches_any(self, hostname: str, domains: tuple[str, ...]) -> bool:
-        return any(
-            hostname == domain or hostname.endswith(f".{domain}")
-            for domain in domains
-        )
+    def _competitor_website(self, competitor: dict[str, Any]) -> str:
+        return str(competitor.get("website") or "").strip()
 
     def _dump_context_with_budget(
         self,
@@ -1252,9 +1205,14 @@ class ReportWriterAgent:
                 "Use citation_ref values like [1] for material claims in the report body.",
                 "Use EvidenceItem.url values as source URLs.",
                 "Do not use rejected evidence as support for claims.",
+                "Let chapter three dimensions follow the available claims and evidence; do not use a preset product-dimension template.",
                 "Do not write the appendix; the system appends the information index.",
             ],
-            "product_analysis_checklist": self._product_analysis_sections(),
+            "dynamic_analysis_sections": self._dynamic_analysis_sections(
+                claims,
+                evidence_items,
+                analysis_dimensions,
+            ),
             "task": self._task_for_report_context(state, citation_refs_by_evidence_id),
             "competitors": self._compact_competitors_for_context(
                 state.get("competitors") or state.get("task", {}).get("competitors", []),
@@ -1337,45 +1295,211 @@ class ReportWriterAgent:
         if dimension_by_id:
             return list(dimension_by_id.values())[:10]
 
-        return [
-            {
-                "id": section["id"],
-                "name": section["title"],
-                "description": section["guiding_question"],
-                "priority": "P1",
-                "guiding_questions": [section["guiding_question"]],
-            }
-            for section in PRODUCT_ANALYSIS_SECTIONS
-        ]
+        return []
 
-    def _product_analysis_sections(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "number": section["number"],
-                "id": section["id"],
-                "title": section["title"],
-                "guiding_question": section["guiding_question"],
-            }
-            for section in PRODUCT_ANALYSIS_SECTIONS
-        ]
-
-    def _product_analysis_checklist_markdown(self) -> str:
+    def _dynamic_analysis_overview_markdown(
+        self,
+        sections: list[dict[str, Any]],
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]] | None = None,
+        citation_refs_by_evidence_id: dict[str, str] | None = None,
+    ) -> str:
+        evidence_items = evidence_items or []
+        citation_refs_by_evidence_id = citation_refs_by_evidence_id or {}
         lines = [
-            "### 产品分析调研清单",
+            "### 分析维度总览",
             "",
-            "| 章节 | 引导问题 |",
-            "| ---- | ---- |",
+            "| 章节 | 动态维度 | 证据覆盖 | 主要竞品 | 主要引用 |",
+            "| --- | --- | --- | --- | --- |",
         ]
-        for section in PRODUCT_ANALYSIS_SECTIONS:
-            lines.append(
-                self._markdown_table_row(
+        for section in sections:
+            section_claims = self._claims_for_dynamic_section(claims, section, 10_000)
+            section_evidence = [
+                evidence
+                for evidence in evidence_items
+                if self._matches_dynamic_section(evidence, section)
+            ]
+            section_evidence_ids = list(
+                dict.fromkeys(
                     [
-                        f"{section['number']} {section['title']}",
-                        section["guiding_question"],
+                        evidence_id
+                        for claim in section_claims
+                        for evidence_id in claim.get("evidence_ids", [])
+                        if evidence_id
+                    ]
+                    + [
+                        evidence.get("id", "")
+                        for evidence in section_evidence
+                        if evidence.get("id")
                     ]
                 )
             )
+            citation_refs = [
+                citation_refs_by_evidence_id[evidence_id]
+                for evidence_id in section_evidence_ids
+                if evidence_id in citation_refs_by_evidence_id
+            ]
+            if section_claims:
+                coverage = f"{len(section_claims)} 条可追溯 claim"
+                if section_evidence:
+                    coverage += f"，{len(section_evidence)} 项公开证据"
+            elif section_evidence:
+                coverage = f"{len(section_evidence)} 项公开证据，需复核"
+            else:
+                coverage = "公开证据不足"
+            lines.append(
+                self._markdown_table_row(
+                    [
+                        section["number"],
+                        section["title"],
+                        coverage,
+                        ", ".join(section.get("competitors", [])) or "综合",
+                        "".join(citation_refs[:5]) or "公开证据不足",
+                    ]
+                )
+            )
+        if not sections:
+            lines.append("| 公开证据不足 | 公开证据不足 | 0 条可追溯 claim | 综合 | 公开证据不足 |")
         return "\n".join(lines)
+
+    def _dynamic_analysis_sections(
+        self,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        evidence_by_id = {
+            evidence.get("id", ""): evidence
+            for evidence in evidence_items
+            if evidence.get("id")
+        }
+        dimension_meta = self._dimension_metadata(
+            analysis_dimensions,
+            evidence_items,
+        )
+        dimension_order: list[str] = []
+        for claim in claims:
+            dimension_id = self._claim_dimension_id(claim, evidence_by_id)
+            if dimension_id and dimension_id not in dimension_order:
+                dimension_order.append(dimension_id)
+        for evidence in evidence_items:
+            dimension_id = str(evidence.get("dimension_id", "") or "")
+            if (
+                dimension_id
+                and dimension_id != "competitor_profile"
+                and dimension_id not in dimension_order
+            ):
+                dimension_order.append(dimension_id)
+
+        sections: list[dict[str, Any]] = []
+        for index, dimension_id in enumerate(
+            dimension_order[:DYNAMIC_ANALYSIS_SECTION_LIMIT],
+            start=1,
+        ):
+            meta = dimension_meta.get(dimension_id, {})
+            title = (
+                str(meta.get("name") or "").strip()
+                or self._humanize_dimension_id(dimension_id)
+            )
+            section_claims = [
+                claim
+                for claim in claims
+                if self._claim_dimension_id(claim, evidence_by_id) == dimension_id
+            ]
+            section_evidence = [
+                evidence
+                for evidence in evidence_items
+                if evidence.get("dimension_id") == dimension_id
+            ]
+            sections.append(
+                {
+                    "number": f"3.{index}",
+                    "id": self._section_id(dimension_id),
+                    "title": title,
+                    "guiding_question": (
+                        str(meta.get("description") or "").strip()
+                        or f"基于已有公开证据，对比竞品在“{title}”维度上的表现、差异和可验证信号。"
+                    ),
+                    "source_dimension_ids": [dimension_id],
+                    "competitors": self._section_competitors(
+                        section_claims,
+                        section_evidence,
+                    ),
+                }
+            )
+        return sections
+
+    def _dimension_metadata(
+        self,
+        analysis_dimensions: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        metadata: dict[str, dict[str, Any]] = {}
+        for dimension in analysis_dimensions:
+            dimension_id = str(dimension.get("id", "") or "")
+            if not dimension_id:
+                continue
+            metadata[dimension_id] = {
+                "name": dimension.get("name") or dimension_id,
+                "description": (
+                    dimension.get("description")
+                    or "；".join(dimension.get("guiding_questions", [])[:2])
+                ),
+            }
+        for evidence in evidence_items:
+            dimension_id = str(evidence.get("dimension_id", "") or "")
+            if not dimension_id or dimension_id in metadata:
+                continue
+            metadata[dimension_id] = {
+                "name": evidence.get("dimension_name") or dimension_id,
+                "description": "",
+            }
+        return metadata
+
+    def _claim_dimension_id(
+        self,
+        claim: dict[str, Any],
+        evidence_by_id: dict[str, dict[str, Any]],
+    ) -> str:
+        dimension_id = str(claim.get("dimension", "") or "")
+        if dimension_id and dimension_id != "competitor_profile":
+            return dimension_id
+        for evidence_id in claim.get("evidence_ids", []):
+            evidence = evidence_by_id.get(evidence_id, {})
+            evidence_dimension = str(evidence.get("dimension_id", "") or "")
+            if evidence_dimension and evidence_dimension != "competitor_profile":
+                return evidence_dimension
+        return "evidence_supported_findings"
+
+    def _section_competitors(
+        self,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+    ) -> list[str]:
+        competitors: list[str] = []
+        for claim in claims:
+            for competitor in claim.get("competitors", []) or []:
+                competitor_text = str(competitor)
+                if competitor_text and competitor_text not in competitors:
+                    competitors.append(competitor_text)
+        for evidence in evidence_items:
+            competitor_text = str(evidence.get("competitor", "") or "")
+            if competitor_text and competitor_text not in competitors:
+                competitors.append(competitor_text)
+        return competitors
+
+    def _section_id(self, dimension_id: str) -> str:
+        cleaned = "".join(
+            character if character.isalnum() or character == "_" else "_"
+            for character in dimension_id.strip().lower()
+        ).strip("_")
+        return cleaned or "dynamic_analysis"
+
+    def _humanize_dimension_id(self, dimension_id: str) -> str:
+        if dimension_id == "evidence_supported_findings":
+            return "证据支持发现"
+        text = dimension_id.removeprefix("direction_").replace("_", " ").strip()
+        return text.title() if text else "动态分析维度"
 
     def _compact_claim(
         self,
@@ -1543,16 +1667,31 @@ class ReportWriterAgent:
             if evidence_id
         }
 
-    def _ensure_product_analysis_chapter(
+    def _ensure_dynamic_analysis_chapter(
         self,
         report: str,
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
     ) -> str:
-        if self._has_product_analysis_chapter_format(report):
-            return report
+        citation_refs_by_evidence_id = self._citation_refs_by_evidence_id(
+            self._ordered_evidence_ids(claims, evidence_items)
+        )
+        if self._has_dynamic_analysis_chapter_format(report):
+            return self._replace_dynamic_analysis_overview(
+                report,
+                claims,
+                evidence_items,
+                analysis_dimensions,
+                citation_refs_by_evidence_id,
+            )
 
-        chapter = self._product_analysis_chapter(claims, evidence_items).strip()
+        chapter = self._dynamic_analysis_chapter(
+            claims,
+            evidence_items,
+            analysis_dimensions,
+            citation_refs_by_evidence_id,
+        ).strip()
         chapter_start = report.find("## 第三章：竞品分析")
         chapter_end = report.find("## 第四章", chapter_start if chapter_start >= 0 else 0)
 
@@ -1576,34 +1715,75 @@ class ReportWriterAgent:
             )
         return report.rstrip() + "\n\n" + chapter
 
-    def _has_product_analysis_chapter_format(self, report: str) -> bool:
+    def _has_dynamic_analysis_chapter_format(self, report: str) -> bool:
         if "## 第三章：竞品分析" not in report:
             return False
-        if "| 章节 | 引导问题 |" not in report:
-            return False
-        return all(
-            f"| {section['number']} {section['title']} |" in report
-            and f"### {section['number']} {section['title']}" in report
-            for section in PRODUCT_ANALYSIS_SECTIONS
+        return "### 分析维度总览" in report
+
+    def _replace_dynamic_analysis_overview(
+        self,
+        report: str,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        sections = self._dynamic_analysis_sections(
+            claims,
+            evidence_items,
+            analysis_dimensions,
+        )
+        overview = self._dynamic_analysis_overview_markdown(
+            sections,
+            claims,
+            evidence_items,
+            citation_refs_by_evidence_id,
+        ).strip()
+        overview_start = report.find("### 分析维度总览")
+        if overview_start < 0:
+            return report
+
+        chapter_end = report.find("## 第四章", overview_start)
+        if chapter_end < 0:
+            chapter_end = len(report)
+        next_section = report.find("### 3.", overview_start + len("### 分析维度总览"))
+        overview_end = next_section if 0 <= next_section < chapter_end else chapter_end
+        return (
+            report[:overview_start].rstrip()
+            + "\n\n"
+            + overview
+            + "\n\n"
+            + report[overview_end:].lstrip()
         )
 
-    def _product_analysis_chapter(
+    def _dynamic_analysis_chapter(
         self,
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
+        analysis_dimensions: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str] | None = None,
     ) -> str:
-        report_evidence_ids = {
-            evidence.get("id", "")
-            for evidence in evidence_items
-            if evidence.get("id")
-        }
+        if citation_refs_by_evidence_id is None:
+            citation_refs_by_evidence_id = self._citation_refs_by_evidence_id(
+                self._ordered_evidence_ids(claims, evidence_items)
+            )
+        sections = self._dynamic_analysis_sections(
+            claims,
+            evidence_items,
+            analysis_dimensions,
+        )
         lines = [
             "## 第三章：竞品分析",
             "",
-            self._product_analysis_checklist_markdown(),
+            self._dynamic_analysis_overview_markdown(
+                sections,
+                claims,
+                evidence_items,
+                citation_refs_by_evidence_id,
+            ),
         ]
-        for section in PRODUCT_ANALYSIS_SECTIONS:
-            section_claims = self._claims_for_product_section(
+        for section in sections:
+            section_claims = self._claims_for_dynamic_section(
                 claims,
                 section,
                 SECTION_CLAIM_LIMIT,
@@ -1611,12 +1791,34 @@ class ReportWriterAgent:
             section_evidence = [
                 evidence
                 for evidence in evidence_items
-                if self._matches_product_section(evidence, section)
+                if self._matches_dynamic_section(evidence, section)
             ]
-            lines.extend(["", *self._product_analysis_section_lines(section, section_claims, section_evidence)])
+            lines.extend(
+                [
+                    "",
+                    *self._dynamic_analysis_section_lines(
+                        section,
+                        section_claims,
+                        section_evidence,
+                    ),
+                ]
+            )
+        if not sections:
+            lines.extend(
+                [
+                    "",
+                    "### 3.1 证据覆盖概览",
+                    "",
+                    "| 动态维度 | 竞品/对象 | 结论 | 引用 |",
+                    "| --- | --- | --- | --- |",
+                    "| 公开证据不足 | 综合 | 当前缺少可追溯 claim，无法生成动态分析维度。 | 无 |",
+                    "",
+                    "分析：该报告保留公开证据不足状态，需要补充采集或人工校验后再生成动态维度。",
+                ]
+            )
         return "\n".join(lines)
 
-    def _product_analysis_section_lines(
+    def _dynamic_analysis_section_lines(
         self,
         section: dict[str, Any],
         section_claims: list[dict[str, Any]],
@@ -1636,7 +1838,7 @@ class ReportWriterAgent:
         lines = [
             f"### {section['number']} {section['title']}",
             "",
-            "| 引导问题 | 竞品/对象 | 结论 | 引用 |",
+            "| 动态维度 | 竞品/对象 | 结论 | 引用 |",
             "| --- | --- | --- | --- |",
         ]
         if section_claims:
@@ -1649,7 +1851,7 @@ class ReportWriterAgent:
                 lines.append(
                     self._markdown_table_row(
                         [
-                            section["guiding_question"],
+                            section["title"],
                             ", ".join(claim.get("competitors", [])) or "综合",
                             f"{claim.get('claim', '') or '公开证据不足'}{support_label}",
                             ", ".join(
@@ -1680,7 +1882,7 @@ class ReportWriterAgent:
                 lines.append(
                     self._markdown_table_row(
                         [
-                            section["guiding_question"],
+                            section["title"],
                             evidence.get("competitor", "") or "综合",
                             evidence_text,
                             evidence.get("id", "") or "无",
@@ -1695,7 +1897,7 @@ class ReportWriterAgent:
             lines.append(
                 self._markdown_table_row(
                     [
-                        section["guiding_question"],
+                        section["title"],
                         "综合",
                         "公开证据不足",
                         "无",
@@ -1703,17 +1905,17 @@ class ReportWriterAgent:
                 )
             )
             lines.append("")
-            lines.append("分析：该维度目前缺少足够的公开证据，需要补充采集或人工校验。")
+            lines.append("分析：该动态维度目前缺少足够的公开证据，需要补充采集或人工校验。")
         return lines
 
-    def _claims_for_product_section(
+    def _claims_for_dynamic_section(
         self,
         claims: list[dict[str, Any]],
         section: dict[str, Any],
         limit: int,
     ) -> list[dict[str, Any]]:
         matched_claims = [
-            claim for claim in claims if self._matches_product_section(claim, section)
+            claim for claim in claims if self._matches_dynamic_section(claim, section)
         ]
         return self._fair_sample_claims_by_competitor(matched_claims, limit)
 
@@ -1753,34 +1955,22 @@ class ReportWriterAgent:
             return competitors
         return "综合"
 
-    def _matches_product_section(
+    def _matches_dynamic_section(
         self,
         item: dict[str, Any],
         section: dict[str, Any],
     ) -> bool:
-        mapped_sections = self._mapped_product_sections_for_item(item)
-        if mapped_sections:
-            return section.get("id", "") in mapped_sections
-
-        searchable = " ".join(
-            str(item.get(key, ""))
-            for key in (
-                "dimension",
-                "dimension_id",
-                "dimension_name",
-                "title",
-                "claim",
-            )
-        ).lower()
-        aliases = [str(alias).lower() for alias in section.get("aliases", [])]
-        return any(alias and alias in searchable for alias in aliases)
-
-    def _mapped_product_sections_for_item(self, item: dict[str, Any]) -> tuple[str, ...]:
+        source_dimension_ids = set(section.get("source_dimension_ids", []))
+        item_dimension_ids: list[str] = []
         for key in ("dimension", "dimension_id"):
             dimension_id = str(item.get(key, "") or "")
-            if dimension_id in PRODUCT_SECTION_DIRECTION_MAP:
-                return PRODUCT_SECTION_DIRECTION_MAP[dimension_id]
-        return ()
+            if dimension_id:
+                item_dimension_ids.append(dimension_id)
+            if dimension_id and dimension_id in source_dimension_ids:
+                return True
+        if not item_dimension_ids and "evidence_supported_findings" in source_dimension_ids:
+            return True
+        return False
 
     def _fallback_report(
         self,
@@ -1806,7 +1996,7 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
-                    website = self._validated_competitor_website(competitor)
+                    website = self._competitor_website(competitor)
                     lines.append(f"- **{competitor.get('name', '未知竞品')}**")
                     lines.append(f"  - 产品/品牌：{competitor.get('product', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 官网：{website or '公开资料不足'}")
@@ -1830,7 +2020,7 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
-                    website = self._validated_competitor_website(competitor)
+                    website = self._competitor_website(competitor)
                     evidence_ids = ", ".join(competitor.get("evidence_ids", [])[:3])
                     lines.append(
                         "| "
@@ -1846,7 +2036,13 @@ class ReportWriterAgent:
         else:
             lines.append("| 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
 
-        lines.append(self._product_analysis_chapter(claims, evidence_items))
+        lines.append(
+            self._dynamic_analysis_chapter(
+                claims,
+                evidence_items,
+                analysis_dimensions,
+            )
+        )
 
         lines.extend(
             [

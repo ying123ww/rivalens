@@ -3,6 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from rivalens.agents.messages import create_agent_message
 from rivalens.agents.publishing import PublisherAgent
@@ -49,18 +50,20 @@ class ReportExportTest(unittest.TestCase):
         self.assertIn("<html", Path(artifacts["html"]).read_text(encoding="utf-8"))
 
     def test_pdf_export_preserves_chinese_text(self):
-        path = self.output_dir / "中文报告.pdf"
+        path = self.output_dir / f"chinese_report_{uuid4().hex}.pdf"
         report = "\n".join(
             [
                 "# 竞品分析报告",
                 "",
                 "## 第三章：竞品分析",
                 "",
-                "| 章节 | 引导问题 | 数据来源约束 |",
-                "| ---- | ---- | ---- |",
-                "| 3.1 战略定位 | 这个产品把自己定位成什么？ | 官网首页、公开采访、品牌宣传 |",
+                "### 分析维度总览",
                 "",
-                "用户口碑和商业模式需要保留可读中文。",
+                "| 章节 | 动态维度 | 证据覆盖 | 主要竞品 |",
+                "| ---- | ---- | ---- | ---- |",
+                "| 3.1 价格与套餐 | 对比公开证据中的价格与套餐差异。 | 2 条可追溯 claim | 示例竞品 |",
+                "",
+                "用户反馈和商业信号需要保留可读中文。",
             ]
         )
 
@@ -73,8 +76,8 @@ class ReportExportTest(unittest.TestCase):
 
         text = "\n".join(page.get_text() for page in fitz.open(path))
         self.assertIn("竞品分析报告", text)
-        self.assertIn("战略定位", text)
-        self.assertIn("用户口碑", text)
+        self.assertIn("价格与套餐", text)
+        self.assertIn("用户反馈", text)
 
     def test_publisher_uses_shared_export_and_publishes_all_artifacts(self):
         async def fake_generate_report_files(report, filename, **kwargs):
