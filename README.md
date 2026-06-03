@@ -101,17 +101,20 @@ flowchart LR
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
 inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
-keeps the industry template directions separate from PlanningAgent supplement
-directions, then emits one `schema_selection` handoff to `source_collection`.
-When deterministic industry matching is confident, the planner continues to use
-the maintained industry templates. When the top rule score is below the
+composes the confirmed analysis directions from reusable industry facets, then
+emits one `schema_selection` handoff to `source_collection`. When deterministic
+industry matching is confident, the planner uses the maintained facet templates:
+L0 common business-analysis directions, L1 business-archetype directions, and
+L2 regulated-domain directions are deduplicated into the default search plan.
+The selected GICS sector, archetypes, regulated domains, and composition layers
+are stored in `final_analysis_plan.direction_composition` for review and trace
+replay. When the top rule score is below the
 configured threshold, it calls the Anthropic-compatible industry LLM fallback
 configured by `INDUSTRY_FALLBACK_LLM` / `ANTHROPIC_MODEL`, then stores the
 structured industry, rationale, and suggested directions inside the same
-`IndustryDirectionPlan` and `ActiveKnowledgeSchema` protocol.
-The planner uses the ten general product-analysis directions only as a coverage
-check for missing task-level `planner_added_directions`; they are not written
-back as original industry defaults. The confirmed direction plan is stored in
+`IndustryDirectionPlan` and `ActiveKnowledgeSchema` protocol. Rule-template
+plans no longer use a second set of `planner_added_directions`, because L0 is
+the shared general coverage layer. The confirmed direction plan is stored in
 `CompetitorAnalysisState.industry_direction_plan`, so the search scope can be
 reviewed before evidence collection. When the user has not specified a clear
 competitor pair, the preview plan surfaces industry-template example

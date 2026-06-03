@@ -2,6 +2,7 @@
 
 import json
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState
@@ -94,11 +95,44 @@ PRODUCT_ANALYSIS_SECTIONS: list[dict[str, Any]] = [
     },
 ]
 
+PRODUCT_SECTION_DIRECTION_MAP: dict[str, tuple[str, ...]] = {
+    "direction_strategic_positioning": ("strategic_positioning",),
+    "direction_market_trends_opportunities": ("strategic_positioning",),
+    "direction_target_users_segments": ("target_users",),
+    "direction_business_model_pricing": ("business_model",),
+    "direction_growth_channels": ("operation_strategy",),
+    "direction_operations_fulfillment": ("operation_strategy", "product_flow"),
+    "direction_core_product_supply": ("product_features", "product_structure"),
+    "direction_integrations_ecosystem": ("product_features", "product_structure"),
+    "direction_ai_capability_application": ("product_features", "signature_features"),
+    "direction_product_experience": ("product_flow", "product_structure", "interaction_design"),
+    "direction_baseline_trust_security_compliance": ("product_features", "signature_features"),
+    "direction_sla_reliability": ("product_features",),
+    "direction_moat_resources_team": ("strategic_positioning", "signature_features"),
+    "direction_migration_switching_cost": ("product_flow", "user_reputation"),
+    "direction_user_reputation": ("user_reputation",),
+}
+
 SECTION_CLAIM_LIMIT = 12
 SUMMARY_CLAIM_LIMIT = 30
 OPENING_CONTEXT_CHAR_LIMIT = 6000
 SECTION_CONTEXT_CHAR_LIMIT = 8000
 SUMMARY_CONTEXT_CHAR_LIMIT = 9000
+
+OFFICIAL_WEBSITE_DOMAIN_RULES: tuple[dict[str, tuple[str, ...]], ...] = (
+    {
+        "aliases": ("钉钉", "dingtalk", "ding talk"),
+        "domains": ("dingtalk.com", "dingtalk-global.com"),
+    },
+    {
+        "aliases": ("企业微信", "企微", "wecom", "work weixin", "work.weixin"),
+        "domains": ("work.weixin.qq.com", "wecom.work"),
+    },
+    {
+        "aliases": ("飞书", "feishu", "lark", "larksuite"),
+        "domains": ("feishu.cn", "feishu.com", "larksuite.com"),
+    },
+)
 
 
 class _ReportResearcherAdapter:
@@ -311,6 +345,7 @@ class ReportWriterAgent:
 ### 竞品信息卡片
 - 为每个竞品输出一个简短信息卡片。
 - 卡片字段优先使用 competitors 中的 name、product、website、category、notes、evidence_ids。
+- 官网字段必须使用已校验的 competitors.website；不要从混合对比证据中推断官网。若为空或与竞品身份不匹配，写“公开资料不足”。
 - 如果字段由公开证据推导，必须展示对应 citation_ref，例如 [1]；不要无证据扩写。
 
 ### 竞品分类表格
@@ -338,17 +373,67 @@ class ReportWriterAgent:
 1. 一个正式对比表格。
 2. 一段对应的分析文字。
 3. 表格或段落中要保留相关 citation_ref，例如 [1]。
-4. 如果 Context 缺少该小节证据，结论写“公开证据不足”，不要编造。
+4. 只要 Context 中存在与该小节问题相关、可追溯的 claim 或 evidence，就可以引用；不要因为来源类型不是“定价页/帮助中心/截图”等优先来源而弃用。
+5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
+6. 如果 Context 缺少该小节相关证据，结论写“公开证据不足”，不要编造。
 
 ## 第四章：总结
-### SWOT 分析矩阵
-- 输出 SWOT 分析矩阵表。
-- 如果 Context 没有显式 SWOT，请基于 analysis_claims、competitor_knowledge 和 evidence_items 综合归纳。
-- 不足的信息写“公开证据不足”，不要编造。
+
+### SWOT 因素矩阵
+
+先输出 2×2 SWOT 因素总览表：
+
+| S 优势 | W 劣势 |
+| --- | --- |
+| O 机会 | T 威胁 |
+
+每个象限 3-5 条，绑定 citation_ref。
+
+各象限追问（必须在展开回答中覆盖，而非只列关键词）：
+
+**S 优势** — 基于 evidence_items 回答：
+1. 该竞品目前可观察的核心优势是什么？与同类竞品的差距有多大？
+2. 这些优势能维持多久？竞品做出有力反应需要多长时间？
+3. 是否有证据表明该优势正在减弱或被追赶？
+
+**W 劣势** — 基于 evidence_items 回答：
+1. 哪些劣势对该竞品影响最大？是功能缺口、定价问题还是运营短板？
+2. 该劣势是否正在被市场机会放大？
+3. 补充该劣势需要多大投入和多长时间？（可从公开信息推断）
+
+**O 机会** — 基于 analysis_claims 和 competitor_knowledge 回答：
+1. 对该竞品所在赛道，哪些是真正的结构性机会？会持续多久？
+2. 该竞品在利用这些机会上有什么优势或劣势？
+3. 有哪些机会是该竞品目前明显忽视或覆盖不足的？
+
+**T 威胁** — 基于 analysis_claims 和 evidence_items 回答：
+1. 哪些威胁对该竞品是致命的？
+2. 面对这些威胁，该竞品可能会怎么做？其他竞品在做什么？
+3. 如果无法规避，该竞品最可能的应对路径是什么？
+
+**信息不足的维度绝对不可用编造，不足的地方留白。**
+
+### TOWS 战略矩阵
+
+基于 SWOT 因子交叉配对，输出竞品战略推演矩阵：
+
+|  | O 机会 | T 威胁 |
+| --- | --- | --- |
+| **S 优势** | **SO 增长型**<br>竞品会如何用优势抢机会？<br>预计推出什么产品或动作？ | **ST 多点型**<br>竞品会如何用优势对冲威胁？<br>是否会分散经营化解风险？ |
+| **W 劣势** | **WO 扭转型**<br>机会暴露了竞品哪些可被追的短板？<br>竞品是否已在调整？ | **WT 防御型**<br>竞品哪些短板在威胁面前最脆弱？<br>这些脆弱点是否构成可攻击的突破口？ |
+
+每个格子输出 1-2 条具体战略推演，必须是可观察/可验证的动作，不能写空泛结论。
+
+示例（仅供参考格式与颗粒度）：
+假设 Context 中 S: “产品免费额度显著高于同类 [3]”，O: “中小企业对低成本工具的需求在增长 [5]”，则 SO 格应写为：
+> **SO 增长型**: 该竞品可能以当前免费额度为钩子，推出面向中小企业的付费升级方案，以低成本获客路径抢占增量市场。[3][5]
+不应写为：
+> ~~发挥免费优势，抓住中小企业市场机会。~~（空泛，不可验证）
+
+每条绑定 citation_ref。证据不足写”公开证据不足，无法推演”。
 
 ### 总结论述
-- 输出一段综合结论。
-- 必须说明主要竞争差异、机会和风险。
+- 基于 TOWS 矩阵，输出一段综合结论。说明核心竞争差异、竞品下一步最可能的战略动作，以及被分析对象相对竞品的关键机会窗口或风险敞口。
 
 不要输出附录。附录将由系统基于 EvidenceItem 自动追加。
 所有重要判断必须绑定 citation_ref。不要使用 Context 之外的信息。不要把原始 evidence ID 当作正文引用输出。
@@ -446,9 +531,11 @@ class ReportWriterAgent:
             self._product_analysis_checklist_markdown(),
         ]
         for section in PRODUCT_ANALYSIS_SECTIONS:
-            section_claims = [
-                claim for claim in claims if self._matches_product_section(claim, section)
-            ][:SECTION_CLAIM_LIMIT]
+            section_claims = self._claims_for_product_section(
+                claims,
+                section,
+                SECTION_CLAIM_LIMIT,
+            )
             section_context = self._build_product_section_context(
                 state,
                 section,
@@ -544,10 +631,11 @@ class ReportWriterAgent:
 1. 一个正式对比表格。
 2. 一段对应的分析文字。
 3. 表格或段落中保留相关 citation_ref，例如 [1]。
-4. 如果 Context 缺少证据，结论写“公开证据不足”，不要编造。
+4. 只要 Context 中存在与本小节问题相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
+5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
+6. 如果 Context 缺少相关证据，结论写“公开证据不足”，不要编造。
 
 引导问题：{section['guiding_question']}
-数据来源约束：{section['source_constraints']}
 """
 
     def _summary_prompt(self) -> str:
@@ -555,11 +643,21 @@ class ReportWriterAgent:
 请只基于 Context 输出以下 Markdown 片段：
 
 ## 第四章：总结
-### SWOT 分析矩阵
-- 输出 SWOT 分析矩阵表。
+
+### SWOT 因素矩阵
+输出 2×2 SWOT 因素总览表，每格 3-5 条，绑定 citation_ref。需覆盖以下追问：
+- S: 核心优势是什么？差距多大？能维持多久？
+- W: 哪些劣势影响最大？是否被机会放大？
+- O: 哪些是结构性机会？竞品是否忽视？
+- T: 哪些威胁致命？竞品可能的应对路径？
+
+### TOWS 战略矩阵
+基于 SWOT 因子交叉配对，输出 TOWS 战略矩阵（SO 增长型 / WO 扭转型 / ST 多点型 / WT 防御型）。
+每个格子 1-2 条具体战略推演（可观察的动作，不是空泛结论），绑定 citation_ref。
+证据不足写"公开证据不足，无法推演"。
 
 ### 总结论述
-- 输出一段综合结论，说明主要竞争差异、机会和风险。
+- 输出一段综合结论，说明核心竞争差异、竞品下一步最可能的战略动作及关键机会窗口。
 
 必须保留可用的 citation_ref，例如 [1]。不要输出附录。
 """
@@ -608,9 +706,10 @@ class ReportWriterAgent:
             "reporting_constraints": [
                 "Only write chapters one and two.",
                 "Use competitor fields and citation_ref values already attached to competitors.",
+                "Use only validated competitors.website values; write 公开资料不足 if website is empty.",
                 "Do not write product analysis, summary, or appendix.",
             ],
-            "task": state.get("task", {}),
+            "task": self._task_for_report_context(state, citation_refs_by_evidence_id),
             "competitors": self._compact_competitors_for_context(
                 state.get("competitors") or state.get("task", {}).get("competitors", []),
                 citation_refs_by_evidence_id,
@@ -631,6 +730,8 @@ class ReportWriterAgent:
                 "Only write this product-analysis subsection.",
                 "Use the provided claims as the main claim set.",
                 "Use citation_ref values like [1] for material claims.",
+                "Use any relevant citation-backed claim for this section regardless of source type.",
+                "Do not treat source-type preferences as a writing gate; keep indirect-evidence wording conservative.",
                 "Do not infer new claims from raw evidence.",
                 "If claims are missing, write 公开证据不足.",
             ],
@@ -644,7 +745,6 @@ class ReportWriterAgent:
                 "id": section["id"],
                 "title": section["title"],
                 "guiding_question": section["guiding_question"],
-                "source_constraints": section["source_constraints"],
             },
             "analysis_claims": [
                 self._compact_claim(
@@ -652,7 +752,10 @@ class ReportWriterAgent:
                     report_evidence_ids,
                     citation_refs_by_evidence_id,
                 )
-                for claim in claims[:SECTION_CLAIM_LIMIT]
+                for claim in self._fair_sample_claims_by_competitor(
+                    claims,
+                    SECTION_CLAIM_LIMIT,
+                )
             ],
         }
         return self._dump_context_with_budget(payload, SECTION_CONTEXT_CHAR_LIMIT)
@@ -711,13 +814,14 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
+                    website = self._validated_competitor_website(competitor)
                     evidence_refs = self._citation_refs_for_evidence_ids(
                         competitor.get("evidence_ids", []),
                         citation_refs_by_evidence_id,
                     )
                     lines.append(f"- **{competitor.get('name', '未知竞品')}**")
                     lines.append(f"  - 产品/品牌：{competitor.get('product', '公开资料不足') or '公开资料不足'}")
-                    lines.append(f"  - 官网：{competitor.get('website', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 官网：{website or '公开资料不足'}")
                     lines.append(f"  - 分类：{competitor.get('category', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 备注：{competitor.get('notes', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 主要引用：{', '.join(evidence_refs) or '公开资料不足'}")
@@ -738,6 +842,7 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
+                    website = self._validated_competitor_website(competitor)
                     evidence_refs = ", ".join(
                         self._citation_refs_for_evidence_ids(
                             competitor.get("evidence_ids", []),
@@ -750,7 +855,7 @@ class ReportWriterAgent:
                                 competitor.get("name", "") or "未知竞品",
                                 competitor.get("product", "") or "公开资料不足",
                                 competitor.get("category", "") or "公开资料不足",
-                                competitor.get("website", "") or "公开资料不足",
+                                website or "公开资料不足",
                                 competitor.get("notes", "") or "公开资料不足",
                                 evidence_refs or "公开资料不足",
                             ]
@@ -783,14 +888,22 @@ class ReportWriterAgent:
             [
                 "## 第四章：总结",
                 "",
-                "### SWOT 分析矩阵",
+                "### SWOT 因素矩阵",
                 "",
-                "| 类型 | 内容 | 引用 |",
+                "| S 优势 | W 劣势 |",
+                "| --- | --- |",
+                f"| 基于已接受证据的综合判断。{evidence_ids} | 未覆盖或证据不足的维度需继续补充。 |",
+                "",
+                "| O 机会 | T 威胁 |",
+                "| --- | --- |",
+                f"| 可围绕证据充分的差异化维度进一步定位。 | 竞品已有公开信号可能形成竞争压力。{evidence_ids} |",
+                "",
+                "### TOWS 战略矩阵",
+                "",
+                "|  | O 机会 | T 威胁 |",
                 "| --- | --- | --- |",
-                f"| Strengths 优势 | 基于已接受证据，部分竞品已形成可观察的公开竞争信号。 | {evidence_ids} |",
-                "| Weaknesses 劣势 | 未覆盖或证据不足的维度需要继续补充。 | 无 |",
-                "| Opportunities 机会 | 可围绕证据充分的差异化维度进一步定位产品机会。 | 无 |",
-                f"| Threats 威胁 | 竞品已有公开定位、定价、客户或能力信号，可能形成直接竞争压力。 | {evidence_ids} |",
+                f"| **S 优势** | SO 增长型: 竞品可能以优势领域为核心扩展增量市场。{evidence_ids} | ST 多点型: 竞品可能通过多线布局对冲外部风险。{evidence_ids} |",
+                "| **W 劣势** | WO 扭转型: 竞品可能借市场机会调整弱势领域。 | WT 防御型: 竞品弱势领域在外部压力下可能成为突破口。 |",
                 "",
                 "### 总结论述",
                 "",
@@ -837,7 +950,7 @@ class ReportWriterAgent:
                 {
                     "name": competitor.get("name", ""),
                     "product": competitor.get("product", ""),
-                    "website": competitor.get("website", ""),
+                    "website": self._validated_competitor_website(competitor),
                     "category": competitor.get("category", ""),
                     "notes": competitor.get("notes", ""),
                     "evidence_ids": evidence_ids,
@@ -848,6 +961,56 @@ class ReportWriterAgent:
                 }
             )
         return compact_competitors
+
+    def _task_for_report_context(
+        self,
+        state: CompetitorAnalysisState,
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, Any]:
+        task = dict(state.get("task", {}) or {})
+        competitors = task.get("competitors")
+        if isinstance(competitors, list):
+            task["competitors"] = self._compact_competitors_for_context(
+                competitors,
+                citation_refs_by_evidence_id,
+            )
+        return task
+
+    def _validated_competitor_website(self, competitor: dict[str, Any]) -> str:
+        website = str(competitor.get("website") or "").strip()
+        if not website:
+            return ""
+        hostname = self._website_hostname(website)
+        if not hostname:
+            return ""
+        allowed_domains = self._official_domains_for_competitor(competitor)
+        if allowed_domains and not self._hostname_matches_any(hostname, allowed_domains):
+            return ""
+        return website
+
+    def _official_domains_for_competitor(self, competitor: dict[str, Any]) -> tuple[str, ...]:
+        identity = " ".join(
+            str(competitor.get(field) or "").lower()
+            for field in ("name", "product")
+        )
+        if not identity.strip():
+            return ()
+        for rule in OFFICIAL_WEBSITE_DOMAIN_RULES:
+            if any(alias in identity for alias in rule["aliases"]):
+                return rule["domains"]
+        return ()
+
+    def _website_hostname(self, website: str) -> str:
+        value = website.strip()
+        parsed = urlparse(value if "://" in value else f"https://{value}")
+        hostname = (parsed.hostname or "").lower()
+        return hostname[4:] if hostname.startswith("www.") else hostname
+
+    def _hostname_matches_any(self, hostname: str, domains: tuple[str, ...]) -> bool:
+        return any(
+            hostname == domain or hostname.endswith(f".{domain}")
+            for domain in domains
+        )
 
     def _dump_context_with_budget(
         self,
@@ -1092,9 +1255,11 @@ class ReportWriterAgent:
                 "Do not write the appendix; the system appends the information index.",
             ],
             "product_analysis_checklist": self._product_analysis_sections(),
-            "task": state.get("task", {}),
-            "competitors": state.get("competitors")
-            or state.get("task", {}).get("competitors", []),
+            "task": self._task_for_report_context(state, citation_refs_by_evidence_id),
+            "competitors": self._compact_competitors_for_context(
+                state.get("competitors") or state.get("task", {}).get("competitors", []),
+                citation_refs_by_evidence_id,
+            ),
             "active_knowledge_schema": state.get("active_knowledge_schema", {}),
             "analysis_dimensions": analysis_dimensions,
             "analysis_claims": [
@@ -1179,7 +1344,6 @@ class ReportWriterAgent:
                 "description": section["guiding_question"],
                 "priority": "P1",
                 "guiding_questions": [section["guiding_question"]],
-                "source_constraints": section["source_constraints"],
             }
             for section in PRODUCT_ANALYSIS_SECTIONS
         ]
@@ -1191,7 +1355,6 @@ class ReportWriterAgent:
                 "id": section["id"],
                 "title": section["title"],
                 "guiding_question": section["guiding_question"],
-                "source_constraints": section["source_constraints"],
             }
             for section in PRODUCT_ANALYSIS_SECTIONS
         ]
@@ -1200,8 +1363,8 @@ class ReportWriterAgent:
         lines = [
             "### 产品分析调研清单",
             "",
-            "| 章节 | 引导问题 | 数据来源约束 |",
-            "| ---- | ---- | ---- |",
+            "| 章节 | 引导问题 |",
+            "| ---- | ---- |",
         ]
         for section in PRODUCT_ANALYSIS_SECTIONS:
             lines.append(
@@ -1209,7 +1372,6 @@ class ReportWriterAgent:
                     [
                         f"{section['number']} {section['title']}",
                         section["guiding_question"],
-                        section["source_constraints"],
                     ]
                 )
             )
@@ -1417,7 +1579,7 @@ class ReportWriterAgent:
     def _has_product_analysis_chapter_format(self, report: str) -> bool:
         if "## 第三章：竞品分析" not in report:
             return False
-        if "| 章节 | 引导问题 | 数据来源约束 |" not in report:
+        if "| 章节 | 引导问题 |" not in report:
             return False
         return all(
             f"| {section['number']} {section['title']} |" in report
@@ -1441,9 +1603,11 @@ class ReportWriterAgent:
             self._product_analysis_checklist_markdown(),
         ]
         for section in PRODUCT_ANALYSIS_SECTIONS:
-            section_claims = [
-                claim for claim in claims if self._matches_product_section(claim, section)
-            ]
+            section_claims = self._claims_for_product_section(
+                claims,
+                section,
+                SECTION_CLAIM_LIMIT,
+            )
             section_evidence = [
                 evidence
                 for evidence in evidence_items
@@ -1472,8 +1636,8 @@ class ReportWriterAgent:
         lines = [
             f"### {section['number']} {section['title']}",
             "",
-            "| 引导问题 | 数据来源约束 | 竞品/对象 | 结论 | 引用 |",
-            "| --- | --- | --- | --- | --- |",
+            "| 引导问题 | 竞品/对象 | 结论 | 引用 |",
+            "| --- | --- | --- | --- |",
         ]
         if section_claims:
             for claim in section_claims:
@@ -1486,7 +1650,6 @@ class ReportWriterAgent:
                     self._markdown_table_row(
                         [
                             section["guiding_question"],
-                            section["source_constraints"],
                             ", ".join(claim.get("competitors", [])) or "综合",
                             f"{claim.get('claim', '') or '公开证据不足'}{support_label}",
                             ", ".join(
@@ -1518,7 +1681,6 @@ class ReportWriterAgent:
                     self._markdown_table_row(
                         [
                             section["guiding_question"],
-                            section["source_constraints"],
                             evidence.get("competitor", "") or "综合",
                             evidence_text,
                             evidence.get("id", "") or "无",
@@ -1534,7 +1696,6 @@ class ReportWriterAgent:
                 self._markdown_table_row(
                     [
                         section["guiding_question"],
-                        section["source_constraints"],
                         "综合",
                         "公开证据不足",
                         "无",
@@ -1545,11 +1706,62 @@ class ReportWriterAgent:
             lines.append("分析：该维度目前缺少足够的公开证据，需要补充采集或人工校验。")
         return lines
 
+    def _claims_for_product_section(
+        self,
+        claims: list[dict[str, Any]],
+        section: dict[str, Any],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        matched_claims = [
+            claim for claim in claims if self._matches_product_section(claim, section)
+        ]
+        return self._fair_sample_claims_by_competitor(matched_claims, limit)
+
+    def _fair_sample_claims_by_competitor(
+        self,
+        claims: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or len(claims) <= limit:
+            return claims
+
+        grouped_claims: dict[str, list[dict[str, Any]]] = {}
+        competitor_order: list[str] = []
+        for claim in claims:
+            competitor_key = self._claim_competitor_key(claim)
+            if competitor_key not in grouped_claims:
+                grouped_claims[competitor_key] = []
+                competitor_order.append(competitor_key)
+            grouped_claims[competitor_key].append(claim)
+
+        sampled_claims: list[dict[str, Any]] = []
+        while len(sampled_claims) < limit and any(grouped_claims.values()):
+            for competitor_key in competitor_order:
+                competitor_claims = grouped_claims[competitor_key]
+                if not competitor_claims:
+                    continue
+                sampled_claims.append(competitor_claims.pop(0))
+                if len(sampled_claims) >= limit:
+                    break
+        return sampled_claims
+
+    def _claim_competitor_key(self, claim: dict[str, Any]) -> str:
+        competitors = claim.get("competitors", [])
+        if isinstance(competitors, list) and competitors:
+            return ", ".join(str(competitor) for competitor in competitors if competitor) or "综合"
+        if isinstance(competitors, str) and competitors:
+            return competitors
+        return "综合"
+
     def _matches_product_section(
         self,
         item: dict[str, Any],
         section: dict[str, Any],
     ) -> bool:
+        mapped_sections = self._mapped_product_sections_for_item(item)
+        if mapped_sections:
+            return section.get("id", "") in mapped_sections
+
         searchable = " ".join(
             str(item.get(key, ""))
             for key in (
@@ -1562,6 +1774,13 @@ class ReportWriterAgent:
         ).lower()
         aliases = [str(alias).lower() for alias in section.get("aliases", [])]
         return any(alias and alias in searchable for alias in aliases)
+
+    def _mapped_product_sections_for_item(self, item: dict[str, Any]) -> tuple[str, ...]:
+        for key in ("dimension", "dimension_id"):
+            dimension_id = str(item.get(key, "") or "")
+            if dimension_id in PRODUCT_SECTION_DIRECTION_MAP:
+                return PRODUCT_SECTION_DIRECTION_MAP[dimension_id]
+        return ()
 
     def _fallback_report(
         self,
@@ -1587,9 +1806,10 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
+                    website = self._validated_competitor_website(competitor)
                     lines.append(f"- **{competitor.get('name', '未知竞品')}**")
                     lines.append(f"  - 产品/品牌：{competitor.get('product', '公开资料不足') or '公开资料不足'}")
-                    lines.append(f"  - 官网：{competitor.get('website', '公开资料不足') or '公开资料不足'}")
+                    lines.append(f"  - 官网：{website or '公开资料不足'}")
                     lines.append(f"  - 分类：{competitor.get('category', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 备注：{competitor.get('notes', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 主要引用：{', '.join(competitor.get('evidence_ids', [])[:3]) or '公开资料不足'}")
@@ -1610,13 +1830,14 @@ class ReportWriterAgent:
         if competitors:
             for competitor in competitors:
                 if isinstance(competitor, dict):
+                    website = self._validated_competitor_website(competitor)
                     evidence_ids = ", ".join(competitor.get("evidence_ids", [])[:3])
                     lines.append(
                         "| "
                         f"{competitor.get('name', '') or '未知竞品'} | "
                         f"{competitor.get('product', '') or '公开资料不足'} | "
                         f"{competitor.get('category', '') or '公开资料不足'} | "
-                        f"{competitor.get('website', '') or '公开资料不足'} | "
+                        f"{website or '公开资料不足'} | "
                         f"{competitor.get('notes', '') or '公开资料不足'} |"
                         f"{evidence_ids or '公开资料不足'} |"
                     )
@@ -1632,16 +1853,22 @@ class ReportWriterAgent:
                 "",
                 "## 第四章：总结",
                 "",
-                "### SWOT 分析矩阵",
+                "### SWOT 因素矩阵",
                 "",
-                "| 类型 | 内容 | 引用 |",
+                "| S 优势 | W 劣势 |",
+                "| --- | --- |",
+                f"| 基于已接受证据的综合判断。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} | 未覆盖或证据不足的维度需继续补充。 |",
+                "",
+                "| O 机会 | T 威胁 |",
+                "| --- | --- |",
+                f"| 可围绕证据充分的差异化维度进一步定位。 | 竞品已有公开信号可能形成竞争压力。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
+                "",
+                "### TOWS 战略矩阵",
+                "",
+                "|  | O 机会 | T 威胁 |",
                 "| --- | --- | --- |",
-                "| Strengths 优势 | 基于已接受证据，部分竞品已形成可观察的公开竞争信号。 | "
-                f"{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
-                "| Weaknesses 劣势 | 未覆盖或证据不足的维度需要继续补充。 | 无 |",
-                "| Opportunities 机会 | 可围绕证据充分的差异化维度进一步定位产品机会。 | 无 |",
-                "| Threats 威胁 | 竞品已有公开定位、定价、客户或能力信号，可能形成直接竞争压力。 | "
-                f"{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
+                f"| **S 优势** | SO 增长型: 竞品可能以优势领域为核心扩展增量市场。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} | ST 多点型: 竞品可能通过多线布局对冲外部风险。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
+                "| **W 劣势** | WO 扭转型: 竞品可能借市场机会调整弱势领域。 | WT 防御型: 竞品弱势领域在外部压力下可能成为突破口。 |",
                 "",
                 "### 总结论述",
                 "",

@@ -176,6 +176,10 @@ class IndustryDirectionTemplate:
     display_name: str
     aliases: tuple[str, ...]
     known_competitors: tuple[str, ...]
+    gics_sector: str
+    archetypes: tuple[str, ...]
+    regulated_domains: tuple[str, ...]
+    direction_model: str
     default_directions: tuple[IndustryProfileDirection, ...]
 
 
@@ -192,6 +196,12 @@ def _load_templates(
                 known_competitors=tuple(
                     str(item) for item in raw.get("known_competitors", [])
                 ),
+                gics_sector=str(raw.get("gics_sector", "")),
+                archetypes=tuple(str(item) for item in raw.get("archetypes", [])),
+                regulated_domains=tuple(
+                    str(item) for item in raw.get("regulated_domains", [])
+                ),
+                direction_model=str(raw.get("direction_model", "legacy_template")),
                 default_directions=tuple(
                     {
                         "direction_id": str(item["direction_id"]),
@@ -212,10 +222,10 @@ def _load_templates(
 
 
 class IndustryDirectionSkill:
-    """Match an industry and return user-maintained default directions.
+    """Match an industry and return facet-composed default directions.
 
-    Industry-specific directions are deterministic template data from
-    rivalens.industry_templates.directions. The skill does not invent them.
+    Industry templates carry GICS sector, business archetype, and regulated-domain
+    facet tags. The concrete directions are deterministic L0/L1/L2 combinations.
     """
 
     def __init__(
@@ -248,7 +258,7 @@ class IndustryDirectionSkill:
             selected_direction_ids=selected_direction_ids,
             user_confirmed=user_confirmed,
             candidate_industries=candidate_industries,
-            selection_method="rule_template",
+            selection_method="rule_facet_template",
         )
 
     async def build_plan_with_fallback(
@@ -273,7 +283,7 @@ class IndustryDirectionSkill:
                 selected_direction_ids=selected_direction_ids,
                 user_confirmed=user_confirmed,
                 candidate_industries=candidate_industries,
-                selection_method="rule_template",
+                selection_method="rule_facet_template",
             )
 
         if self.llm_fallback and self.llm_fallback.is_configured():
@@ -303,7 +313,7 @@ class IndustryDirectionSkill:
                     selected_direction_ids=selected_direction_ids,
                     user_confirmed=user_confirmed,
                     candidate_industries=candidate_industries,
-                    selection_method="rule_template_after_llm_fallback_error",
+                    selection_method="rule_facet_template_after_llm_fallback_error",
                     fallback_reason=f"LLM fallback failed: {exc}",
                     fallback_model=self.llm_fallback.llm_spec,
                 )
@@ -315,7 +325,7 @@ class IndustryDirectionSkill:
             selected_direction_ids=selected_direction_ids,
             user_confirmed=user_confirmed,
             candidate_industries=candidate_industries,
-            selection_method="rule_template_fallback_unavailable",
+            selection_method="rule_facet_template_fallback_unavailable",
             fallback_reason=(
                 "Rule confidence was below threshold, but no industry LLM fallback "
                 "model was configured."
@@ -351,8 +361,7 @@ class IndustryDirectionSkill:
             self._template_direction_to_payload(direction, index)
             for index, direction in enumerate(template.default_directions, start=1)
         ]
-        planner_candidate_directions = self._planner_added_directions(default_directions)
-        planner_added_directions = planner_candidate_directions
+        planner_added_directions: list[AnalysisDirection] = []
         selected_default_directions = self._select_default_directions(
             default_directions,
             selected_direction_ids,
@@ -392,8 +401,11 @@ class IndustryDirectionSkill:
                 "suggested_directions": default_directions,
                 "planner_added_directions": planner_added_directions,
                 "planner_coverage_basis": [
-                    direction["name"] for direction in PLANNER_COVERAGE_DIRECTIONS
+                    "L0 通用方向",
+                    "L1 商业模式原型方向",
+                    "L2 受监管域方向",
                 ],
+                "direction_composition": self._direction_composition(template),
                 "scope_limited_by_query": False,
                 "auto_selected_directions": [],
                 "planner_supplement_skipped": False,
@@ -543,6 +555,22 @@ class IndustryDirectionSkill:
             if template.industry == industry_id:
                 return template
         return None
+
+    def _direction_composition(
+        self,
+        template: IndustryDirectionTemplate,
+    ) -> dict[str, Any]:
+        return {
+            "model": template.direction_model,
+            "gics_sector": template.gics_sector,
+            "archetypes": list(template.archetypes),
+            "regulated_domains": list(template.regulated_domains),
+            "layers": {
+                "l0": "common_business_analysis",
+                "l1": list(template.archetypes),
+                "l2": list(template.regulated_domains),
+            },
+        }
 
     def _detected_competitors(
         self,

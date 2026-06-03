@@ -26,32 +26,20 @@ export const useResearchHistory = () => {
           setHistory(localHistory);
         }
         
-        // Then try to fetch from server, but only for items we have locally
-        if (localHistory && localHistory.length > 0) {
-          // Extract IDs from local history to filter server results
-          const localIds = localHistory.map((item: ResearchHistoryItem) => item.id).join(',');
-          console.log(`Sending ${localHistory.length} local IDs to server for filtering`);
-          
-          const response = await fetch(`/api/reports?report_ids=${localIds}`);
-          if (response.ok) {
-            const data = await response.json();
-            
-            // Check if the response has the expected structure
-            if (data.reports && Array.isArray(data.reports)) {
-              console.log('Loaded research history from server:', data.reports.length, 'items');
-              
-              // Merge local and server history
-              await syncLocalHistoryWithServer(localHistory, data.reports);
-            } else {
-              console.warn('Server response did not contain reports array', data);
-              // Keep using the local history we already loaded
-            }
+        // Always fetch server history so refreshed browsers can recover runs
+        // that were completed by the backend after the page was closed.
+        const response = await fetch('/api/reports');
+        if (response.ok) {
+          const data = await response.json();
+
+          if (data.reports && Array.isArray(data.reports)) {
+            console.log('Loaded research history from server:', data.reports.length, 'items');
+            await syncLocalHistoryWithServer(localHistory || [], data.reports);
           } else {
-            console.warn('Failed to load history from server, status:', response.status);
-            // We're already using local history from above
+            console.warn('Server response did not contain reports array', data);
           }
         } else {
-          console.log('No local history found, skipping server fetch');
+          console.warn('Failed to load history from server, status:', response.status);
         }
       } catch (error) {
         console.error('Error fetching research history:', error);
