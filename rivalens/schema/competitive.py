@@ -100,6 +100,9 @@ class EvidenceItem(TypedDict, total=False):
     parent_branch_id: str | None
     collection_task_id: str
     research_task_id: str
+    analysis_dimension_id: str
+    schema_field_ids: list[str]
+    report_section_id: str
     dimension_id: str
     dimension_name: str
     title: str
@@ -138,6 +141,9 @@ class EvidenceCollectionTask(TypedDict, total=False):
     topic: str
     expansion_reason: str
     competitor: str
+    analysis_dimension_id: str
+    schema_field_ids: list[str]
+    report_section_id: str
     dimension_id: str
     dimension_name: str
     dimension_type: str
@@ -213,6 +219,9 @@ class ResearchBranch(TypedDict, total=False):
     depth: int
     path: list[str]
     competitor: str
+    analysis_dimension_id: str
+    schema_field_ids: list[str]
+    report_section_id: str
     dimension_id: str
     dimension_name: str
     dimension_type: str
@@ -247,6 +256,9 @@ class ResearchBrief(TypedDict, total=False):
     id: str
     branch_id: str
     competitor: str
+    analysis_dimension_id: str
+    schema_field_ids: list[str]
+    report_section_id: str
     dimension_id: str
     dimension_name: str
     objective: str
@@ -266,6 +278,9 @@ class ResearchTask(TypedDict, total=False):
     parent_task_id: str | None
     branch_id: str
     competitor: str
+    analysis_dimension_id: str
+    schema_field_ids: list[str]
+    report_section_id: str
     dimension_id: str
     dimension_name: str
     search_stage: SearchStage
@@ -290,6 +305,9 @@ class FollowUpTaskSpec(TypedDict, total=False):
     success_criteria: list[SuccessCriterion]
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
+    analysis_dimension_id: str
+    schema_field_ids: list[str]
+    report_section_id: str
     dimension_id: str
     dimension_name: str
     dimension_type: str
@@ -485,6 +503,11 @@ class CompetitorKnowledge(TypedDict, total=False):
 
 class AnalysisClaim(TypedDict, total=False):
     id: str
+    analysis_dimension_id: str
+    knowledge_fact_ids: list[str]
+    report_section_id: str
+    report_section_role: str
+    claim_source: str
     dimension: str
     branch_id: str
     evidence_review_id: str
@@ -499,6 +522,8 @@ class ClaimSupportReview(TypedDict, total=False):
     id: str
     claim_id: str
     branch_id: str
+    analysis_dimension_id: str
+    report_section_id: str
     dimension: str
     support_status: ClaimSupportStatus
     evidence_ids: list[str]
@@ -508,17 +533,44 @@ class ClaimSupportReview(TypedDict, total=False):
     confidence: float
 
 
+class ReportSectionTarget(TypedDict, total=False):
+    section_id: str
+    role: Literal["primary", "secondary"]
+    reason: str
+
+
 class AnalysisDimension(TypedDict, total=False):
     id: str
     name: str
     description: str
+    objective: str
     priority: str
+    source_hints: list[str]
+    success_criteria: list[SuccessCriterion]
     guiding_questions: list[str]
     search_intent: str
     minimum_coverage: list[str]
     risk_level: str
     expected_claim_types: list[str]
+    origin: str
+    required: bool
+    direction_id: str
+    schema_field_ids: list[str]
+    report_targets: list[ReportSectionTarget]
+    report_order: int
     rank: int
+
+
+class KnowledgeFact(TypedDict, total=False):
+    id: str
+    competitor: str
+    analysis_dimension_id: str
+    schema_field_id: str
+    statement: str
+    value: dict[str, Any]
+    evidence_ids: list[str]
+    report_section_id: str
+    confidence: float
 
 
 class AgentEvent(TypedDict, total=False):
@@ -694,8 +746,53 @@ class CompetitorKnowledgePayload(StrictPayloadModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
+class ReportSectionTargetPayload(StrictPayloadModel):
+    section_id: str
+    role: Literal["primary", "secondary"] = "primary"
+    reason: str = ""
+
+
+class AnalysisDimensionPayload(StrictPayloadModel):
+    id: str
+    name: str
+    description: str = ""
+    objective: str = ""
+    priority: str = "P1"
+    source_hints: list[str] = Field(default_factory=list)
+    success_criteria: list[dict[str, Any]] = Field(default_factory=list)
+    guiding_questions: list[str] = Field(default_factory=list)
+    search_intent: str = ""
+    minimum_coverage: list[str] = Field(default_factory=list)
+    risk_level: str = "medium"
+    expected_claim_types: list[str] = Field(default_factory=list)
+    origin: str = ""
+    required: bool = True
+    direction_id: str = ""
+    schema_field_ids: list[str] = Field(default_factory=list)
+    report_targets: list[ReportSectionTargetPayload] = Field(default_factory=list)
+    report_order: int = 0
+    rank: int = 0
+
+
+class KnowledgeFactPayload(StrictPayloadModel):
+    id: str
+    competitor: str = ""
+    analysis_dimension_id: str = ""
+    schema_field_id: str = ""
+    statement: str
+    value: dict[str, Any] = Field(default_factory=dict)
+    evidence_ids: list[str] = Field(default_factory=list)
+    report_section_id: str = ""
+    confidence: float = Field(default=0.5, ge=0, le=1)
+
+
 class AnalysisClaimPayload(StrictPayloadModel):
     id: str
+    analysis_dimension_id: str = ""
+    knowledge_fact_ids: list[str] = Field(default_factory=list)
+    report_section_id: str = ""
+    report_section_role: str = ""
+    claim_source: str = ""
     dimension: str
     branch_id: str | None = None
     evidence_review_id: str | None = None
@@ -721,11 +818,13 @@ class SchemaSelectionMessagePayload(StrictPayloadModel):
     active_schema: ActiveKnowledgeSchemaPayloadModel
     candidate_count: int = Field(ge=0)
     industry_direction_plan: IndustryDirectionPlanPayload | None = None
+    analysis_dimensions: list[AnalysisDimensionPayload] = Field(default_factory=list)
 
 
 class SchemaMessagePayload(StrictPayloadModel):
     knowledge_count: int = Field(ge=0)
     competitor_knowledge: list[CompetitorKnowledgePayload] = Field(default_factory=list)
+    knowledge_facts: list[KnowledgeFactPayload] = Field(default_factory=list)
 
 
 class AnalysisMessagePayload(StrictPayloadModel):
@@ -737,6 +836,8 @@ class ClaimSupportReviewPayload(StrictPayloadModel):
     id: str
     claim_id: str
     branch_id: str = ""
+    analysis_dimension_id: str = ""
+    report_section_id: str = ""
     dimension: str = ""
     support_status: ClaimSupportStatus
     evidence_ids: list[str] = Field(default_factory=list)
@@ -932,6 +1033,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     competitors: list[Competitor]
     active_knowledge_schema: ActiveKnowledgeSchema
     industry_direction_plan: IndustryDirectionPlan
+    analysis_dimensions: list[AnalysisDimension]
     research_branches: list[ResearchBranch]
     research_briefs: list[ResearchBrief]
     research_tasks: list[ResearchTask]
@@ -940,6 +1042,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     file_context: FileContext
     evidence_items: list[EvidenceItem]
     direction_results: list[DirectionResult]
+    knowledge_facts: list[KnowledgeFact]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
     claim_support_reviews: list[ClaimSupportReview]

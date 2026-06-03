@@ -411,6 +411,21 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             "industry_direction_plan",
             result["messages"][-1]["payload"],
         )
+        analysis_dimensions = result["analysis_dimensions"]
+        user_dimension = next(
+            dimension
+            for dimension in analysis_dimensions
+            if dimension["id"] == "user_direction_1"
+        )
+        self.assertEqual(user_dimension["schema_field_ids"], ["direction_user_direction_1"])
+        self.assertEqual(
+            user_dimension["report_targets"][0]["section_id"],
+            "target_users",
+        )
+        self.assertEqual(
+            result["messages"][-1]["payload"]["analysis_dimensions"],
+            analysis_dimensions,
+        )
         platform_extension = next(
             extension
             for extension in direction_extensions

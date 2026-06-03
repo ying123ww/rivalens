@@ -84,6 +84,11 @@ class ClaimSupportReviewer:
                     "id": f"claim_support_{claim_id or len(reviews) + 1}",
                     "claim_id": claim_id,
                     "branch_id": claim.get("branch_id", ""),
+                    "analysis_dimension_id": claim.get(
+                        "analysis_dimension_id",
+                        claim.get("dimension", ""),
+                    ),
+                    "report_section_id": claim.get("report_section_id", ""),
                     "dimension": claim.get("dimension", ""),
                     "support_status": status,
                     "evidence_ids": evidence_ids,
@@ -278,7 +283,11 @@ class ClaimSupportReviewer:
         if support_status == "supported" or not allow_verification:
             return []
 
-        dimension = str(claim.get("dimension", "source_evidence"))
+        dimension = str(
+            claim.get("analysis_dimension_id")
+            or claim.get("dimension")
+            or "source_evidence"
+        )
         claim_text = str(claim.get("claim", ""))
         competitors = claim.get("competitors", []) or []
         competitor = competitors[0] if competitors else ""
@@ -317,6 +326,8 @@ class ClaimSupportReviewer:
                 "reason": "Claim support review marked this claim as weak or unverifiable.",
                 "search_stage": "verification",
                 "competitor": competitor,
+                "analysis_dimension_id": dimension,
+                "report_section_id": claim.get("report_section_id", ""),
                 "dimension_id": dimension,
                 "parent_branch_id": claim.get("branch_id", ""),
                 "claim_ids": [claim.get("id", "")],

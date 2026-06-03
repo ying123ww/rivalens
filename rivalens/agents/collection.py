@@ -10,6 +10,7 @@ from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.search_query_builder import SearchQueryBuilder
 from rivalens.agents.success_criteria import normalize_success_criteria
 from rivalens.file_context import format_rag_context
+from rivalens.report_sections import primary_report_section_id
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
 from rivalens.research.evidence_collector import _trace_collection_task
 from rivalens.research.trace_context import langsmith_extra_for_trace_context
@@ -79,6 +80,10 @@ class CollectionAgent:
             "active_schema",
             {},
         )
+        analysis_dimensions = state.get("analysis_dimensions") or schema_payload.get(
+            "analysis_dimensions",
+            [],
+        )
         query = task.get("query", "")
         competitors = state.get("competitors") or task.get("competitors") or []
         verbose = bool(task.get("verbose", True))
@@ -105,6 +110,7 @@ class CollectionAgent:
                 query,
                 competitors,
                 active_schema,
+                analysis_dimensions,
             )
             root_branches, root_branch_limit_exceeded = (
                 self._limit_root_branches_per_competitor(root_branches)
@@ -169,6 +175,10 @@ class CollectionAgent:
                         {
                             "collection_task_id": collection_task["id"],
                             "branch_id": branch["id"],
+                            "analysis_dimension_id": collection_task.get(
+                                "analysis_dimension_id",
+                                collection_task["dimension_id"],
+                            ),
                             "dimension_id": collection_task["dimension_id"],
                             "competitor": collection_task["competitor"],
                             "error": str(result),
@@ -211,8 +221,13 @@ class CollectionAgent:
                         "research_task_id": collection_task.get("research_task_id", ""),
                         "search_stage": collection_task.get("search_stage", ""),
                         "generated_from_gap": collection_task.get("generated_from_gap", ""),
+                        "analysis_dimension_id": collection_task.get(
+                            "analysis_dimension_id",
+                            collection_task["dimension_id"],
+                        ),
                         "dimension_id": collection_task["dimension_id"],
                         "dimension_name": collection_task["dimension_name"],
+                        "report_section_id": collection_task.get("report_section_id", ""),
                         "collection_task_id": collection_task["id"],
                         "context": result["context"],
                         "evidence_ids": [source.get("id", "") for source in sources],
@@ -261,7 +276,10 @@ class CollectionAgent:
             "collection_task_count": processed_branch_count,
             "failed_task_count": len(failed_tasks),
             "dimensions": sorted(
-                {branch["dimension_id"] for branch in research_branches}
+                {
+                    branch.get("analysis_dimension_id") or branch["dimension_id"]
+                    for branch in research_branches
+                }
             ),
         }
         message = create_agent_message(
@@ -317,7 +335,11 @@ class CollectionAgent:
                         "max_root_branches_per_competitor": self.max_root_branch_hard_limit,
                         "max_concurrent_collections": self.max_concurrent_collections,
                         "dimensions": sorted(
-                            {branch["dimension_id"] for branch in research_branches}
+                            {
+                                branch.get("analysis_dimension_id")
+                                or branch["dimension_id"]
+                                for branch in research_branches
+                            }
                         ),
                     },
                     "output": {
@@ -408,14 +430,17 @@ class CollectionAgent:
         query: str,
         competitors: list[Any],
         active_schema: dict[str, Any],
+        analysis_dimensions: list[dict[str, Any]] | None = None,
     ) -> list[ResearchBranch]:
         normalized_competitors = self._normalize_competitors(competitors)
-        dimensions = self._schema_dimensions(active_schema)
+        dimensions = self._collection_dimensions(analysis_dimensions or [], active_schema)
         branches = []
 
         for competitor in normalized_competitors:
             for dimension in [self._competitor_profile_dimension(), *dimensions]:
-                branch_id = self._task_id(competitor, dimension["id"])
+                analysis_dimension_id = dimension.get("analysis_dimension_id", dimension["id"])
+                report_section_id = dimension.get("report_section_id", "")
+                branch_id = self._task_id(competitor, analysis_dimension_id)
                 query_plan = self.search_query_builder.build(
                     original_query=query,
                     competitor=competitor,
@@ -430,9 +455,12 @@ class CollectionAgent:
                         "research_brief_id": f"brief_{branch_id}",
                         "parent_id": None,
                         "depth": 0,
-                        "path": [dimension["id"]],
+                        "path": [analysis_dimension_id],
                         "competitor": competitor,
-                        "dimension_id": dimension["id"],
+                        "analysis_dimension_id": analysis_dimension_id,
+                        "schema_field_ids": list(dimension.get("schema_field_ids", [])),
+                        "report_section_id": report_section_id,
+                        "dimension_id": analysis_dimension_id,
                         "dimension_name": dimension["name"],
                         "dimension_type": dimension["type"],
                         "parent_dimension_id": dimension.get("parent_dimension_id", ""),
@@ -455,7 +483,7 @@ class CollectionAgent:
                         "guiding_questions": dimension.get("guiding_questions", []),
                         "evidence_ids": [],
                         "status": "active",
-                        "expansion_reason": "Root branch generated from active schema industry extension.",
+                        "expansion_reason": "Root branch generated from planned analysis dimension.",
                     }
                 )
 
@@ -483,6 +511,7 @@ class CollectionAgent:
     def _competitor_profile_dimension(self) -> dict[str, Any]:
         return {
             "id": "competitor_profile",
+            "analysis_dimension_id": "competitor_profile",
             "name": "竞品基础信息",
             "type": "profile",
             "description": (
@@ -506,6 +535,8 @@ class CollectionAgent:
             ],
             "risk_level": "low",
             "expected_claim_types": ["competitor_profile"],
+            "schema_field_ids": [],
+            "report_section_id": "",
         }
 
     def _build_verification_branches(
@@ -519,7 +550,11 @@ class CollectionAgent:
             query = task_spec.get("query", "")
             if not query:
                 continue
-            dimension_id = task_spec.get("dimension_id") or "source_evidence"
+            dimension_id = (
+                task_spec.get("analysis_dimension_id")
+                or task_spec.get("dimension_id")
+                or "source_evidence"
+            )
             dimension = dimensions_by_id.get(dimension_id, {})
             branch_id = f"verify_{self._slug(task_spec.get('generated_from_gap', str(index)))}_{index}"
             branches.append(
@@ -530,6 +565,15 @@ class CollectionAgent:
                     "depth": 0,
                     "path": [dimension_id, task_spec.get("generated_from_gap", "verification")],
                     "competitor": task_spec.get("competitor", ""),
+                    "analysis_dimension_id": dimension_id,
+                    "schema_field_ids": list(
+                        task_spec.get("schema_field_ids")
+                        or dimension.get("schema_field_ids", [])
+                    ),
+                    "report_section_id": task_spec.get(
+                        "report_section_id",
+                        dimension.get("report_section_id", ""),
+                    ),
                     "dimension_id": dimension_id,
                     "dimension_name": dimension.get("name", dimension_id.replace("_", " ")),
                     "dimension_type": "claim_verification",
@@ -565,14 +609,25 @@ class CollectionAgent:
         state: CompetitorAnalysisState,
     ) -> dict[str, dict[str, Any]]:
         lookup: dict[str, dict[str, Any]] = {}
+        for dimension in state.get("analysis_dimensions", []):
+            dimension_id = dimension.get("id", "")
+            if not dimension_id:
+                continue
+            lookup[dimension_id] = {
+                **dimension,
+                "name": dimension.get("name", dimension_id.replace("_", " ")),
+                "report_section_id": primary_report_section_id(dimension),
+            }
         for branch in state.get("research_branches", []):
-            dimension_id = branch.get("dimension_id", "")
+            dimension_id = branch.get("analysis_dimension_id") or branch.get("dimension_id", "")
             if not dimension_id:
                 continue
             lookup[dimension_id] = {
                 "id": dimension_id,
                 "name": branch.get("dimension_name", dimension_id.replace("_", " ")),
                 "source_hints": branch.get("source_hints", []),
+                "schema_field_ids": branch.get("schema_field_ids", []),
+                "report_section_id": branch.get("report_section_id", ""),
             }
         active_schema = state.get("active_knowledge_schema", {})
         for dimension in self._schema_dimensions(active_schema):
@@ -594,6 +649,12 @@ class CollectionAgent:
                     "id": branch.get("research_brief_id", f"brief_{branch['id']}"),
                     "branch_id": branch["id"],
                     "competitor": competitor,
+                    "analysis_dimension_id": branch.get(
+                        "analysis_dimension_id",
+                        branch.get("dimension_id", ""),
+                    ),
+                    "schema_field_ids": list(branch.get("schema_field_ids", [])),
+                    "report_section_id": branch.get("report_section_id", ""),
                     "dimension_id": branch.get("dimension_id", ""),
                     "dimension_name": dimension_name,
                     "objective": (
@@ -638,6 +699,12 @@ class CollectionAgent:
             "parent_task_id": branch.get("parent_task_id"),
             "branch_id": branch["id"],
             "competitor": branch.get("competitor", ""),
+            "analysis_dimension_id": branch.get(
+                "analysis_dimension_id",
+                branch.get("dimension_id", ""),
+            ),
+            "schema_field_ids": list(branch.get("schema_field_ids", [])),
+            "report_section_id": branch.get("report_section_id", ""),
             "dimension_id": branch.get("dimension_id", ""),
             "dimension_name": branch.get("dimension_name", ""),
             "search_stage": search_stage,
@@ -677,6 +744,12 @@ class CollectionAgent:
             "topic": branch.get("topic", ""),
             "expansion_reason": branch.get("expansion_reason", ""),
             "competitor": branch.get("competitor", ""),
+            "analysis_dimension_id": branch.get(
+                "analysis_dimension_id",
+                branch.get("dimension_id", ""),
+            ),
+            "schema_field_ids": list(branch.get("schema_field_ids", [])),
+            "report_section_id": branch.get("report_section_id", ""),
             "dimension_id": branch.get("dimension_id", ""),
             "dimension_name": branch.get("dimension_name", ""),
             "dimension_type": branch.get("dimension_type", ""),
@@ -704,9 +777,22 @@ class CollectionAgent:
             if not query:
                 continue
             topic = follow_up_spec.get("objective") or f"{parent['topic']} follow-up {index}"
-            dimension_id = follow_up_spec.get("dimension_id", parent.get("dimension_id", ""))
+            dimension_id = (
+                follow_up_spec.get("analysis_dimension_id")
+                or follow_up_spec.get("dimension_id")
+                or parent.get("analysis_dimension_id")
+                or parent.get("dimension_id", "")
+            )
             dimension_name = follow_up_spec.get("dimension_name", parent.get("dimension_name", ""))
             dimension_type = follow_up_spec.get("dimension_type", parent.get("dimension_type", ""))
+            schema_field_ids = list(
+                follow_up_spec.get("schema_field_ids")
+                or parent.get("schema_field_ids", [])
+            )
+            report_section_id = follow_up_spec.get(
+                "report_section_id",
+                parent.get("report_section_id", ""),
+            )
             child_id = f"{parent['id']}_d{parent.get('depth', 0) + 1}_{index}"
             success_criteria = follow_up_spec.get(
                 "success_criteria",
@@ -727,6 +813,9 @@ class CollectionAgent:
                     "depth": parent.get("depth", 0) + 1,
                     "path": list(parent.get("path", [])) + [topic],
                     "competitor": parent.get("competitor", ""),
+                    "analysis_dimension_id": dimension_id,
+                    "schema_field_ids": schema_field_ids,
+                    "report_section_id": report_section_id,
                     "dimension_id": dimension_id,
                     "dimension_name": dimension_name,
                     "dimension_type": dimension_type,
@@ -778,6 +867,50 @@ class CollectionAgent:
             normalized.append(name)
         return [name for name in normalized if name] or [""]
 
+    def _collection_dimensions(
+        self,
+        analysis_dimensions: list[dict[str, Any]],
+        active_schema: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not analysis_dimensions:
+            return self._schema_dimensions(active_schema)
+
+        dimensions = []
+        for dimension in analysis_dimensions:
+            dimension_id = dimension.get("id", "")
+            if not dimension_id:
+                continue
+            normalized = {
+                **dimension,
+                "id": dimension_id,
+                "analysis_dimension_id": dimension_id,
+                "name": dimension.get("name", dimension_id.replace("_", " ").title()),
+                "type": "analysis_dimension",
+                "description": dimension.get(
+                    "description",
+                    dimension_id.replace("_", " "),
+                ),
+                "source_hints": self._ranked_source_hints(
+                    list(dimension.get("source_hints", [])),
+                ),
+                "guiding_questions": list(dimension.get("guiding_questions", [])),
+                "success_criteria": list(dimension.get("success_criteria", [])),
+                "search_intent": dimension.get("search_intent", ""),
+                "minimum_coverage": list(
+                    dimension.get("minimum_coverage")
+                    or ["At least two source-backed public evidence items."]
+                ),
+                "risk_level": dimension.get("risk_level", "medium"),
+                "expected_claim_types": list(
+                    dimension.get("expected_claim_types")
+                    or ["industry_specific_signal"],
+                ),
+                "schema_field_ids": list(dimension.get("schema_field_ids", [])),
+            }
+            normalized["report_section_id"] = primary_report_section_id(normalized)
+            dimensions.append(normalized)
+        return dimensions
+
     def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, Any]]:
         dimensions = []
 
@@ -806,6 +939,15 @@ class CollectionAgent:
                     "minimum_coverage": ["At least two source-backed public evidence items."],
                     "risk_level": "medium",
                     "expected_claim_types": ["industry_specific_signal"],
+                    "schema_field_ids": [extension_id],
+                    "report_section_id": primary_report_section_id(
+                        {
+                            "id": extension_id,
+                            "name": extension.get("name", ""),
+                            "description": extension.get("description", ""),
+                            "source_hints": extension.get("source_hints", []),
+                        }
+                    ),
                 }
             )
 
@@ -981,7 +1123,13 @@ class CollectionAgent:
                 "research_task_id",
                 collection_task.get("research_task_id", ""),
             )
-            item["dimension_id"] = collection_task["dimension_id"]
+            item["analysis_dimension_id"] = collection_task.get(
+                "analysis_dimension_id",
+                collection_task["dimension_id"],
+            )
+            item["schema_field_ids"] = list(collection_task.get("schema_field_ids", []))
+            item["report_section_id"] = collection_task.get("report_section_id", "")
+            item["dimension_id"] = item["analysis_dimension_id"]
             item["dimension_name"] = collection_task["dimension_name"]
             assigned.append(item)
         return assigned

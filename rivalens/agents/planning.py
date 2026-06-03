@@ -14,11 +14,13 @@ from rivalens.file_context import (
 )
 from rivalens.schema import (
     ActiveKnowledgeSchema,
+    AnalysisDimension,
     Competitor,
     CompetitorAnalysisState,
     IndustryDirectionPlan,
     SchemaExtension,
 )
+from rivalens.report_sections import report_targets_for_dimension
 from rivalens.schema_registry import CORE_SCHEMA_FIELDS, SchemaRegistry
 
 
@@ -74,6 +76,7 @@ def _planning_trace_outputs(output: Any) -> dict[str, Any]:
         return {"output_type": type(output).__name__}
 
     active_schema = output.get("active_knowledge_schema") or {}
+    analysis_dimensions = output.get("analysis_dimensions") or []
     selected_industry = active_schema.get("selected_industry") or {}
     industry_direction_plan = output.get("industry_direction_plan") or {}
     final_analysis_plan = industry_direction_plan.get("final_analysis_plan") or {}
@@ -86,6 +89,7 @@ def _planning_trace_outputs(output: Any) -> dict[str, Any]:
         "active_schema_id": active_schema.get("id", ""),
         "candidate_industry_count": len(active_schema.get("candidate_industries", [])),
         "industry_extension_count": len(active_schema.get("industry_extensions", [])),
+        "analysis_dimension_count": len(analysis_dimensions),
         "detected_competitors": list(
             industry_direction_plan.get("detected_competitors") or []
         ),
@@ -201,6 +205,7 @@ class PlanningAgent:
             file_context,
             industry_direction_plan,
         )
+        analysis_dimensions = self._analysis_dimensions(industry_direction_plan)
         candidate_industries = active_schema.get("candidate_industries", [])
         industry_extensions = active_schema.get("industry_extensions", [])
 
@@ -219,6 +224,7 @@ class PlanningAgent:
                     "planning_query": planning_query,
                     "candidate_industries": candidate_industries,
                     "industry_extensions": industry_extensions,
+                    "analysis_dimensions": analysis_dimensions,
                     "industry_direction_plan": industry_direction_plan,
                     "file_context_summary": file_context.get("summary", ""),
                 },
@@ -233,6 +239,7 @@ class PlanningAgent:
                 "active_schema": active_schema,
                 "candidate_count": len(candidate_industries),
                 "industry_direction_plan": industry_direction_plan,
+                "analysis_dimensions": analysis_dimensions,
             },
         )
 
@@ -240,6 +247,7 @@ class PlanningAgent:
             "competitors": normalized,
             "active_knowledge_schema": active_schema,
             "industry_direction_plan": industry_direction_plan,
+            "analysis_dimensions": analysis_dimensions,
             "file_context": file_context,
             "research_artifacts": research_artifacts,
             "messages": state.get("messages", []) + [message],
@@ -300,6 +308,7 @@ class PlanningAgent:
                             "",
                         ),
                         "extension_count": len(industry_extensions),
+                        "analysis_dimension_count": len(analysis_dimensions),
                     },
                 }
             ],
@@ -458,6 +467,63 @@ class PlanningAgent:
                 }
             )
         return extensions
+
+    def _analysis_dimensions(
+        self,
+        industry_direction_plan: IndustryDirectionPlan,
+    ) -> list[AnalysisDimension]:
+        dimensions: list[AnalysisDimension] = []
+        for index, direction in enumerate(
+            industry_direction_plan.get("final_directions", []),
+            start=1,
+        ):
+            direction_id = direction.get("direction_id", "")
+            if not direction_id:
+                continue
+            dimension_id = self._slug(direction_id)
+            schema_field_id = f"direction_{dimension_id}"
+            description = " ".join(
+                part
+                for part in [
+                    direction.get("description", ""),
+                    direction.get("search_focus", ""),
+                    direction.get("reason", ""),
+                ]
+                if part
+            )[:500]
+            source_hints = list(direction.get("source_hints", []))
+            name = direction.get("name", direction_id)
+            dimensions.append(
+                {
+                    "id": dimension_id,
+                    "name": name,
+                    "description": description,
+                    "objective": direction.get("search_focus", "") or description,
+                    "priority": "P1" if direction.get("required", True) else "P2",
+                    "source_hints": source_hints,
+                    "success_criteria": [],
+                    "guiding_questions": [],
+                    "search_intent": direction.get("search_focus", ""),
+                    "minimum_coverage": [
+                        "At least two source-backed public evidence items.",
+                    ],
+                    "risk_level": "medium",
+                    "expected_claim_types": ["industry_specific_signal"],
+                    "origin": direction.get("origin", ""),
+                    "required": direction.get("required", True),
+                    "direction_id": direction_id,
+                    "schema_field_ids": [schema_field_id],
+                    "report_targets": report_targets_for_dimension(
+                        dimension_id,
+                        name=name,
+                        description=description,
+                        source_hints=source_hints,
+                    ),
+                    "report_order": index,
+                    "rank": index,
+                }
+            )
+        return dimensions
 
     def _merge_candidate_industries(
         self,

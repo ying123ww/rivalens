@@ -120,6 +120,14 @@ AnalysisDimension
 
 ## 推荐对象模型
 
+## 当前实现落点
+
+- 固定 10 个第三章 product sections 和默认维度映射集中在 `rivalens/report_sections.py`。
+- `PlanningAgent` 负责从 `IndustryDirectionPlan.final_directions` 生成 `state["analysis_dimensions"]`，并为每个维度写入 `report_targets`。
+- `CollectionAgent` 正常路径优先消费 `analysis_dimensions`，旧的 `active_knowledge_schema.industry_extensions` 仅作为兼容入口。
+- `EvidenceItem`、`KnowledgeFact`、`AnalysisClaim` 和 ClaimSupport verification task 均应保留 `analysis_dimension_id`；报告正文路由使用 `report_section_id`。
+- `ReportWriterAgent` 仍输出固定 10 小节，但优先按 `report_section_id` / `report_targets` 选择 claims，aliases 只作为兼容 fallback。
+
 ### AnalysisDimension
 
 `AnalysisDimension` 是主线对象，由 PlanningAgent 写入 state。

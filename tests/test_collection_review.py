@@ -450,6 +450,54 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertEqual(branches[1]["source_hints"], ["official_site", "news"])
         self.assertEqual(branches[1]["search_stage"], "focused")
 
+    def test_collection_root_branches_prefer_analysis_dimensions(self):
+        branches = CollectionAgent()._build_root_branches(
+            query="Compare Acme and Beta",
+            competitors=[{"name": "Acme"}],
+            active_schema={
+                "selected_industry": {"name": "Productivity SaaS"},
+                "industry_extensions": [
+                    {
+                        "id": "direction_legacy_security",
+                        "name": "Legacy security",
+                    }
+                ],
+            },
+            analysis_dimensions=[
+                {
+                    "id": "baseline_trust_security_compliance",
+                    "name": "信任、安全与合规",
+                    "description": "Security and compliance signals.",
+                    "source_hints": ["trust_center", "official_site"],
+                    "schema_field_ids": ["direction_baseline_trust_security_compliance"],
+                    "report_targets": [
+                        {
+                            "section_id": "product_features",
+                            "role": "primary",
+                            "reason": "Security is a product capability.",
+                        }
+                    ],
+                }
+            ],
+        )
+
+        dimension_branch = branches[1]
+
+        self.assertEqual(len(branches), 2)
+        self.assertEqual(
+            dimension_branch["analysis_dimension_id"],
+            "baseline_trust_security_compliance",
+        )
+        self.assertEqual(
+            dimension_branch["dimension_id"],
+            "baseline_trust_security_compliance",
+        )
+        self.assertEqual(
+            dimension_branch["schema_field_ids"],
+            ["direction_baseline_trust_security_compliance"],
+        )
+        self.assertEqual(dimension_branch["report_section_id"], "product_features")
+
     def test_collection_root_branches_use_chinese_queries_for_chinese_products(self):
         branches = CollectionAgent()._build_root_branches(
             query="帮我对比钉钉和飞书，只关注产品定位和定价",
@@ -771,6 +819,43 @@ class CollectionReviewTest(unittest.TestCase):
                 for query in collection_task["search_queries"]
             )
         )
+
+    def test_assign_evidence_ids_preserves_analysis_dimension_mapping(self):
+        collection_task = {
+            "id": "collect_acme_security",
+            "research_task_id": "task_collect_acme_security",
+            "branch_id": "collect_acme_security",
+            "competitor": "Acme",
+            "analysis_dimension_id": "baseline_trust_security_compliance",
+            "schema_field_ids": ["direction_baseline_trust_security_compliance"],
+            "report_section_id": "product_features",
+            "dimension_id": "baseline_trust_security_compliance",
+            "dimension_name": "信任、安全与合规",
+        }
+
+        assigned = CollectionAgent()._assign_evidence_ids(
+            [
+                {
+                    "title": "Acme trust center",
+                    "url": "https://acme.example/trust",
+                    "source_type": "trust_center",
+                    "excerpt": "Acme documents security controls.",
+                }
+            ],
+            0,
+            collection_task,
+        )
+
+        self.assertEqual(
+            assigned[0]["analysis_dimension_id"],
+            "baseline_trust_security_compliance",
+        )
+        self.assertEqual(assigned[0]["dimension_id"], "baseline_trust_security_compliance")
+        self.assertEqual(
+            assigned[0]["schema_field_ids"],
+            ["direction_baseline_trust_security_compliance"],
+        )
+        self.assertEqual(assigned[0]["report_section_id"], "product_features")
 
     def test_short_queries_are_generic_across_competitor_names(self):
         forbidden_demo_aliases = ["Feishu", "Lark", "DingTalk", "飞书", "钉钉"]
@@ -1950,6 +2035,77 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Acme pricing", serialized)
         self.assertNotIn("Rejected scrape", serialized)
 
+    def test_knowledge_structuring_builds_facts_and_precise_extension_evidence(self):
+        state = {
+            "active_knowledge_schema": {
+                "id": "schema_1",
+                "industry_extensions": [
+                    {
+                        "id": "direction_baseline_trust_security_compliance",
+                        "name": "信任、安全与合规",
+                    },
+                    {
+                        "id": "direction_business_model_pricing",
+                        "name": "商业模式",
+                    },
+                ],
+            },
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "analysis_dimension_id": "baseline_trust_security_compliance",
+                    "schema_field_ids": ["direction_baseline_trust_security_compliance"],
+                    "report_section_id": "product_features",
+                    "dimension_id": "baseline_trust_security_compliance",
+                    "dimension_name": "信任、安全与合规",
+                    "title": "Acme trust center",
+                    "excerpt": "Acme documents SSO and audit log controls.",
+                    "source_type": "trust_center",
+                    "confidence": 0.8,
+                },
+                {
+                    "id": "ev_2",
+                    "competitor": "Acme",
+                    "analysis_dimension_id": "business_model_pricing",
+                    "schema_field_ids": ["direction_business_model_pricing"],
+                    "report_section_id": "business_model",
+                    "dimension_id": "business_model_pricing",
+                    "dimension_name": "商业模式",
+                    "title": "Acme pricing",
+                    "excerpt": "Acme publishes team pricing.",
+                    "source_type": "pricing_page",
+                    "confidence": 0.9,
+                },
+            ],
+            "evidence_reviews": [{"accepted_evidence_ids": ["ev_1", "ev_2"]}],
+            "messages": [],
+        }
+
+        result = asyncio.run(KnowledgeStructuringAgent().run(state))
+        knowledge = result["competitor_knowledge"][0]
+        facts_by_dimension = {
+            fact["analysis_dimension_id"]: fact
+            for fact in result["knowledge_facts"]
+        }
+
+        self.assertEqual(
+            knowledge["industry_extensions"]["direction_baseline_trust_security_compliance"]["evidence_ids"],
+            ["ev_1"],
+        )
+        self.assertEqual(
+            knowledge["industry_extensions"]["direction_business_model_pricing"]["evidence_ids"],
+            ["ev_2"],
+        )
+        self.assertEqual(
+            facts_by_dimension["baseline_trust_security_compliance"]["report_section_id"],
+            "product_features",
+        )
+        self.assertEqual(
+            facts_by_dimension["baseline_trust_security_compliance"]["evidence_ids"],
+            ["ev_1"],
+        )
+
     def test_knowledge_structuring_skips_unreadable_feature_text(self):
         state = {
             "active_knowledge_schema": {"id": "schema_1"},
@@ -2021,6 +2177,55 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Acme Pricing Model:", claim["claim"])
         self.assertIn("Acme publishes a starter pricing plan", claim["claim"])
         self.assertNotIn("Rejected scrape", claim["claim"])
+
+    def test_analysis_prefers_knowledge_facts_with_report_section_mapping(self):
+        state = {
+            "analysis_dimensions": [
+                {
+                    "id": "baseline_trust_security_compliance",
+                    "name": "信任、安全与合规",
+                    "report_targets": [
+                        {
+                            "section_id": "product_features",
+                            "role": "primary",
+                            "reason": "Security capability.",
+                        }
+                    ],
+                }
+            ],
+            "knowledge_facts": [
+                {
+                    "id": "fact_1",
+                    "competitor": "Acme",
+                    "analysis_dimension_id": "baseline_trust_security_compliance",
+                    "statement": "Acme documents SSO and audit log controls.",
+                    "evidence_ids": ["ev_1"],
+                    "report_section_id": "product_features",
+                    "confidence": 0.82,
+                }
+            ],
+            "evidence_items": [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "analysis_dimension_id": "baseline_trust_security_compliance",
+                    "dimension_id": "baseline_trust_security_compliance",
+                    "title": "Acme trust center",
+                    "excerpt": "Acme documents SSO and audit log controls.",
+                }
+            ],
+            "evidence_reviews": [],
+            "messages": [],
+        }
+
+        result = asyncio.run(AnalysisAgent().run(state))
+        claim = result["analysis_claims"][0]
+
+        self.assertEqual(claim["claim_source"], "knowledge_fact")
+        self.assertEqual(claim["analysis_dimension_id"], "baseline_trust_security_compliance")
+        self.assertEqual(claim["knowledge_fact_ids"], ["fact_1"])
+        self.assertEqual(claim["report_section_id"], "product_features")
+        self.assertEqual(claim["evidence_ids"], ["ev_1"])
 
     def test_analysis_keeps_partial_accepted_evidence_from_expand_reviews(self):
         state = {
@@ -2723,6 +2928,24 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertFalse(
             agent._matches_product_section(
                 {"dimension": "direction_user_reputation"},
+                sections_by_id["business_model"],
+            )
+        )
+        self.assertTrue(
+            agent._matches_product_section(
+                {
+                    "dimension": "unknown_dynamic_dimension",
+                    "report_section_id": "product_features",
+                },
+                sections_by_id["product_features"],
+            )
+        )
+        self.assertFalse(
+            agent._matches_product_section(
+                {
+                    "dimension": "unknown_dynamic_dimension",
+                    "report_section_id": "product_features",
+                },
                 sections_by_id["business_model"],
             )
         )

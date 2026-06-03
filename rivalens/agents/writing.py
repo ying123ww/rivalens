@@ -6,112 +6,17 @@ from urllib.parse import urlparse
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState
+from rivalens.report_sections import (
+    PRODUCT_ANALYSIS_SECTIONS,
+    PRODUCT_SECTION_DIRECTION_MAP,
+    primary_report_section_id,
+    report_targets_for_dimension,
+)
 from rivalens.research.config import Config
 from rivalens.research.prompts import get_prompt_family
 from rivalens.research.skills.writer import ReportGenerator
 from rivalens.research.utils.enum import ReportSource, ReportType, Tone
 
-
-PRODUCT_ANALYSIS_SECTIONS: list[dict[str, Any]] = [
-    {
-        "number": "3.1",
-        "id": "strategic_positioning",
-        "title": "战略定位",
-        "guiding_question": "这个产品把自己定位成什么？和竞品的定位差异在哪？",
-        "source_constraints": "官网首页、公开采访、品牌宣传",
-        "aliases": ["strategic_positioning", "positioning", "战略定位", "市场卡位", "品牌宣传"],
-    },
-    {
-        "number": "3.2",
-        "id": "target_users",
-        "title": "目标用户",
-        "guiding_question": "这个产品主要服务谁？用户画像是什么？",
-        "source_constraints": "官网描述、定价页暗示、公开报道",
-        "aliases": ["target_users", "target_users_personas", "user_personas", "persona", "目标用户", "用户画像", "使用场景"],
-    },
-    {
-        "number": "3.3",
-        "id": "business_model",
-        "title": "商业模式",
-        "guiding_question": "这个产品怎么赚钱？定价策略是什么？",
-        "source_constraints": "定价页、公开财务信息",
-        "aliases": ["business_model", "pricing_model", "pricing_business_model", "monetization", "商业模式", "定价", "收费"],
-    },
-    {
-        "number": "3.4",
-        "id": "operation_strategy",
-        "title": "运营策略",
-        "guiding_question": "这个产品怎么获客、怎么留存、怎么做增长？",
-        "source_constraints": "可观察的公开运营动作",
-        "aliases": ["operation_strategy", "market_growth", "growth", "go_to_market", "运营", "获客", "留存", "增长"],
-    },
-    {
-        "number": "3.5",
-        "id": "product_features",
-        "title": "产品功能",
-        "guiding_question": "核心功能有哪些？和竞品功能差异在哪？",
-        "source_constraints": "官方文档、功能页、帮助中心",
-        "aliases": ["product_features", "feature_tree", "feature", "capability", "产品功能", "核心功能", "功能差异"],
-    },
-    {
-        "number": "3.6",
-        "id": "product_flow",
-        "title": "产品流程",
-        "guiding_question": "用户的核心使用路径是什么？",
-        "source_constraints": "官方文档、教程、演示视频",
-        "aliases": ["product_flow", "workflow", "onboarding", "tutorial", "产品流程", "使用路径", "教程", "演示"],
-    },
-    {
-        "number": "3.7",
-        "id": "product_structure",
-        "title": "产品结构",
-        "guiding_question": "产品的模块划分和信息架构是什么？",
-        "source_constraints": "帮助中心目录、功能导航",
-        "aliases": ["product_structure", "architecture", "module", "navigation", "产品结构", "信息架构", "模块", "导航"],
-    },
-    {
-        "number": "3.8",
-        "id": "interaction_design",
-        "title": "交互设计",
-        "guiding_question": "交互有什么特点？体验亮点和不足？",
-        "source_constraints": "产品截图、评测文章",
-        "aliases": ["interaction_design", "interaction", "experience", "ux", "ui", "交互设计", "体验亮点", "体验不足"],
-    },
-    {
-        "number": "3.9",
-        "id": "signature_features",
-        "title": "特色功能",
-        "guiding_question": "有什么独有的、竞品没有的能力？",
-        "source_constraints": "官方宣传重点、对比评测",
-        "aliases": ["signature_features", "differentiation", "unique", "特色功能", "差异化", "独有", "竞品没有"],
-    },
-    {
-        "number": "3.10",
-        "id": "user_reputation",
-        "title": "用户口碑",
-        "guiding_question": "用户怎么评价？好评和差评集中在哪？",
-        "source_constraints": "搜索API可索引的公开评价（尽力而为）",
-        "aliases": ["user_reputation", "customer_proof", "review", "reviews", "用户口碑", "用户评价", "好评", "差评", "评论"],
-    },
-]
-
-PRODUCT_SECTION_DIRECTION_MAP: dict[str, tuple[str, ...]] = {
-    "direction_strategic_positioning": ("strategic_positioning",),
-    "direction_market_trends_opportunities": ("strategic_positioning",),
-    "direction_target_users_segments": ("target_users",),
-    "direction_business_model_pricing": ("business_model",),
-    "direction_growth_channels": ("operation_strategy",),
-    "direction_operations_fulfillment": ("operation_strategy", "product_flow"),
-    "direction_core_product_supply": ("product_features", "product_structure"),
-    "direction_integrations_ecosystem": ("product_features", "product_structure"),
-    "direction_ai_capability_application": ("product_features", "signature_features"),
-    "direction_product_experience": ("product_flow", "product_structure", "interaction_design"),
-    "direction_baseline_trust_security_compliance": ("product_features", "signature_features"),
-    "direction_sla_reliability": ("product_features",),
-    "direction_moat_resources_team": ("strategic_positioning", "signature_features"),
-    "direction_migration_switching_cost": ("product_flow", "user_reputation"),
-    "direction_user_reputation": ("user_reputation",),
-}
 
 SECTION_CLAIM_LIMIT = 12
 SUMMARY_CLAIM_LIMIT = 30
@@ -771,6 +676,11 @@ class ReportWriterAgent:
         citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         report_evidence_ids = set(citation_refs_by_evidence_id)
+        mapped_dimensions = [
+            dimension
+            for dimension in self._analysis_dimensions(state, [])
+            if self._matches_product_section(dimension, section)
+        ]
         payload = {
             "reporting_constraints": [
                 "Only write this product-analysis subsection.",
@@ -792,6 +702,7 @@ class ReportWriterAgent:
                 "title": section["title"],
                 "guiding_question": section["guiding_question"],
             },
+            "mapped_analysis_dimensions": mapped_dimensions,
             "analysis_claims": [
                 self._compact_claim(
                     claim,
@@ -1239,6 +1150,8 @@ class ReportWriterAgent:
             "id",
             "citation_ref",
             "source_type",
+            "analysis_dimension_id",
+            "report_section_id",
             "dimension_id",
             "branch_id",
             "collection_task_id",
@@ -1366,7 +1279,11 @@ class ReportWriterAgent:
     ) -> list[dict[str, Any]]:
         dimensions = state.get("analysis_dimensions", [])
         if dimensions:
-            return dimensions
+            return [
+                self._with_report_targets(dimension)
+                for dimension in dimensions
+                if dimension.get("id")
+            ]
 
         dimension_by_id: dict[str, dict[str, Any]] = {}
         for evidence in evidence_items:
@@ -1379,6 +1296,13 @@ class ReportWriterAgent:
                 "description": "Evidence-derived analysis dimension.",
                 "priority": "P1",
                 "guiding_questions": [],
+                "schema_field_ids": evidence.get("schema_field_ids", []),
+                "report_targets": report_targets_for_dimension(
+                    dimension_id,
+                    name=evidence.get("dimension_name", ""),
+                    description="Evidence-derived analysis dimension.",
+                    source_hints=[],
+                ),
             }
         if dimension_by_id:
             return list(dimension_by_id.values())[:10]
@@ -1390,9 +1314,30 @@ class ReportWriterAgent:
                 "description": section["guiding_question"],
                 "priority": "P1",
                 "guiding_questions": [section["guiding_question"]],
+                "report_targets": [
+                    {
+                        "section_id": section["id"],
+                        "role": "primary",
+                        "reason": "Legacy fallback section dimension.",
+                    }
+                ],
             }
             for section in PRODUCT_ANALYSIS_SECTIONS
         ]
+
+    def _with_report_targets(self, dimension: dict[str, Any]) -> dict[str, Any]:
+        if dimension.get("report_targets"):
+            return dimension
+        dimension_id = dimension.get("id", "")
+        return {
+            **dimension,
+            "report_targets": report_targets_for_dimension(
+                dimension_id,
+                name=dimension.get("name", ""),
+                description=dimension.get("description", ""),
+                source_hints=list(dimension.get("source_hints", []) or []),
+            ),
+        }
 
     def _product_analysis_sections(self) -> list[dict[str, Any]]:
         return [
@@ -1436,6 +1381,14 @@ class ReportWriterAgent:
         ]
         return {
             "id": claim.get("id", ""),
+            "analysis_dimension_id": claim.get(
+                "analysis_dimension_id",
+                claim.get("dimension", ""),
+            ),
+            "knowledge_fact_ids": claim.get("knowledge_fact_ids", []),
+            "report_section_id": claim.get("report_section_id", ""),
+            "report_section_role": claim.get("report_section_role", ""),
+            "claim_source": claim.get("claim_source", ""),
             "dimension": claim.get("dimension", ""),
             "branch_id": claim.get("branch_id", ""),
             "evidence_review_id": claim.get("evidence_review_id", ""),
@@ -1467,6 +1420,12 @@ class ReportWriterAgent:
             "competitor": evidence.get("competitor", ""),
             "branch_id": evidence.get("branch_id", ""),
             "collection_task_id": evidence.get("collection_task_id", ""),
+            "analysis_dimension_id": evidence.get(
+                "analysis_dimension_id",
+                evidence.get("dimension_id", ""),
+            ),
+            "schema_field_ids": evidence.get("schema_field_ids", []),
+            "report_section_id": evidence.get("report_section_id", ""),
             "dimension_id": evidence.get("dimension_id", ""),
             "dimension_name": evidence.get("dimension_name", ""),
             "title": evidence.get("title", ""),
@@ -1502,6 +1461,11 @@ class ReportWriterAgent:
         return {
             "id": review.get("id", ""),
             "claim_id": review.get("claim_id", ""),
+            "analysis_dimension_id": review.get(
+                "analysis_dimension_id",
+                review.get("dimension", ""),
+            ),
+            "report_section_id": review.get("report_section_id", ""),
             "support_status": review.get("support_status", ""),
             "evidence_ids": review.get("evidence_ids", []),
             "unsupported_phrases": review.get("unsupported_phrases", []),
@@ -1822,7 +1786,21 @@ class ReportWriterAgent:
         return any(alias and alias in searchable for alias in aliases)
 
     def _mapped_product_sections_for_item(self, item: dict[str, Any]) -> tuple[str, ...]:
-        for key in ("dimension", "dimension_id"):
+        explicit_section = str(item.get("report_section_id", "") or "")
+        if explicit_section:
+            return (explicit_section,)
+
+        report_targets = item.get("report_targets", [])
+        if isinstance(report_targets, list):
+            target_section_ids = [
+                str(target.get("section_id", ""))
+                for target in report_targets
+                if isinstance(target, dict) and target.get("section_id")
+            ]
+            if target_section_ids:
+                return tuple(dict.fromkeys(target_section_ids))
+
+        for key in ("analysis_dimension_id", "dimension", "dimension_id"):
             dimension_id = str(item.get(key, "") or "")
             if dimension_id in PRODUCT_SECTION_DIRECTION_MAP:
                 return PRODUCT_SECTION_DIRECTION_MAP[dimension_id]

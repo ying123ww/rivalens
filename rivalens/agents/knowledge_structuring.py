@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
-from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge
+from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge, KnowledgeFact
 from rivalens.text_quality import clean_text, is_low_quality_text
 
 
@@ -20,6 +20,7 @@ class KnowledgeStructuringAgent:
         active_schema = state.get("active_knowledge_schema", {})
         evidence_items = self._accepted_evidence_items(state)
 
+        knowledge_facts = self._build_knowledge_facts(evidence_items)
         knowledge = self._build_competitor_knowledge(evidence_items, active_schema)
         competitors = self._enrich_competitors(
             state.get("competitors") or task.get("competitors", []),
@@ -33,6 +34,7 @@ class KnowledgeStructuringAgent:
             payload={
                 "knowledge_count": len(knowledge),
                 "competitor_knowledge": knowledge,
+                "knowledge_facts": knowledge_facts,
             },
             evidence_ids=[
                 evidence_id
@@ -43,6 +45,7 @@ class KnowledgeStructuringAgent:
 
         return {
             "competitors": competitors,
+            "knowledge_facts": knowledge_facts,
             "competitor_knowledge": knowledge,
             "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
@@ -58,6 +61,7 @@ class KnowledgeStructuringAgent:
                     },
                     "output": {
                         "knowledge_count": len(knowledge),
+                        "knowledge_fact_count": len(knowledge_facts),
                         "profile_count": len(
                             [
                                 competitor
@@ -91,7 +95,7 @@ class KnowledgeStructuringAgent:
             persona_signals = []
 
             for feature_index, evidence in enumerate(competitor_evidence, start=1):
-                if evidence.get("dimension_id") == "competitor_profile":
+                if self._evidence_analysis_dimension_id(evidence) == "competitor_profile":
                     continue
                 evidence_id = evidence.get("id", "")
                 text = (
@@ -181,7 +185,10 @@ class KnowledgeStructuringAgent:
                         extension.get("id", ""): {
                             "name": extension.get("name", ""),
                             "description": extension.get("description", ""),
-                            "evidence_ids": evidence_ids,
+                            "evidence_ids": self._extension_evidence_ids(
+                                extension.get("id", ""),
+                                competitor_evidence,
+                            ),
                             "confidence": extension.get("confidence", 0.5),
                         }
                         for extension in active_schema.get("industry_extensions", [])
@@ -194,6 +201,44 @@ class KnowledgeStructuringAgent:
 
         return knowledge_items
 
+    def _build_knowledge_facts(
+        self,
+        evidence_items: list[dict[str, Any]],
+    ) -> list[KnowledgeFact]:
+        facts: list[KnowledgeFact] = []
+        for evidence in evidence_items:
+            analysis_dimension_id = self._evidence_analysis_dimension_id(evidence)
+            if not analysis_dimension_id or analysis_dimension_id == "competitor_profile":
+                continue
+            evidence_id = evidence.get("id", "")
+            text = clean_text(
+                evidence.get("excerpt")
+                or evidence.get("title")
+                or evidence.get("url")
+                or ""
+            )
+            if not text or is_low_quality_text(text):
+                continue
+            schema_field_ids = list(evidence.get("schema_field_ids", []) or [])
+            facts.append(
+                {
+                    "id": f"fact_{len(facts) + 1}",
+                    "competitor": evidence.get("competitor", ""),
+                    "analysis_dimension_id": analysis_dimension_id,
+                    "schema_field_id": schema_field_ids[0] if schema_field_ids else "",
+                    "statement": text[:500],
+                    "value": {
+                        "title": evidence.get("title", ""),
+                        "source_type": evidence.get("source_type", ""),
+                        "url": evidence.get("url", ""),
+                    },
+                    "evidence_ids": [evidence_id] if evidence_id else [],
+                    "report_section_id": evidence.get("report_section_id", ""),
+                    "confidence": evidence.get("confidence", 0.5),
+                }
+            )
+        return facts
+
     def _enrich_competitors(
         self,
         competitors: list[Any],
@@ -202,7 +247,7 @@ class KnowledgeStructuringAgent:
     ) -> list[dict[str, Any]]:
         profiles_by_competitor: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for evidence in evidence_items:
-            if evidence.get("dimension_id") != "competitor_profile":
+            if self._evidence_analysis_dimension_id(evidence) != "competitor_profile":
                 continue
             competitor = self._profile_key(evidence.get("competitor", ""))
             if competitor:
@@ -213,7 +258,7 @@ class KnowledgeStructuringAgent:
             normalized = [
                 {"name": evidence.get("competitor", "")}
                 for evidence in evidence_items
-                if evidence.get("dimension_id") == "competitor_profile"
+                if self._evidence_analysis_dimension_id(evidence) == "competitor_profile"
                 and evidence.get("competitor")
             ]
 
@@ -303,6 +348,34 @@ class KnowledgeStructuringAgent:
             if any(token in text for token in tokens):
                 return extension_id
         return "core_feature"
+
+    def _extension_evidence_ids(
+        self,
+        extension_id: str,
+        evidence_items: list[dict[str, Any]],
+    ) -> list[str]:
+        if not extension_id:
+            return []
+        matched = []
+        for evidence in evidence_items:
+            schema_field_ids = set(evidence.get("schema_field_ids", []) or [])
+            evidence_dimension_ids = {
+                self._evidence_analysis_dimension_id(evidence),
+                str(evidence.get("dimension_id", "") or ""),
+            }
+            if extension_id not in schema_field_ids and extension_id not in evidence_dimension_ids:
+                continue
+            evidence_id = evidence.get("id", "")
+            if evidence_id:
+                matched.append(evidence_id)
+        return list(dict.fromkeys(matched))
+
+    def _evidence_analysis_dimension_id(self, evidence: dict[str, Any]) -> str:
+        return str(
+            evidence.get("analysis_dimension_id")
+            or evidence.get("dimension_id")
+            or ""
+        )
 
     def _average_confidence(self, items: list[dict[str, Any]]) -> float:
         confidences = [float(item.get("confidence", 0.5)) for item in items]
