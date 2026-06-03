@@ -1,8 +1,6 @@
 """Structured competitor knowledge schema."""
 
 from .competitive import (
-    ActiveKnowledgeSchema,
-    ActiveKnowledgeSchemaPayloadModel,
     AgentEvent,
     AgentMessage,
     AgentMessagePayload,
@@ -58,6 +56,7 @@ from .competitive import (
     PricingPlan,
     PricingPlanPayload,
     PublishMessagePayload,
+    ResearchPlanMessagePayload,
     ReportMessagePayload,
     ResearchRoutingAction,
     ResearchRoutingDecision,
@@ -69,10 +68,7 @@ from .competitive import (
     ResearchTask,
     ReportSectionTarget,
     ReportSectionTargetPayload,
-    SchemaExtension,
-    SchemaExtensionPayload,
     SchemaMessagePayload,
-    SchemaSelectionMessagePayload,
     StageContract,
     StageOutputKind,
     StageRole,
@@ -83,8 +79,7 @@ from .competitive import (
 )
 
 __all__ = [
-    "ActiveKnowledgeSchema",
-    "ActiveKnowledgeSchemaPayloadModel",
+    "ResearchPlanMessagePayload",
     "AgentEvent",
     "AgentMessage",
     "AgentMessagePayload",
@@ -151,10 +146,7 @@ __all__ = [
     "ResearchTask",
     "ReportSectionTarget",
     "ReportSectionTargetPayload",
-    "SchemaExtension",
-    "SchemaExtensionPayload",
     "SchemaMessagePayload",
-    "SchemaSelectionMessagePayload",
     "StageContract",
     "StageOutputKind",
     "StageRole",

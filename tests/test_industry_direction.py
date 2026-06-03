@@ -15,7 +15,6 @@ from rivalens.industry_templates import (
     L2_REGULATED_DOMAIN_DIRECTIONS,
 )
 from rivalens.schema.competitive import EvidenceType, SOURCE_TYPE_PRIORITY
-from rivalens.schema_registry.registry import SchemaRegistry
 
 
 class IndustryDirectionSkillTest(unittest.TestCase):
@@ -98,31 +97,6 @@ class IndustryDirectionSkillTest(unittest.TestCase):
                             valid_source_hints
                         )
                     )
-
-    def test_schema_registry_uses_industry_direction_template_ids(self):
-        template_ids = {
-            template["industry_id"] for template in INDUSTRY_DIRECTION_TEMPLATES
-        }
-        registry = SchemaRegistry()
-        registry_ids = {
-            definition.industry_id for definition in registry.industries
-        }
-
-        self.assertTrue(template_ids.issubset(registry_ids))
-        self.assertIn(
-            "security_compliance",
-            [
-                extension["id"]
-                for extension in registry.get_extensions("saas_collaboration")
-            ],
-        )
-        self.assertIn(
-            "regulatory_compliance",
-            [
-                extension["id"]
-                for extension in registry.get_extensions("financial_services")
-            ],
-        )
 
     def test_builds_flat_direction_review_rows(self):
         from rivalens.industry_templates.review import build_direction_review_rows
@@ -354,7 +328,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             plan["final_analysis_plan"]["final_directions"],
         )
 
-    def test_planning_agent_always_includes_registry_extensions(self):
+    def test_planning_agent_derives_schema_field_ids_from_directions(self):
         state = {
             "task": {
                 "query": "帮我对比钉钉和飞书，只看产品定位和定价，给出带来源的简短结论",
@@ -364,16 +338,20 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         }
 
         result = asyncio.run(PlanningAgent().run(state))
-        extension_ids = [
-            extension["id"]
-            for extension in result["active_knowledge_schema"]["industry_extensions"]
+        schema_field_ids = [
+            schema_field_id
+            for dimension in result["analysis_dimensions"]
+            for schema_field_id in dimension["schema_field_ids"]
         ]
 
-        self.assertIn("direction_business_model_pricing", extension_ids)
-        self.assertIn("direction_strategic_positioning", extension_ids)
-        self.assertIn("security_compliance", extension_ids)
+        self.assertIn("direction_business_model_pricing", schema_field_ids)
+        self.assertIn("direction_strategic_positioning", schema_field_ids)
+        self.assertNotIn("security_compliance", schema_field_ids)
+        self.assertTrue(
+            all(schema_field_id.startswith("direction_") for schema_field_id in schema_field_ids)
+        )
 
-    def test_planning_agent_injects_directions_into_schema_selection(self):
+    def test_planning_agent_injects_directions_into_research_plan(self):
         plan = IndustryDirectionSkill().build_plan(
             query="分析 Shopify 和 Amazon 在电商零售行业的竞品差异",
             user_directions=["商家侧运营工具"],
@@ -389,29 +367,27 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         }
 
         result = asyncio.run(PlanningAgent().run(state))
-        active_schema = result["active_knowledge_schema"]
-        direction_extensions = [
-            extension
-            for extension in active_schema["industry_extensions"]
-            if extension["id"].startswith("direction_")
+        analysis_dimensions = result["analysis_dimensions"]
+        schema_field_ids = [
+            schema_field_id
+            for dimension in analysis_dimensions
+            for schema_field_id in dimension["schema_field_ids"]
         ]
-        direction_extension_ids = [extension["id"] for extension in direction_extensions]
 
         self.assertEqual(
             result["industry_direction_plan"]["industry"]["industry_id"],
             "ecommerce_retail",
         )
-        self.assertIn("direction_user_direction_1", direction_extension_ids)
+        self.assertIn("direction_user_direction_1", schema_field_ids)
         self.assertIn(
             "direction_platform_supply_demand_liquidity",
-            direction_extension_ids,
+            schema_field_ids,
         )
-        self.assertEqual(result["messages"][-1]["type"], "schema_selection")
+        self.assertEqual(result["messages"][-1]["type"], "research_plan")
         self.assertIn(
             "industry_direction_plan",
             result["messages"][-1]["payload"],
         )
-        analysis_dimensions = result["analysis_dimensions"]
         user_dimension = next(
             dimension
             for dimension in analysis_dimensions
@@ -426,13 +402,12 @@ class IndustryDirectionSkillTest(unittest.TestCase):
             result["messages"][-1]["payload"]["analysis_dimensions"],
             analysis_dimensions,
         )
-        platform_extension = next(
-            extension
-            for extension in direction_extensions
-            if extension["id"] == "direction_take_rate_monetization_governance"
+        monetization_dimension = next(
+            dimension
+            for dimension in analysis_dimensions
+            if dimension["id"] == "take_rate_monetization_governance"
         )
-        self.assertIn("source_hints", platform_extension)
-        self.assertIn("pricing_page", platform_extension["source_hints"])
+        self.assertIn("pricing_page", monetization_dimension["source_hints"])
 
     def test_planning_agent_uses_detected_competitors_when_none_are_explicit(self):
         state = {
@@ -471,7 +446,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         self.assertEqual(inputs["competitors"], ["ChatGPT", "Kimi", "Perplexity"])
         self.assertEqual(inputs["custom_analysis_direction_count"], 1)
         self.assertEqual(outputs["selected_industry"], "ai_product_application")
-        self.assertEqual(outputs["message_type"], "schema_selection")
+        self.assertEqual(outputs["message_type"], "research_plan")
         self.assertIn("final_direction_ids", outputs)
         self.assertIn("user_direction_1", outputs["user_added_direction_ids"])
 

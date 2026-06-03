@@ -13,7 +13,7 @@
 
 ## 当前实现状态
 
-- `PlanningAgent` 生成并确认 10 个 analysis dimensions，写入 `CompetitorAnalysisState.analysis_dimensions`。
+- `PlanningAgent` 从 L0/L1/L2 行业方向生成并确认 analysis dimensions，写入 `CompetitorAnalysisState.analysis_dimensions`，并映射回固定 10 个报告小节。
 - `CollectionAgent` 将 competitor x confirmed dimension 展开成 root branches，所有 root branches 使用 `search_stage=focused`。
 - `ResearchEngineEvidenceCollector` 对 focused 和 verification 都使用 `ResearchMode.STANDARD_EVIDENCE`，并归一化为 `EvidenceItem`。
 - `EvidenceQualityReviewer` 对每次 standard evidence result 做 source-level accept / reject。

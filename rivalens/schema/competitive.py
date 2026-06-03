@@ -428,28 +428,6 @@ class IndustryDirectionPlan(TypedDict, total=False):
     created_at: str
 
 
-class SchemaExtension(TypedDict, total=False):
-    id: str
-    name: str
-    description: str
-    origin: Literal["core", "schema_registry", "evidence_inferred", "user_requested"]
-    evidence_ids: list[str]
-    source_hints: list[str]
-    confidence: float
-    approved: bool
-
-
-class ActiveKnowledgeSchema(TypedDict, total=False):
-    id: str
-    version: str
-    core_fields: list[str]
-    selected_industry: IndustryCandidate
-    candidate_industries: list[IndustryCandidate]
-    industry_extensions: list[SchemaExtension]
-    candidate_extensions: list[SchemaExtension]
-    rationale: str
-
-
 class FeatureNode(TypedDict, total=False):
     id: str
     category: str
@@ -492,11 +470,9 @@ class UserPersona(TypedDict, total=False):
 class CompetitorKnowledge(TypedDict, total=False):
     id: str
     competitor: str
-    active_schema_id: str
     feature_tree: list[FeatureNode]
     pricing_model: PricingModel
     user_personas: list[UserPersona]
-    industry_extensions: dict[str, Any]
     evidence_ids: list[str]
     confidence: float
 
@@ -506,9 +482,7 @@ class AnalysisClaim(TypedDict, total=False):
     analysis_dimension_id: str
     knowledge_fact_ids: list[str]
     report_section_id: str
-    report_section_role: str
     claim_source: str
-    dimension: str
     branch_id: str
     evidence_review_id: str
     claim: str
@@ -524,7 +498,6 @@ class ClaimSupportReview(TypedDict, total=False):
     branch_id: str
     analysis_dimension_id: str
     report_section_id: str
-    dimension: str
     support_status: ClaimSupportStatus
     evidence_ids: list[str]
     unsupported_phrases: list[str]
@@ -584,7 +557,7 @@ class AgentEvent(TypedDict, total=False):
 
 
 AgentMessageType = Literal[
-    "schema_selection",
+    "research_plan",
     "evidence",
     "schema",
     "analysis",
@@ -673,28 +646,6 @@ class IndustryDirectionPlanPayload(StrictPayloadModel):
     created_at: str
 
 
-class SchemaExtensionPayload(StrictPayloadModel):
-    id: str
-    name: str
-    description: str = ""
-    origin: Literal["core", "schema_registry", "evidence_inferred", "user_requested"]
-    evidence_ids: list[str] = Field(default_factory=list)
-    source_hints: list[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.5, ge=0, le=1)
-    approved: bool = False
-
-
-class ActiveKnowledgeSchemaPayloadModel(StrictPayloadModel):
-    id: str
-    version: str
-    core_fields: list[str] = Field(default_factory=list)
-    selected_industry: IndustryCandidatePayload
-    candidate_industries: list[IndustryCandidatePayload] = Field(default_factory=list)
-    industry_extensions: list[SchemaExtensionPayload] = Field(default_factory=list)
-    candidate_extensions: list[SchemaExtensionPayload] = Field(default_factory=list)
-    rationale: str = ""
-
-
 class FeatureNodePayload(StrictPayloadModel):
     id: str
     category: str
@@ -737,11 +688,9 @@ class UserPersonaPayload(StrictPayloadModel):
 class CompetitorKnowledgePayload(StrictPayloadModel):
     id: str
     competitor: str
-    active_schema_id: str
     feature_tree: list[FeatureNodePayload] = Field(default_factory=list)
     pricing_model: PricingModelPayload = Field(default_factory=PricingModelPayload)
     user_personas: list[UserPersonaPayload] = Field(default_factory=list)
-    industry_extensions: dict[str, Any] = Field(default_factory=dict)
     evidence_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
 
@@ -791,9 +740,7 @@ class AnalysisClaimPayload(StrictPayloadModel):
     analysis_dimension_id: str = ""
     knowledge_fact_ids: list[str] = Field(default_factory=list)
     report_section_id: str = ""
-    report_section_role: str = ""
     claim_source: str = ""
-    dimension: str
     branch_id: str | None = None
     evidence_review_id: str | None = None
     claim: str
@@ -814,10 +761,9 @@ class EvidenceMessagePayload(StrictPayloadModel):
     dimensions: list[str] = Field(default_factory=list)
 
 
-class SchemaSelectionMessagePayload(StrictPayloadModel):
-    active_schema: ActiveKnowledgeSchemaPayloadModel
+class ResearchPlanMessagePayload(StrictPayloadModel):
     candidate_count: int = Field(ge=0)
-    industry_direction_plan: IndustryDirectionPlanPayload | None = None
+    industry_direction_plan: IndustryDirectionPlanPayload
     analysis_dimensions: list[AnalysisDimensionPayload] = Field(default_factory=list)
 
 
@@ -838,7 +784,6 @@ class ClaimSupportReviewPayload(StrictPayloadModel):
     branch_id: str = ""
     analysis_dimension_id: str = ""
     report_section_id: str = ""
-    dimension: str = ""
     support_status: ClaimSupportStatus
     evidence_ids: list[str] = Field(default_factory=list)
     unsupported_phrases: list[str] = Field(default_factory=list)
@@ -866,7 +811,7 @@ class PublishMessagePayload(StrictPayloadModel):
 
 
 AgentMessagePayload = (
-    SchemaSelectionMessagePayload
+    ResearchPlanMessagePayload
     | EvidenceMessagePayload
     | SchemaMessagePayload
     | AnalysisMessagePayload
@@ -1031,7 +976,6 @@ class CompetitorAnalysisState(TypedDict, total=False):
     task: dict[str, Any]
     messages: list[AgentMessage]
     competitors: list[Competitor]
-    active_knowledge_schema: ActiveKnowledgeSchema
     industry_direction_plan: IndustryDirectionPlan
     analysis_dimensions: list[AnalysisDimension]
     research_branches: list[ResearchBranch]

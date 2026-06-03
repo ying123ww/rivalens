@@ -8,7 +8,6 @@ from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState
 from rivalens.report_sections import (
     PRODUCT_ANALYSIS_SECTIONS,
-    PRODUCT_SECTION_DIRECTION_MAP,
     primary_report_section_id,
     report_targets_for_dimension,
 )
@@ -1219,7 +1218,7 @@ class ReportWriterAgent:
                 state.get("competitors") or state.get("task", {}).get("competitors", []),
                 citation_refs_by_evidence_id,
             ),
-            "active_knowledge_schema": state.get("active_knowledge_schema", {}),
+            "industry_direction_plan": state.get("industry_direction_plan", {}),
             "analysis_dimensions": analysis_dimensions,
             "analysis_claims": [
                 self._compact_claim(
@@ -1278,51 +1277,10 @@ class ReportWriterAgent:
         evidence_items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         dimensions = state.get("analysis_dimensions", [])
-        if dimensions:
-            return [
-                self._with_report_targets(dimension)
-                for dimension in dimensions
-                if dimension.get("id")
-            ]
-
-        dimension_by_id: dict[str, dict[str, Any]] = {}
-        for evidence in evidence_items:
-            dimension_id = evidence.get("dimension_id", "")
-            if not dimension_id or dimension_id == "competitor_profile":
-                continue
-            dimension_by_id[dimension_id] = {
-                "id": dimension_id,
-                "name": evidence.get("dimension_name") or dimension_id.replace("_", " "),
-                "description": "Evidence-derived analysis dimension.",
-                "priority": "P1",
-                "guiding_questions": [],
-                "schema_field_ids": evidence.get("schema_field_ids", []),
-                "report_targets": report_targets_for_dimension(
-                    dimension_id,
-                    name=evidence.get("dimension_name", ""),
-                    description="Evidence-derived analysis dimension.",
-                    source_hints=[],
-                ),
-            }
-        if dimension_by_id:
-            return list(dimension_by_id.values())[:10]
-
         return [
-            {
-                "id": section["id"],
-                "name": section["title"],
-                "description": section["guiding_question"],
-                "priority": "P1",
-                "guiding_questions": [section["guiding_question"]],
-                "report_targets": [
-                    {
-                        "section_id": section["id"],
-                        "role": "primary",
-                        "reason": "Legacy fallback section dimension.",
-                    }
-                ],
-            }
-            for section in PRODUCT_ANALYSIS_SECTIONS
+            self._with_report_targets(dimension)
+            for dimension in dimensions
+            if dimension.get("id")
         ]
 
     def _with_report_targets(self, dimension: dict[str, Any]) -> dict[str, Any]:
@@ -1381,15 +1339,10 @@ class ReportWriterAgent:
         ]
         return {
             "id": claim.get("id", ""),
-            "analysis_dimension_id": claim.get(
-                "analysis_dimension_id",
-                claim.get("dimension", ""),
-            ),
+            "analysis_dimension_id": claim.get("analysis_dimension_id", ""),
             "knowledge_fact_ids": claim.get("knowledge_fact_ids", []),
             "report_section_id": claim.get("report_section_id", ""),
-            "report_section_role": claim.get("report_section_role", ""),
             "claim_source": claim.get("claim_source", ""),
-            "dimension": claim.get("dimension", ""),
             "branch_id": claim.get("branch_id", ""),
             "evidence_review_id": claim.get("evidence_review_id", ""),
             "claim": claim.get("claim", ""),
@@ -1420,10 +1373,7 @@ class ReportWriterAgent:
             "competitor": evidence.get("competitor", ""),
             "branch_id": evidence.get("branch_id", ""),
             "collection_task_id": evidence.get("collection_task_id", ""),
-            "analysis_dimension_id": evidence.get(
-                "analysis_dimension_id",
-                evidence.get("dimension_id", ""),
-            ),
+            "analysis_dimension_id": evidence.get("analysis_dimension_id", ""),
             "schema_field_ids": evidence.get("schema_field_ids", []),
             "report_section_id": evidence.get("report_section_id", ""),
             "dimension_id": evidence.get("dimension_id", ""),
@@ -1461,10 +1411,7 @@ class ReportWriterAgent:
         return {
             "id": review.get("id", ""),
             "claim_id": review.get("claim_id", ""),
-            "analysis_dimension_id": review.get(
-                "analysis_dimension_id",
-                review.get("dimension", ""),
-            ),
+            "analysis_dimension_id": review.get("analysis_dimension_id", ""),
             "report_section_id": review.get("report_section_id", ""),
             "support_status": review.get("support_status", ""),
             "evidence_ids": review.get("evidence_ids", []),
@@ -1769,21 +1716,7 @@ class ReportWriterAgent:
         section: dict[str, Any],
     ) -> bool:
         mapped_sections = self._mapped_product_sections_for_item(item)
-        if mapped_sections:
-            return section.get("id", "") in mapped_sections
-
-        searchable = " ".join(
-            str(item.get(key, ""))
-            for key in (
-                "dimension",
-                "dimension_id",
-                "dimension_name",
-                "title",
-                "claim",
-            )
-        ).lower()
-        aliases = [str(alias).lower() for alias in section.get("aliases", [])]
-        return any(alias and alias in searchable for alias in aliases)
+        return section.get("id", "") in mapped_sections
 
     def _mapped_product_sections_for_item(self, item: dict[str, Any]) -> tuple[str, ...]:
         explicit_section = str(item.get("report_section_id", "") or "")
@@ -1799,11 +1732,6 @@ class ReportWriterAgent:
             ]
             if target_section_ids:
                 return tuple(dict.fromkeys(target_section_ids))
-
-        for key in ("analysis_dimension_id", "dimension", "dimension_id"):
-            dimension_id = str(item.get(key, "") or "")
-            if dimension_id in PRODUCT_SECTION_DIRECTION_MAP:
-                return PRODUCT_SECTION_DIRECTION_MAP[dimension_id]
         return ()
 
     def _fallback_report(
@@ -1931,7 +1859,7 @@ class ReportWriterAgent:
                             or "无",
                             evidence.get("competitor", "") or "综合",
                             evidence.get("dimension_name")
-                            or evidence.get("dimension_id", "")
+                            or evidence.get("analysis_dimension_id", "")
                             or "未分类",
                             title,
                             evidence.get("source_type", "") or "other",

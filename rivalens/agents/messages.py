@@ -14,14 +14,14 @@ from rivalens.schema import (
     CompetitorAnalysisState,
     EvidenceMessagePayload,
     PublishMessagePayload,
+    ResearchPlanMessagePayload,
     ReportMessagePayload,
     SchemaMessagePayload,
-    SchemaSelectionMessagePayload,
 )
 
 
 PAYLOAD_MODELS: dict[AgentMessageType, type[BaseModel]] = {
-    "schema_selection": SchemaSelectionMessagePayload,
+    "research_plan": ResearchPlanMessagePayload,
     "evidence": EvidenceMessagePayload,
     "schema": SchemaMessagePayload,
     "analysis": AnalysisMessagePayload,

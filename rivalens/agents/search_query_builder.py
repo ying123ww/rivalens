@@ -78,12 +78,12 @@ class SearchQueryBuilder:
         original_query: str,
         competitor: str,
         dimension: dict[str, Any],
-        active_schema: dict[str, Any],
+        industry_direction_plan: dict[str, Any],
     ) -> SearchQueryPlan:
         subject = self._subject(competitor, original_query)
         zh_terms, en_terms = self._dimension_terms(dimension)
         zh_sources, en_sources = self._source_terms(dimension.get("source_hints", []))
-        zh_industry, en_industry = self._industry_terms(active_schema)
+        zh_industry, en_industry = self._industry_terms(industry_direction_plan)
 
         if self._prefers_chinese_queries(original_query, competitor):
             candidates = [
@@ -143,8 +143,11 @@ class SearchQueryBuilder:
             en_terms.extend(terms[1])
         return self._dedupe(zh_terms), self._dedupe(en_terms)
 
-    def _industry_terms(self, active_schema: dict[str, Any]) -> tuple[list[str], list[str]]:
-        industry = active_schema.get("selected_industry", {}).get("name", "")
+    def _industry_terms(
+        self,
+        industry_direction_plan: dict[str, Any],
+    ) -> tuple[list[str], list[str]]:
+        industry = (industry_direction_plan.get("industry") or {}).get("name", "")
         words = self._words(industry, limit=4)
         zh_words = [word for word in words if self._contains_cjk(word)]
         en_words = [word for word in words if not self._contains_cjk(word)]

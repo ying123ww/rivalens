@@ -89,7 +89,9 @@ class AnalysisAgent:
             evidence_ids = [evidence_id for evidence_id in fact.get("evidence_ids", []) if evidence_id]
             if not evidence_ids:
                 continue
-            analysis_dimension_id = fact.get("analysis_dimension_id", "") or "source_evidence"
+            analysis_dimension_id = fact.get("analysis_dimension_id", "")
+            if not analysis_dimension_id:
+                continue
             dimension = dimensions_by_id.get(analysis_dimension_id, {"id": analysis_dimension_id})
             dimension_name = dimension.get("name", analysis_dimension_id.replace("_", " "))
             statement = clean_text(fact.get("statement", ""))
@@ -104,9 +106,7 @@ class AnalysisAgent:
                     "analysis_dimension_id": analysis_dimension_id,
                     "knowledge_fact_ids": [fact.get("id", "")] if fact.get("id") else [],
                     "report_section_id": report_section_id,
-                    "report_section_role": "primary",
                     "claim_source": "knowledge_fact",
-                    "dimension": analysis_dimension_id,
                     "branch_id": "",
                     "evidence_review_id": "",
                     "claim": f"{fact.get('competitor', 'the target competitor')} {dimension_name}: {statement[:420]}",
@@ -172,11 +172,8 @@ class AnalysisAgent:
                 dimension = (
                     branch.get("analysis_dimension_id")
                     or evidence.get("analysis_dimension_id")
-                    or branch.get("dimension_id")
-                    or evidence.get("dimension_id")
-                    or "source_evidence"
                 )
-                if dimension == "competitor_profile":
+                if not dimension or dimension == "competitor_profile":
                     continue
                 evidence_text = self._evidence_excerpt_preview([evidence])
                 if is_low_quality_text(evidence_text):
@@ -197,7 +194,7 @@ class AnalysisAgent:
                 claim_candidates.append(
                     {
                         "competitor": str(competitor),
-                        "dimension": dimension,
+                        "analysis_dimension_id": dimension,
                         "dimension_name": str(dimension_name),
                         "report_section_id": report_section_id,
                         "evidence": evidence,
@@ -217,12 +214,10 @@ class AnalysisAgent:
                 claims.append(
                     {
                         "id": f"claim_{len(claims) + 1}",
-                        "analysis_dimension_id": representative["dimension"],
+                        "analysis_dimension_id": representative["analysis_dimension_id"],
                         "knowledge_fact_ids": [],
                         "report_section_id": representative.get("report_section_id", ""),
-                        "report_section_role": "primary",
                         "claim_source": "accepted_evidence",
-                        "dimension": representative["dimension"],
                         "branch_id": review.get("branch_id", ""),
                         "evidence_review_id": review.get("id", ""),
                         "claim": representative["claim"],
@@ -263,7 +258,7 @@ class AnalysisAgent:
         candidate: dict[str, Any],
         seed: dict[str, Any],
     ) -> bool:
-        if candidate.get("dimension") != seed.get("dimension"):
+        if candidate.get("analysis_dimension_id") != seed.get("analysis_dimension_id"):
             return False
         if candidate.get("competitor") != seed.get("competitor"):
             return False
@@ -371,9 +366,7 @@ class AnalysisAgent:
                     "analysis_dimension_id": dimension,
                     "knowledge_fact_ids": [],
                     "report_section_id": primary_report_section_id({"id": dimension}),
-                    "report_section_role": "primary",
                     "claim_source": "competitor_knowledge",
-                    "dimension": dimension,
                     "claim": f"{competitor} shows a product capability signal: {description[:420]}",
                     "competitors": [competitor] if competitor else [],
                     "evidence_ids": feature.get("evidence_ids", []),
@@ -403,9 +396,7 @@ class AnalysisAgent:
                 "analysis_dimension_id": "pricing_model",
                 "knowledge_fact_ids": [],
                 "report_section_id": primary_report_section_id({"id": "pricing_model"}),
-                "report_section_role": "primary",
                 "claim_source": "competitor_knowledge",
-                "dimension": "pricing_model",
                 "claim": f"{competitor} has public pricing-model signals around: {plan_names}.",
                 "competitors": [competitor] if competitor else [],
                 "evidence_ids": evidence_ids,
@@ -428,9 +419,7 @@ class AnalysisAgent:
                     "analysis_dimension_id": "user_personas",
                     "knowledge_fact_ids": [],
                     "report_section_id": primary_report_section_id({"id": "user_personas"}),
-                    "report_section_role": "primary",
                     "claim_source": "competitor_knowledge",
-                    "dimension": "user_personas",
                     "claim": f"{competitor} appears to serve {persona.get('segment', 'a user segment')} needs: {needs}.",
                     "competitors": [competitor] if competitor else [],
                     "evidence_ids": persona.get("evidence_ids", []),

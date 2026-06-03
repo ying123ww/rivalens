@@ -234,11 +234,9 @@ competitor_knowledge = Table(
     Column("run_id", String(80), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True),
     Column("id", String(180), primary_key=True),
     Column("competitor", Text, nullable=False, default=""),
-    Column("active_schema_id", Text, nullable=False, default=""),
     Column("feature_tree", JSON, nullable=False, default=list),
     Column("pricing_model", JSON, nullable=False, default=dict),
     Column("user_personas", JSON, nullable=False, default=list),
-    Column("industry_extensions", JSON, nullable=False, default=dict),
     Column("evidence_ids", JSON, nullable=False, default=list),
     Column("confidence", Float, nullable=False, default=0.0),
 )
@@ -248,7 +246,10 @@ analysis_claims = Table(
     metadata,
     Column("run_id", String(80), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True),
     Column("id", String(160), primary_key=True),
-    Column("dimension", Text, nullable=False, default=""),
+    Column("analysis_dimension_id", Text, nullable=False, default=""),
+    Column("knowledge_fact_ids", JSON, nullable=False, default=list),
+    Column("report_section_id", Text, nullable=False, default=""),
+    Column("claim_source", Text, nullable=False, default=""),
     Column("branch_id", Text, nullable=True),
     Column("evidence_review_id", Text, nullable=True),
     Column("claim", Text, nullable=False, default=""),
@@ -279,7 +280,8 @@ claim_support_reviews = Table(
     Column("id", String(160), primary_key=True),
     Column("claim_id", String(160), nullable=False),
     Column("branch_id", Text, nullable=False, default=""),
-    Column("dimension", Text, nullable=False, default=""),
+    Column("analysis_dimension_id", Text, nullable=False, default=""),
+    Column("report_section_id", Text, nullable=False, default=""),
     Column("support_status", String(40), nullable=False),
     Column("evidence_ids", JSON, nullable=False, default=list),
     Column("unsupported_phrases", JSON, nullable=False, default=list),
@@ -298,7 +300,11 @@ Index("ix_evidence_items_run_competitor", evidence_items.c.run_id, evidence_item
 Index("ix_evidence_reviews_run_branch", evidence_reviews.c.run_id, evidence_reviews.c.branch_id)
 Index("ix_coverage_assessments_run_branch", coverage_assessments.c.run_id, coverage_assessments.c.branch_id)
 Index("ix_competitor_knowledge_run_competitor", competitor_knowledge.c.run_id, competitor_knowledge.c.competitor)
-Index("ix_analysis_claims_run_dimension", analysis_claims.c.run_id, analysis_claims.c.dimension)
+Index(
+    "ix_analysis_claims_run_analysis_dimension",
+    analysis_claims.c.run_id,
+    analysis_claims.c.analysis_dimension_id,
+)
 Index("ix_agent_events_run_agent", agent_events.c.run_id, agent_events.c.agent)
 Index("ix_claim_support_reviews_claim_id", claim_support_reviews.c.claim_id)
 
@@ -763,11 +769,9 @@ def _competitor_knowledge_row(
         "run_id": run_id,
         "id": str(knowledge.get("id", "")),
         "competitor": str(knowledge.get("competitor", "")),
-        "active_schema_id": str(knowledge.get("active_schema_id", "")),
         "feature_tree": list(knowledge.get("feature_tree", []) or []),
         "pricing_model": knowledge.get("pricing_model", {}) or {},
         "user_personas": list(knowledge.get("user_personas", []) or []),
-        "industry_extensions": knowledge.get("industry_extensions", {}) or {},
         "evidence_ids": list(knowledge.get("evidence_ids", []) or []),
         "confidence": float(knowledge.get("confidence", 0.0) or 0.0),
     }
@@ -777,7 +781,10 @@ def _claim_row(claim: dict[str, Any], run_id: str) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "id": str(claim.get("id", "")),
-        "dimension": str(claim.get("dimension", "")),
+        "analysis_dimension_id": str(claim.get("analysis_dimension_id", "")),
+        "knowledge_fact_ids": list(claim.get("knowledge_fact_ids", []) or []),
+        "report_section_id": str(claim.get("report_section_id", "")),
+        "claim_source": str(claim.get("claim_source", "")),
         "branch_id": claim.get("branch_id"),
         "evidence_review_id": claim.get("evidence_review_id"),
         "claim": str(claim.get("claim", "")),
@@ -812,7 +819,8 @@ def _claim_support_review_row(review: dict[str, Any], run_id: str) -> dict[str, 
         "id": str(review.get("id", "")),
         "claim_id": str(review.get("claim_id", "")),
         "branch_id": str(review.get("branch_id", "")),
-        "dimension": str(review.get("dimension", "")),
+        "analysis_dimension_id": str(review.get("analysis_dimension_id", "")),
+        "report_section_id": str(review.get("report_section_id", "")),
         "support_status": str(review.get("support_status", "")),
         "evidence_ids": list(review.get("evidence_ids", []) or []),
         "unsupported_phrases": list(review.get("unsupported_phrases", []) or []),

@@ -54,6 +54,7 @@ def pricing_branch():
         "id": "collect_acme_pricing_model",
         "depth": 0,
         "competitor": "Acme",
+        "analysis_dimension_id": "pricing_model",
         "dimension_id": "pricing_model",
         "dimension_name": "Pricing Model",
         "topic": "Pricing Model",
@@ -415,27 +416,28 @@ class CollectionReviewTest(unittest.TestCase):
             "collect_acme_pricing",
         )
 
-    def test_collection_root_branches_use_planned_industry_extensions(self):
+    def test_collection_root_branches_use_analysis_dimensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",
             competitors=[{"name": "Acme"}],
-            active_schema={
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "direction_strategic_positioning",
-                        "name": "战略定位",
-                        "description": "品牌定位和市场细分。",
-                        "source_hints": ["official_site", "news"],
-                    }
-                ],
+            industry_direction_plan={
+                "industry": {"name": "Productivity SaaS"},
             },
+            analysis_dimensions=[
+                {
+                    "id": "strategic_positioning",
+                    "name": "战略定位",
+                    "description": "品牌定位和市场细分。",
+                    "source_hints": ["official_site", "news"],
+                    "schema_field_ids": ["direction_strategic_positioning"],
+                }
+            ],
         )
 
         self.assertEqual(len(branches), 2)
         self.assertEqual(branches[0]["dimension_id"], "competitor_profile")
         self.assertEqual(branches[0]["dimension_name"], "竞品基础信息")
-        self.assertEqual(branches[1]["dimension_id"], "direction_strategic_positioning")
+        self.assertEqual(branches[1]["dimension_id"], "strategic_positioning")
         self.assertEqual(branches[1]["dimension_name"], "战略定位")
         self.assertLessEqual(_word_count(branches[1]["query"]), 15)
         self.assertEqual(branches[1]["query"], branches[1]["search_queries"][0])
@@ -454,14 +456,8 @@ class CollectionReviewTest(unittest.TestCase):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",
             competitors=[{"name": "Acme"}],
-            active_schema={
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "direction_legacy_security",
-                        "name": "Legacy security",
-                    }
-                ],
+            industry_direction_plan={
+                "industry": {"name": "Productivity SaaS"},
             },
             analysis_dimensions=[
                 {
@@ -502,23 +498,24 @@ class CollectionReviewTest(unittest.TestCase):
         branches = CollectionAgent()._build_root_branches(
             query="帮我对比钉钉和飞书，只关注产品定位和定价",
             competitors=[{"name": "钉钉"}],
-            active_schema={
-                "selected_industry": {"name": "SaaS / 协作文档工具"},
-                "industry_extensions": [
-                    {
-                        "id": "direction_pricing_packaging",
-                        "name": "定价与套餐分层",
-                        "description": "免费版、团队版、企业版、AI 加购和用量限制。",
-                        "source_hints": ["pricing_page", "official_site", "review"],
-                    }
-                ],
+            industry_direction_plan={
+                "industry": {"name": "SaaS / 协作文档工具"},
             },
+            analysis_dimensions=[
+                {
+                    "id": "pricing_packaging",
+                    "name": "定价与套餐分层",
+                    "description": "免费版、团队版、企业版、AI 加购和用量限制。",
+                    "source_hints": ["pricing_page", "official_site", "review"],
+                    "schema_field_ids": ["direction_pricing_packaging"],
+                }
+            ],
         )
 
         pricing_branch = next(
             branch
             for branch in branches
-            if branch["dimension_id"] == "direction_pricing_packaging"
+            if branch["dimension_id"] == "pricing_packaging"
         )
 
         self.assertEqual(pricing_branch["query"], "钉钉 定价 套餐 官网")
@@ -548,14 +545,14 @@ class CollectionReviewTest(unittest.TestCase):
                 "verbose": False,
             },
             "competitors": [{"name": "Acme"}, {"name": "Beta"}],
-            "active_knowledge_schema": {
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {"id": "positioning", "name": "Positioning"},
-                    {"id": "pricing", "name": "Pricing"},
-                    {"id": "security", "name": "Security"},
-                ],
+            "industry_direction_plan": {
+                "industry": {"name": "Productivity SaaS"},
             },
+            "analysis_dimensions": [
+                {"id": "positioning", "name": "Positioning"},
+                {"id": "pricing", "name": "Pricing"},
+                {"id": "security", "name": "Security"},
+            ],
             "messages": [],
         }
 
@@ -597,18 +594,18 @@ class CollectionReviewTest(unittest.TestCase):
                 "verbose": False,
             },
             "competitors": [{"name": "Acme"}, {"name": "Beta"}],
-            "active_knowledge_schema": {
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "pricing_business_model",
-                        "name": "Pricing",
-                        "description": "Pricing and packaging",
-                        "source_hints": ["pricing_page", "official_site"],
-                        "guiding_questions": ["What pricing evidence is public?"],
-                    }
-                ],
+            "industry_direction_plan": {
+                "industry": {"name": "Productivity SaaS"},
             },
+            "analysis_dimensions": [
+                {
+                    "id": "pricing_business_model",
+                    "name": "Pricing",
+                    "description": "Pricing and packaging",
+                    "source_hints": ["pricing_page", "official_site"],
+                    "guiding_questions": ["What pricing evidence is public?"],
+                }
+            ],
             "messages": [],
         }
 
@@ -655,13 +652,8 @@ class CollectionReviewTest(unittest.TestCase):
                 "verbose": False,
             },
             "competitors": [{"name": "Acme"}],
-            "active_knowledge_schema": {
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {"id": "positioning", "name": "Positioning"},
-                    {"id": "pricing", "name": "Pricing"},
-                    {"id": "security", "name": "Security"},
-                ],
+            "industry_direction_plan": {
+                "industry": {"name": "Productivity SaaS"},
             },
             "messages": [],
         }
@@ -737,14 +729,12 @@ class CollectionReviewTest(unittest.TestCase):
             ["Acme Pricing", "Acme Reviews"],
         )
 
-    def test_collection_does_not_fallback_to_core_fields(self):
+    def test_collection_uses_only_profile_without_analysis_dimensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme and Beta",
             competitors=[{"name": "Acme"}],
-            active_schema={
-                "selected_industry": {"name": "Productivity SaaS"},
-                "core_fields": ["feature_tree", "pricing_model", "user_personas"],
-                "industry_extensions": [],
+            industry_direction_plan={
+                "industry": {"name": "Productivity SaaS"},
             },
         )
 
@@ -755,9 +745,8 @@ class CollectionReviewTest(unittest.TestCase):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Taobao and JD",
             competitors=[{"name": "淘宝"}],
-            active_schema={
-                "selected_industry": {"name": "零售 / 电商"},
-                "industry_extensions": [],
+            industry_direction_plan={
+                "industry": {"name": "零售 / 电商"},
             },
         )
 
@@ -774,24 +763,24 @@ class CollectionReviewTest(unittest.TestCase):
         branches = CollectionAgent()._build_root_branches(
             query="Compare AcmeAI and BetaAI for pricing, packaging, and security posture",
             competitors=[{"name": "AcmeAI"}],
-            active_schema={
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "pricing_packaging",
-                        "name": "Pricing and packaging",
-                        "description": (
-                            "Compare public plans, fees, packaging, "
-                            "and enterprise tiers."
-                        ),
-                        "source_hints": ["official_site", "pricing_page", "review"],
-                        "guiding_questions": [
-                            "What plans are public?",
-                            "What fees or tiers are visible?",
-                        ],
-                    }
-                ],
+            industry_direction_plan={
+                "industry": {"name": "Productivity SaaS"},
             },
+            analysis_dimensions=[
+                {
+                    "id": "pricing_packaging",
+                    "name": "Pricing and packaging",
+                    "description": (
+                        "Compare public plans, fees, packaging, "
+                        "and enterprise tiers."
+                    ),
+                    "source_hints": ["official_site", "pricing_page", "review"],
+                    "guiding_questions": [
+                        "What plans are public?",
+                        "What fees or tiers are visible?",
+                    ],
+                }
+            ],
         )
 
         branch = next(
@@ -864,20 +853,20 @@ class CollectionReviewTest(unittest.TestCase):
                 branches = CollectionAgent()._build_root_branches(
                     query=f"分析 {competitor} 的定价和商业模式",
                     competitors=[{"name": competitor}],
-                    active_schema={
-                        "selected_industry": {"name": "通用行业"},
-                        "industry_extensions": [
-                            {
-                                "id": "pricing_business_model",
-                                "name": "定价和商业模式",
-                                "description": (
-                                    "Compare public pricing, packaging, "
-                                    "fees, and business model."
-                                ),
-                                "source_hints": ["official_site", "pricing_page"],
-                            }
-                        ],
+                    industry_direction_plan={
+                        "industry": {"name": "通用行业"},
                     },
+                    analysis_dimensions=[
+                        {
+                            "id": "pricing_business_model",
+                            "name": "定价和商业模式",
+                            "description": (
+                                "Compare public pricing, packaging, "
+                                "fees, and business model."
+                            ),
+                            "source_hints": ["official_site", "pricing_page"],
+                        }
+                    ],
                 )
                 branch = next(
                     branch
@@ -926,9 +915,8 @@ class CollectionReviewTest(unittest.TestCase):
                 "verbose": False,
             },
             "competitors": [{"name": "AcmeAI"}],
-            "active_knowledge_schema": {
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [],
+            "industry_direction_plan": {
+                "industry": {"name": "Productivity SaaS"},
             },
             "file_context": {
                 "chunks": [
@@ -959,15 +947,14 @@ class CollectionReviewTest(unittest.TestCase):
         state = {
             "task": {"query": "对比淘宝、京东、拼多多"},
             "competitors": [{"name": "淘宝"}],
-            "active_knowledge_schema": {
-                "id": "active_schema_retail",
-                "selected_industry": {"name": "零售 / 电商"},
-                "industry_extensions": [],
+            "industry_direction_plan": {
+                "industry": {"name": "零售 / 电商"},
             },
             "evidence_items": [
                 {
                     "id": "ev_1",
                     "competitor": "淘宝",
+                    "analysis_dimension_id": "competitor_profile",
                     "dimension_id": "competitor_profile",
                     "dimension_name": "竞品基础信息",
                     "title": "淘宝官网",
@@ -1044,22 +1031,21 @@ class CollectionReviewTest(unittest.TestCase):
                 "competitors": [{"name": "Acme"}],
                 "verbose": False,
             },
-            "active_knowledge_schema": {
-                "id": "schema_productivity",
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "pricing_business_model",
-                        "name": "定价与商业模式",
-                        "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
-                        "source_hints": ["pricing_page", "official_site"],
-                        "guiding_questions": [
-                            "What monetization evidence is public?",
-                            "What packaging details are available?",
-                        ],
-                    }
-                ],
+            "industry_direction_plan": {
+                "industry": {"name": "Productivity SaaS"},
             },
+            "analysis_dimensions": [
+                {
+                    "id": "pricing_business_model",
+                    "name": "定价与商业模式",
+                    "description": "价格、套餐、计费单位、免费层、企业销售和收入模式。",
+                    "source_hints": ["pricing_page", "official_site"],
+                    "guiding_questions": [
+                        "What monetization evidence is public?",
+                        "What packaging details are available?",
+                    ],
+                }
+            ],
             "messages": [],
         }
 
@@ -1123,27 +1109,27 @@ class CollectionReviewTest(unittest.TestCase):
             )
         )
 
-    def test_collection_uses_focused_for_all_planned_industry_extensions(self):
+    def test_collection_uses_focused_for_all_analysis_dimensions(self):
         branches = CollectionAgent()._build_root_branches(
             query="Compare Acme",
             competitors=[{"name": "Acme"}],
-            active_schema={
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "market_growth",
-                        "name": "市场增长",
-                        "description": "市场规模、增长速度、需求变化和商业机会。",
-                        "source_hints": ["official_site", "news"],
-                    },
-                    {
-                        "id": "competitive_moat",
-                        "name": "竞争壁垒",
-                        "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
-                        "source_hints": ["official_site", "review"],
-                    },
-                ],
+            industry_direction_plan={
+                "industry": {"name": "Productivity SaaS"},
             },
+            analysis_dimensions=[
+                {
+                    "id": "market_growth",
+                    "name": "市场增长",
+                    "description": "市场规模、增长速度、需求变化和商业机会。",
+                    "source_hints": ["official_site", "news"],
+                },
+                {
+                    "id": "competitive_moat",
+                    "name": "竞争壁垒",
+                    "description": "护城河、替代风险、迁移成本、生态依赖、品牌资产和长期优势。",
+                    "source_hints": ["official_site", "review"],
+                },
+            ],
         )
 
         self.assertEqual(
@@ -1160,7 +1146,7 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "pricing_business_model",
+                    "analysis_dimension_id": "pricing_business_model",
                     "branch_id": "collect_acme_pricing_business_model",
                     "claim": "Acme publishes enterprise pricing with public packaging.",
                     "competitors": ["Acme"],
@@ -1189,7 +1175,7 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "pricing_business_model",
+                    "analysis_dimension_id": "pricing_business_model",
                     "branch_id": "collect_acme_pricing_business_model",
                     "claim": "Acme publishes enterprise pricing with public packaging.",
                     "competitors": ["Acme"],
@@ -1243,7 +1229,7 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_contradicted",
-                    "dimension": "pricing_model",
+                    "analysis_dimension_id": "pricing_model",
                     "branch_id": "branch_1",
                     "claim": "contradicted pricing claim",
                     "competitors": ["Acme"],
@@ -1251,7 +1237,7 @@ class CollectionReviewTest(unittest.TestCase):
                 },
                 {
                     "id": "claim_unverifiable_1",
-                    "dimension": "security_compliance",
+                    "analysis_dimension_id": "security_compliance",
                     "branch_id": "branch_2",
                     "claim": "unverifiable security claim",
                     "competitors": ["Acme"],
@@ -1259,7 +1245,7 @@ class CollectionReviewTest(unittest.TestCase):
                 },
                 {
                     "id": "claim_unverifiable_2",
-                    "dimension": "security_compliance",
+                    "analysis_dimension_id": "security_compliance",
                     "branch_id": "branch_3",
                     "claim": "unverifiable admin claim",
                     "competitors": ["Acme"],
@@ -1267,7 +1253,7 @@ class CollectionReviewTest(unittest.TestCase):
                 },
                 {
                     "id": "claim_weak",
-                    "dimension": "user_personas",
+                    "analysis_dimension_id": "user_personas",
                     "branch_id": "branch_4",
                     "claim": "weak persona claim",
                     "competitors": ["Acme"],
@@ -1301,7 +1287,7 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "strategic_positioning",
+                    "analysis_dimension_id": "strategic_positioning",
                     "branch_id": "collect_taobao_strategic_positioning",
                     "claim": "淘宝是面向消费者和商家的综合电商平台。",
                     "competitors": ["淘宝"],
@@ -1367,16 +1353,16 @@ class CollectionReviewTest(unittest.TestCase):
                 "competitors": [{"name": "Acme"}],
                 "verbose": False,
             },
-            "active_knowledge_schema": {
-                "selected_industry": {"name": "Productivity SaaS"},
-                "industry_extensions": [
-                    {
-                        "id": "pricing_business_model",
-                        "name": "定价与商业模式",
-                        "source_hints": ["pricing_page"],
-                    }
-                ],
+            "industry_direction_plan": {
+                "industry": {"name": "Productivity SaaS"},
             },
+            "analysis_dimensions": [
+                {
+                    "id": "pricing_business_model",
+                    "name": "定价与商业模式",
+                    "source_hints": ["pricing_page"],
+                }
+            ],
             "verification_task_queue": [
                 {
                     "objective": "Verify claim: Acme enterprise pricing",
@@ -1459,7 +1445,7 @@ class CollectionReviewTest(unittest.TestCase):
                 "competitors": [{"name": "Acme"}],
                 "verbose": False,
             },
-            "active_knowledge_schema": {"industry_extensions": []},
+            "industry_direction_plan": {},
             "verification_task_queue": [
                 {
                     "objective": f"Verify claim {index}",
@@ -1582,6 +1568,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_1",
                     "competitor": "Acme",
+                    "analysis_dimension_id": "pricing_model",
                     "dimension_id": "pricing_model",
                     "url": "https://acme.example/pricing",
                     "title": "Acme pricing",
@@ -1614,6 +1601,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_2",
                     "competitor": "Acme",
+                    "analysis_dimension_id": "pricing_model",
                     "dimension_id": "pricing_model",
                     "url": "https://docs.acme.example/plans",
                     "source_type": "docs",
@@ -1633,6 +1621,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_1",
                     "competitor": "Acme",
+                    "analysis_dimension_id": "pricing_model",
                     "dimension_id": "pricing_model",
                     "url": "",
                     "source_type": "pricing_page",
@@ -1999,7 +1988,7 @@ class CollectionReviewTest(unittest.TestCase):
 
     def test_knowledge_structuring_uses_only_accepted_evidence(self):
         state = {
-            "active_knowledge_schema": {"id": "schema_1"},
+            "industry_direction_plan": {},
             "evidence_items": [
                 {
                     "id": "ev_1",
@@ -2035,21 +2024,9 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertIn("Acme pricing", serialized)
         self.assertNotIn("Rejected scrape", serialized)
 
-    def test_knowledge_structuring_builds_facts_and_precise_extension_evidence(self):
+    def test_knowledge_structuring_builds_facts_with_precise_evidence(self):
         state = {
-            "active_knowledge_schema": {
-                "id": "schema_1",
-                "industry_extensions": [
-                    {
-                        "id": "direction_baseline_trust_security_compliance",
-                        "name": "信任、安全与合规",
-                    },
-                    {
-                        "id": "direction_business_model_pricing",
-                        "name": "商业模式",
-                    },
-                ],
-            },
+            "industry_direction_plan": {},
             "evidence_items": [
                 {
                     "id": "ev_1",
@@ -2089,14 +2066,7 @@ class CollectionReviewTest(unittest.TestCase):
             for fact in result["knowledge_facts"]
         }
 
-        self.assertEqual(
-            knowledge["industry_extensions"]["direction_baseline_trust_security_compliance"]["evidence_ids"],
-            ["ev_1"],
-        )
-        self.assertEqual(
-            knowledge["industry_extensions"]["direction_business_model_pricing"]["evidence_ids"],
-            ["ev_2"],
-        )
+        self.assertNotIn("industry_extensions", knowledge)
         self.assertEqual(
             facts_by_dimension["baseline_trust_security_compliance"]["report_section_id"],
             "product_features",
@@ -2108,7 +2078,7 @@ class CollectionReviewTest(unittest.TestCase):
 
     def test_knowledge_structuring_skips_unreadable_feature_text(self):
         state = {
-            "active_knowledge_schema": {"id": "schema_1"},
+            "industry_direction_plan": {},
             "evidence_items": [
                 {
                     "id": "ev_1",
@@ -2146,6 +2116,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_2",
                     "competitor": "Acme",
+                    "analysis_dimension_id": "pricing_model",
                     "dimension_id": "pricing_model",
                     "dimension_name": "Pricing Model",
                     "title": "Rejected scrape",
@@ -2233,6 +2204,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_1",
                     "competitor": "Beta",
+                    "analysis_dimension_id": "pricing_model",
                     "dimension_id": "pricing_model",
                     "dimension_name": "Pricing Model",
                     "title": "Beta pricing note",
@@ -2244,6 +2216,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "collect_beta_pricing_model",
                     "competitor": "Beta",
+                    "analysis_dimension_id": "pricing_model",
                     "dimension_id": "pricing_model",
                     "dimension_name": "Pricing Model",
                 }
@@ -2275,6 +2248,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_1",
                     "competitor": "飞书",
+                    "analysis_dimension_id": "product_features",
                     "dimension_id": "product_features",
                     "dimension_name": "产品功能",
                     "title": "飞书功能",
@@ -2284,6 +2258,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "ev_2",
                     "competitor": "飞书",
+                    "analysis_dimension_id": "product_features",
                     "dimension_id": "product_features",
                     "dimension_name": "产品功能",
                     "title": "Broken scrape",
@@ -2295,6 +2270,7 @@ class CollectionReviewTest(unittest.TestCase):
                 {
                     "id": "collect_feishu_product_features",
                     "competitor": "飞书",
+                    "analysis_dimension_id": "product_features",
                     "dimension_id": "product_features",
                     "dimension_name": "产品功能",
                 }
@@ -2383,7 +2359,10 @@ class CollectionReviewTest(unittest.TestCase):
         claims = result["analysis_claims"]
 
         self.assertEqual(len(claims), 2)
-        self.assertEqual([claim["dimension"] for claim in claims], ["pricing_model", "pricing_model"])
+        self.assertEqual(
+            [claim["analysis_dimension_id"] for claim in claims],
+            ["pricing_model", "pricing_model"],
+        )
         self.assertEqual([claim["evidence_ids"] for claim in claims], [["ev_1"], ["ev_2"]])
         self.assertIn("starter pricing plan", claims[0]["claim"])
         self.assertNotIn("enterprise pricing", claims[0]["claim"])
@@ -2436,7 +2415,7 @@ class CollectionReviewTest(unittest.TestCase):
         claims = result["analysis_claims"]
 
         self.assertEqual(len(claims), 1)
-        self.assertEqual(claims[0]["dimension"], "pricing_model")
+        self.assertEqual(claims[0]["analysis_dimension_id"], "pricing_model")
         self.assertEqual(claims[0]["evidence_ids"], ["ev_1", "ev_2"])
         self.assertIn("starter pricing plan", claims[0]["claim"])
         self.assertIn("2 EvidenceItem", claims[0]["reasoning"])
@@ -2500,7 +2479,8 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "pricing_model",
+                    "analysis_dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "claim": "Acme publishes a starter pricing plan.",
                     "evidence_ids": ["ev_1", "ev_2"],
                     "confidence": 0.9,
@@ -2511,6 +2491,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_1",
                     "competitor": "Acme",
                     "dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "title": "Acme pricing",
                     "url": "https://acme.example/pricing",
                     "excerpt": "Acme publishes a starter pricing plan.",
@@ -2521,6 +2502,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_2",
                     "competitor": "Acme",
                     "dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "title": "Rejected scrape",
                     "url": "https://acme.example/rejected",
                     "excerpt": "This rejected source should not support the report.",
@@ -2614,7 +2596,8 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "pricing_model",
+                    "analysis_dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "claim": long_claim,
                     "evidence_ids": ["ev_1"],
                     "reasoning": " ".join(["Long reasoning should be compressed."] * 400),
@@ -2625,6 +2608,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_1",
                     "competitor": "Acme",
                     "dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "title": "Acme pricing",
                     "url": "https://acme.example/pricing",
                     "excerpt": raw_evidence_text,
@@ -2674,6 +2658,7 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
+                    "report_section_id": "business_model",
                     "claim": "Acme publishes a starter pricing plan.",
                     "evidence_ids": ["ev_1"],
                 }
@@ -2681,6 +2666,7 @@ class CollectionReviewTest(unittest.TestCase):
             "evidence_items": [
                 {
                     "id": "ev_1",
+                    "report_section_id": "business_model",
                     "title": "Acme pricing",
                     "url": "https://acme.example/pricing",
                     "excerpt": "Acme publishes a starter pricing plan.",
@@ -2731,7 +2717,8 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "pricing_model",
+                    "analysis_dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "claim": "Acme publishes a starter pricing plan.",
                     "evidence_ids": ["ev_1"],
                 }
@@ -2741,6 +2728,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_1",
                     "competitor": "Acme",
                     "dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "dimension_name": "Pricing Model",
                     "title": "Acme pricing",
                     "url": "https://acme.example/pricing",
@@ -2866,21 +2854,23 @@ class CollectionReviewTest(unittest.TestCase):
             if section["id"] == "product_features"
         )
         claims = [
-            {
-                "id": f"claim_feishu_{index}",
-                "dimension": "direction_core_product_supply",
-                "claim": f"飞书功能证据 {index}",
-                "competitors": ["飞书"],
-                "evidence_ids": [f"ev_feishu_{index}"],
+                {
+                    "id": f"claim_feishu_{index}",
+                    "analysis_dimension_id": "core_product_supply",
+                    "report_section_id": "product_features",
+                    "claim": f"飞书功能证据 {index}",
+                    "competitors": ["飞书"],
+                    "evidence_ids": [f"ev_feishu_{index}"],
             }
             for index in range(11)
         ] + [
-            {
-                "id": f"claim_dingtalk_{index}",
-                "dimension": "direction_core_product_supply",
-                "claim": f"钉钉功能证据 {index}",
-                "competitors": ["钉钉"],
-                "evidence_ids": [f"ev_dingtalk_{index}"],
+                {
+                    "id": f"claim_dingtalk_{index}",
+                    "analysis_dimension_id": "core_product_supply",
+                    "report_section_id": "product_features",
+                    "claim": f"钉钉功能证据 {index}",
+                    "competitors": ["钉钉"],
+                    "evidence_ids": [f"ev_dingtalk_{index}"],
             }
             for index in range(6)
         ]
@@ -2900,41 +2890,41 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertGreaterEqual(sampled_competitors.count("钉钉"), 1)
         self.assertEqual(sampled_competitors[:4], ["飞书", "钉钉", "飞书", "钉钉"])
 
-    def test_writer_maps_industry_directions_to_product_sections(self):
+    def test_writer_requires_explicit_product_section_mapping(self):
         agent = ReportWriterAgent()
         sections_by_id = {
             section["id"]: section
             for section in PRODUCT_ANALYSIS_SECTIONS
         }
 
-        self.assertTrue(
+        self.assertFalse(
             agent._matches_product_section(
-                {"dimension": "direction_core_product_supply"},
+                {"analysis_dimension_id": "core_product_supply"},
                 sections_by_id["product_features"],
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             agent._matches_product_section(
-                {"dimension": "direction_product_experience"},
+                {"analysis_dimension_id": "product_experience"},
                 sections_by_id["interaction_design"],
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             agent._matches_product_section(
-                {"dimension": "direction_operations_fulfillment"},
+                {"analysis_dimension_id": "operations_fulfillment"},
                 sections_by_id["product_flow"],
             )
         )
         self.assertFalse(
             agent._matches_product_section(
-                {"dimension": "direction_user_reputation"},
+                {"analysis_dimension_id": "user_reputation"},
                 sections_by_id["business_model"],
             )
         )
         self.assertTrue(
             agent._matches_product_section(
                 {
-                    "dimension": "unknown_dynamic_dimension",
+                    "analysis_dimension_id": "unknown_dynamic_dimension",
                     "report_section_id": "product_features",
                 },
                 sections_by_id["product_features"],
@@ -2943,10 +2933,24 @@ class CollectionReviewTest(unittest.TestCase):
         self.assertFalse(
             agent._matches_product_section(
                 {
-                    "dimension": "unknown_dynamic_dimension",
+                    "analysis_dimension_id": "unknown_dynamic_dimension",
                     "report_section_id": "product_features",
                 },
                 sections_by_id["business_model"],
+            )
+        )
+        self.assertTrue(
+            agent._matches_product_section(
+                {
+                    "analysis_dimension_id": "core_product_supply",
+                    "report_targets": [
+                        {
+                            "section_id": "product_features",
+                            "role": "primary",
+                        }
+                    ],
+                },
+                sections_by_id["product_features"],
             )
         )
 
@@ -2964,7 +2968,8 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "market_growth",
+                    "analysis_dimension_id": "market_growth",
+                    "report_section_id": "operation_strategy",
                     "claim": "淘宝公开资料显示其平台定位覆盖综合电商场景。",
                     "competitors": ["淘宝"],
                     "evidence_ids": ["ev_1"],
@@ -2984,6 +2989,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_1",
                     "competitor": "淘宝",
                     "dimension_id": "market_growth",
+                    "report_section_id": "operation_strategy",
                     "dimension_name": "市场与增长",
                     "title": "淘宝官网",
                     "url": "https://www.taobao.com",
@@ -3014,7 +3020,8 @@ class CollectionReviewTest(unittest.TestCase):
             "analysis_claims": [
                 {
                     "id": "claim_1",
-                    "dimension": "pricing_model",
+                    "analysis_dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "claim": "Acme publishes pricing tiers.",
                     "evidence_ids": ["ev_1"],
                 }
@@ -3024,6 +3031,7 @@ class CollectionReviewTest(unittest.TestCase):
                     "id": "ev_1",
                     "competitor": "Acme",
                     "dimension_id": "pricing_model",
+                    "report_section_id": "business_model",
                     "dimension_name": "Pricing | Packaging",
                     "title": "Acme | pricing",
                     "url": "https://acme.example/pricing?a=1|b=2",

@@ -34,14 +34,15 @@ PlanningAgent
 
 ```text
 IndustryDirectionPlan.final_directions[].direction_id
--> PlanningAgent._direction_schema_extensions()
--> ActiveKnowledgeSchema.industry_extensions[].id
--> CollectionAgent._schema_dimensions()
--> ResearchBranch.dimension_id
--> EvidenceCollectionTask.dimension_id
--> EvidenceItem.dimension_id
--> AnalysisClaim.dimension
--> ReportWriterAgent fixed product section matching
+-> PlanningAgent._analysis_dimensions()
+-> AnalysisDimension.id / schema_field_ids / report_targets
+-> CollectionAgent._collection_dimensions()
+-> ResearchBranch.analysis_dimension_id / report_section_id
+-> EvidenceCollectionTask.analysis_dimension_id
+-> EvidenceItem.analysis_dimension_id
+-> KnowledgeFact.analysis_dimension_id / report_section_id
+-> AnalysisClaim.analysis_dimension_id / report_section_id
+-> ReportWriterAgent fixed product section routing
 ```
 
 证据支持链路大致如下：
@@ -58,41 +59,42 @@ EvidenceItem.id
 这两条链在 `AnalysisClaim` 处临时汇合：
 
 ```text
-AnalysisClaim.dimension    = claim 属于哪个维度
-AnalysisClaim.evidence_ids = claim 由哪些 EvidenceItem 支撑
+AnalysisClaim.analysis_dimension_id = claim 属于哪个分析维度
+AnalysisClaim.report_section_id     = claim 进入哪个固定报告小节
+AnalysisClaim.evidence_ids          = claim 由哪些 EvidenceItem 支撑
 ```
 
-## 当前问题
+## 已修正的问题背景
 
 ### 1. 一个字符串 ID 承担太多语义
 
-当前这些字段经常靠同一个字符串值串起来：
+旧链路中这些字段经常靠同一个字符串值串起来：
 
 ```text
-SchemaExtension.id
+AnalysisDimension.schema_field_ids
 ResearchBranch.dimension_id
 EvidenceItem.dimension_id
-AnalysisClaim.dimension
+AnalysisClaim.dimension  # removed
 ReportWriterAgent section id
 ```
 
 它们分别代表 schema 字段、采集维度、证据归属、claim 归属和报告展示章节。语义不同但字段未显式区分，导致下游只能猜。
 
-### 2. `industry_extensions.evidence_ids` 看起来像证据链，但实际不是
+### 2. `ActiveKnowledgeSchema` / `SchemaExtension` 已移除
 
-`SchemaExtension` 有 `evidence_ids` 字段，但 Planning 阶段通常写入空数组。它不应被当作当前版本的证据绑定来源。
+旧版 `ActiveKnowledgeSchema`、`SchemaExtension` 和 `ActiveKnowledgeSchema.industry_extensions` 容易被误读成证据链或 collection 入口。这些对象已移除；行业选择归属 `IndustryDirectionPlan.industry`，方向派生字段 ID 只保留在 `AnalysisDimension.schema_field_ids`。
 
-### 3. `CompetitorKnowledge.industry_extensions` 不是精准证据聚合
+### 3. `CompetitorKnowledge.industry_extensions` 已移除
 
-当前 `KnowledgeStructuringAgent` 会给每个 competitor 的每个 extension 填 evidence IDs，但这些 evidence IDs 可能是该 competitor 的全部 accepted evidence，而不是该 extension 的精确 evidence。它不适合作为 claim 级引用来源。
+旧版 `KnowledgeStructuringAgent` 会给每个 competitor 的每个 extension 填 evidence IDs。该字段不是主链路需要的证据聚合对象，已经移除；精确证据绑定由 `KnowledgeFact.evidence_ids` 和 `AnalysisClaim.evidence_ids` 承担。
 
 ### 4. Knowledge 没有成为主路径
 
 当前 `AnalysisAgent` 优先从 accepted evidence 直接生成 claims。只有当 evidence-review path 没有生成 claims 时，才 fallback 到 `CompetitorKnowledge`。这让 KnowledgeStructuringAgent 更像旁路存档，而不是主分析输入。
 
-### 5. Writer 仍然按固定产品小节组织第三章
+### 5. Writer 曾经按固定产品小节猜测第三章路由
 
-`ReportWriterAgent` 当前主要遍历固定产品分析小节，再用 mapping / aliases 把 claim 塞进去。行业特定维度或用户自定义方向可能无法进入正文第三章，只剩附录或总结中残留。
+旧版 `ReportWriterAgent` 主要遍历固定产品分析小节，再用 mapping / aliases 把 claim 塞进去。行业特定维度或用户自定义方向可能无法进入正文第三章，只剩附录或总结中残留。
 
 ## 目标架构
 
@@ -110,7 +112,7 @@ AnalysisDimension
 核心原则：
 
 - `AnalysisDimension` 表示这次任务要研究什么，不直接等于报告第三章的小节。
-- `ActiveKnowledgeSchema` 表示结构化知识的存储字段，不直接充当报告章节。
+- `IndustryDirectionPlan` 表示本次任务选中的行业和最终分析方向；不再单独维护 `ActiveKnowledgeSchema`。
 - 报告第三章仍然保留固定 10 个产品分析小节，保证输出结构稳定。
 - 每个 `AnalysisDimension` 必须显式映射到 1 个 primary product section，可选映射到少量 secondary product sections。
 - `EvidenceItem` 必须显式绑定到 `analysis_dimension_id`。
@@ -124,9 +126,9 @@ AnalysisDimension
 
 - 固定 10 个第三章 product sections 和默认维度映射集中在 `rivalens/report_sections.py`。
 - `PlanningAgent` 负责从 `IndustryDirectionPlan.final_directions` 生成 `state["analysis_dimensions"]`，并为每个维度写入 `report_targets`。
-- `CollectionAgent` 正常路径优先消费 `analysis_dimensions`，旧的 `active_knowledge_schema.industry_extensions` 仅作为兼容入口。
+- `CollectionAgent` 只消费 `analysis_dimensions` 生成非 profile 搜索分支；行业搜索词从 `industry_direction_plan.industry` 读取。
 - `EvidenceItem`、`KnowledgeFact`、`AnalysisClaim` 和 ClaimSupport verification task 均应保留 `analysis_dimension_id`；报告正文路由使用 `report_section_id`。
-- `ReportWriterAgent` 仍输出固定 10 小节，但优先按 `report_section_id` / `report_targets` 选择 claims，aliases 只作为兼容 fallback。
+- `ReportWriterAgent` 仍输出固定 10 小节，但只按 `report_section_id` / `report_targets` 选择 claims，不再使用 aliases 或 dimension string 猜测章节。
 
 ### AnalysisDimension
 
@@ -175,24 +177,23 @@ AnalysisDimension
 这次任务要研究什么，以及研究结果应该落到哪些固定报告小节？
 ```
 
-### ActiveKnowledgeSchema / SchemaExtension
+### IndustryDirectionPlan
 
-`ActiveKnowledgeSchema` 只回答：
+`IndustryDirectionPlan` 回答：
 
 ```text
-结构化知识应该沉淀到哪些字段？
+本任务选中了哪个行业？最终要研究哪些方向？
 ```
 
-`SchemaExtension` 可以由 `AnalysisDimension.schema_field_ids` 引用，但不应取代 `AnalysisDimension`。
+方向派生字段不再建模为独立 `SchemaExtension`；它们由
+`AnalysisDimension.schema_field_ids` 承载。
 
 ```python
 {
-    "id": "direction_baseline_trust_security_compliance",
-    "name": "信任、安全与合规",
-    "description": "安全、隐私、权限、合规和信任背书相关字段。",
-    "origin": "schema_registry",
-    "source_hints": ["trust_center", "official_site", "docs"],
-    "approved": True,
+    "industry": {"industry_id": "saas_collaboration", "name": "SaaS / 协作文档工具"},
+    "candidate_industries": [],
+    "final_directions": [...],
+    "selection_method": "rule_template",
 }
 ```
 
@@ -212,7 +213,7 @@ CollectionAgent 应消费 `analysis_dimensions`。
 }
 ```
 
-`dimension_id` 可以在迁移期保留为兼容字段，但新逻辑应优先读 `analysis_dimension_id`。
+`dimension_id` 可以作为 research/evidence trace alias 暂时保留，但 KnowledgeStructuring、Analysis 和 Writer 不应再用它反推 `analysis_dimension_id`。
 
 ### EvidenceItem
 
@@ -274,7 +275,6 @@ AnalysisClaim 应主要从 KnowledgeFact 生成，并保留证据绑定。
     "knowledge_fact_ids": ["fact_1", "fact_2"],
     "evidence_ids": ["ev_1", "ev_2"],
     "report_section_id": "product_features",
-    "report_section_role": "primary",
     "claim": "Acme 在安全合规公开透明度上强于 X，因为其公开披露了 SSO、审计日志和合规认证。",
     "competitors": ["Acme"],
     "confidence": 0.78,
@@ -357,7 +357,6 @@ Report section 是固定 product section 的一次渲染结果。它聚合映射
 PlanningAgent
   -> IndustryDirectionPlan
   -> AnalysisDimension[]
-  -> ActiveKnowledgeSchema
 
 CollectionAgent
   -> ResearchBranch.analysis_dimension_id
@@ -394,7 +393,6 @@ ReportWriterAgent
 
 - Select industry and confirmed analysis directions.
 - Build `AnalysisDimension[]` as the canonical task dimensions.
-- Build `ActiveKnowledgeSchema` as the knowledge storage schema.
 - Preserve provenance from `IndustryDirectionPlan.final_directions` into `AnalysisDimension.direction_id`.
 - Map every `AnalysisDimension` to one primary fixed product section and optional secondary product sections.
 
@@ -427,18 +425,19 @@ ReportWriterAgent
 
 - Generate chapter three from the fixed 10 product sections.
 - Select section claims by exact `report_section_id`, then validate against `analysis_dimension_id`.
-- Use aliases only as a compatibility fallback, never as the primary matching mechanism.
+- Do not infer report sections from aliases, `dimension`, or `dimension_id`.
 - Preserve citations by resolving `claim.evidence_ids -> EvidenceItem.url`.
 
 ## Migration Plan
 
-### Phase 1: Add explicit fields without breaking compatibility
+### Phase 1: Make AnalysisDimension the runtime backbone
 
 - Add `analysis_dimensions` to PlanningAgent output.
 - Add `report_targets` or equivalent `ReportSectionMapping` to each analysis dimension.
 - Add `analysis_dimension_id` to ResearchBranch, ResearchTask, EvidenceCollectionTask, EvidenceItem and AnalysisClaim.
 - Add `report_section_id` to AnalysisClaim or build an equivalent normalized claim-to-section index before writing.
-- Keep current `dimension_id` and `dimension` fields as compatibility aliases.
+- Remove `AnalysisClaim.dimension`; keep lower-level `dimension_id` fields only where research/evidence trace contracts still read them.
+- Remove `ActiveKnowledgeSchema`, `SchemaExtension` and `active_knowledge_schema.industry_extensions`.
 - Add tests that prove `analysis_dimension_id` survives Planning -> Collection -> Analysis -> Writer.
 
 ### Phase 2: Make KnowledgeStructuringAgent meaningful
@@ -481,7 +480,7 @@ A future implementation of this architecture should prove:
 
 ## Design Rule
 
-Do not use `active_knowledge_schema.industry_extensions` as the report or evidence-traceability backbone. Use it as the knowledge schema.
+Do not reintroduce `ActiveKnowledgeSchema` or `active_knowledge_schema.industry_extensions` as the report, collection, or evidence-traceability backbone.
 
 Do not use the fixed 10 product sections as the research backbone either. They are presentation slots.
 

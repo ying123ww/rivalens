@@ -69,18 +69,18 @@ class CollectionAgent:
         config: Any | None = None,
     ) -> CompetitorAnalysisState:
         task = state.get("task", {})
-        schema_message = latest_message_for(
+        plan_message = latest_message_for(
             state,
             receiver="collection",
-            message_type="schema_selection",
+            message_type="research_plan",
             sender="planner",
         )
-        schema_payload = schema_message.get("payload", {}) if schema_message else {}
-        active_schema = state.get("active_knowledge_schema") or schema_payload.get(
-            "active_schema",
+        plan_payload = plan_message.get("payload", {}) if plan_message else {}
+        industry_direction_plan = state.get("industry_direction_plan") or plan_payload.get(
+            "industry_direction_plan",
             {},
         )
-        analysis_dimensions = state.get("analysis_dimensions") or schema_payload.get(
+        analysis_dimensions = state.get("analysis_dimensions") or plan_payload.get(
             "analysis_dimensions",
             [],
         )
@@ -109,7 +109,7 @@ class CollectionAgent:
             root_branches = self._build_root_branches(
                 query,
                 competitors,
-                active_schema,
+                industry_direction_plan,
                 analysis_dimensions,
             )
             root_branches, root_branch_limit_exceeded = (
@@ -323,8 +323,10 @@ class CollectionAgent:
                     "input": {
                         "query": query,
                         "competitors": competitors,
-                        "message_id": schema_message.get("id") if schema_message else None,
-                        "active_schema_id": active_schema.get("id"),
+                        "message_id": plan_message.get("id") if plan_message else None,
+                        "selected_industry": (
+                            industry_direction_plan.get("industry") or {}
+                        ).get("industry_id"),
                         "collection_phase": "verification" if verification_pass else "initial_or_gap_collection",
                         "verification_task_count": len(verification_queue),
                         "max_verification_concurrency": self.max_verification_concurrency,
@@ -429,11 +431,11 @@ class CollectionAgent:
         self,
         query: str,
         competitors: list[Any],
-        active_schema: dict[str, Any],
+        industry_direction_plan: dict[str, Any],
         analysis_dimensions: list[dict[str, Any]] | None = None,
     ) -> list[ResearchBranch]:
         normalized_competitors = self._normalize_competitors(competitors)
-        dimensions = self._collection_dimensions(analysis_dimensions or [], active_schema)
+        dimensions = self._collection_dimensions(analysis_dimensions or [])
         branches = []
 
         for competitor in normalized_competitors:
@@ -445,7 +447,7 @@ class CollectionAgent:
                     original_query=query,
                     competitor=competitor,
                     dimension=dimension,
-                    active_schema=active_schema,
+                    industry_direction_plan=industry_direction_plan,
                 )
                 research_goal = self._research_goal(query, competitor, dimension)
                 success_criteria = self._success_criteria(query, competitor, dimension)
@@ -473,7 +475,7 @@ class CollectionAgent:
                             query,
                             competitor,
                             dimension,
-                            active_schema,
+                            industry_direction_plan,
                         ),
                         "target_urls": [],
                         "search_stage": self._initial_search_stage_from_dimension(dimension),
@@ -629,11 +631,6 @@ class CollectionAgent:
                 "schema_field_ids": branch.get("schema_field_ids", []),
                 "report_section_id": branch.get("report_section_id", ""),
             }
-        active_schema = state.get("active_knowledge_schema", {})
-        for dimension in self._schema_dimensions(active_schema):
-            dimension_id = dimension.get("id", "")
-            if dimension_id and dimension_id not in lookup:
-                lookup[dimension_id] = dimension
         return lookup
 
     def _build_research_briefs(
@@ -870,11 +867,7 @@ class CollectionAgent:
     def _collection_dimensions(
         self,
         analysis_dimensions: list[dict[str, Any]],
-        active_schema: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if not analysis_dimensions:
-            return self._schema_dimensions(active_schema)
-
         dimensions = []
         for dimension in analysis_dimensions:
             dimension_id = dimension.get("id", "")
@@ -911,59 +904,14 @@ class CollectionAgent:
             dimensions.append(normalized)
         return dimensions
 
-    def _schema_dimensions(self, active_schema: dict[str, Any]) -> list[dict[str, Any]]:
-        dimensions = []
-
-        for extension in active_schema.get("industry_extensions", []):
-            extension_id = extension.get("id", "")
-            if not extension_id:
-                continue
-            dimensions.append(
-                {
-                    "id": extension_id,
-                    "name": extension.get(
-                        "name",
-                        extension_id.replace("_", " ").title(),
-                    ),
-                    "type": "industry_extension",
-                    "description": extension.get(
-                        "description",
-                        extension_id.replace("_", " "),
-                    ),
-                    "source_hints": self._ranked_source_hints(
-                        extension.get("source_hints", []),
-                    ),
-                    "guiding_questions": extension.get("guiding_questions", []),
-                    "success_criteria": extension.get("success_criteria", []),
-                    "search_intent": extension.get("search_intent", ""),
-                    "minimum_coverage": ["At least two source-backed public evidence items."],
-                    "risk_level": "medium",
-                    "expected_claim_types": ["industry_specific_signal"],
-                    "schema_field_ids": [extension_id],
-                    "report_section_id": primary_report_section_id(
-                        {
-                            "id": extension_id,
-                            "name": extension.get("name", ""),
-                            "description": extension.get("description", ""),
-                            "source_hints": extension.get("source_hints", []),
-                        }
-                    ),
-                }
-            )
-
-        deduped: dict[str, dict[str, Any]] = {}
-        for dimension in dimensions:
-            deduped[dimension["id"]] = dimension
-        return list(deduped.values())
-
     def _schema_aware_task_context(
         self,
         query: str,
         competitor: str,
         dimension: dict[str, Any],
-        active_schema: dict[str, Any],
+        industry_direction_plan: dict[str, Any],
     ) -> str:
-        selected_industry = active_schema.get("selected_industry", {}).get(
+        selected_industry = (industry_direction_plan.get("industry") or {}).get(
             "name",
             "unknown industry",
         )

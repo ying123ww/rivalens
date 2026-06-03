@@ -37,7 +37,7 @@ under `backend/server/sql_table_create` manually.
 flowchart TB
     User["User / product team"] --> Workflow["rivalens.workflows\nLangGraph DAG"]
 
-    Workflow --> Planner["PlanningAgent\nscope, active schema"]
+    Workflow --> Planner["PlanningAgent\nscope, industry directions"]
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
     Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
     Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
@@ -45,7 +45,7 @@ flowchart TB
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
-    Planner --> MsgSelection["AgentMessage(type=schema_selection)"]
+    Planner --> MsgSelection["AgentMessage(type=research_plan)"]
     Collector --> MsgEvidence["AgentMessage(type=evidence)"]
     Knowledge --> MsgSchema["AgentMessage(type=schema)"]
     Analyst --> MsgAnalysis["AgentMessage(type=analysis)"]
@@ -75,7 +75,8 @@ flowchart TB
 
     State --> Evidence["EvidenceItem"]
     State --> EvidenceReviews["EvidenceReviewResult"]
-    State --> ActiveSchema["ActiveKnowledgeSchema"]
+    State --> DirectionPlan["IndustryDirectionPlan"]
+    State --> Dimensions["AnalysisDimension[]"]
     State --> KnowledgeState["CompetitorKnowledge"]
     State --> Claims["AnalysisClaim"]
     State --> ClaimReviews["ClaimSupportReview"]
@@ -100,9 +101,9 @@ flowchart LR
 ```
 
 `scope_planner` owns the planning phase end to end: it normalizes competitor
-inputs, selects and freezes an `ActiveKnowledgeSchema` from the schema registry,
-composes the confirmed analysis directions from reusable industry facets, then
-emits one `schema_selection` handoff to `source_collection`. When deterministic
+inputs, selects an industry, composes the confirmed analysis directions from
+reusable industry facets, then emits one `research_plan` handoff to
+`source_collection`. When deterministic
 industry matching is confident, the planner uses the maintained facet templates:
 L0 common business-analysis directions, L1 business-archetype directions, and
 L2 regulated-domain directions are deduplicated into the default search plan.
@@ -112,7 +113,7 @@ replay. When the top rule score is below the
 configured threshold, it calls the Anthropic-compatible industry LLM fallback
 configured by `INDUSTRY_FALLBACK_LLM` / `ANTHROPIC_MODEL`, then stores the
 structured industry, rationale, and suggested directions inside the same
-`IndustryDirectionPlan` and `ActiveKnowledgeSchema` protocol. Rule-template
+`IndustryDirectionPlan` protocol. Rule-template
 plans no longer use a second set of `planner_added_directions`, because L0 is
 the shared general coverage layer. The confirmed direction plan is stored in
 `CompetitorAnalysisState.industry_direction_plan`, so the search scope can be
@@ -146,7 +147,7 @@ can create one bounded `verification_task_queue` pass back through
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
-and search hints during outline generation and schema selection. Collection,
+and search hints during industry and analysis planning. Collection,
 knowledge structuring, and analysis reuse the same file chunks as local RAG
 context while preserving the external evidence pipeline.
 
@@ -159,7 +160,7 @@ The payload is validated before it is appended to state. Active handoffs
 currently use these Pydantic payloads:
 
 ```text
-schema_selection -> SchemaSelectionMessagePayload
+research_plan -> ResearchPlanMessagePayload
 evidence -> EvidenceMessagePayload
 schema   -> SchemaMessagePayload
 analysis -> AnalysisMessagePayload
@@ -217,7 +218,7 @@ analysis dimension is collected before any depth expansion is considered. The ex
 budget applies only to child branches created from `CoverageReviewer`
 follow-up task specs, with
 `max_root_branch_hard_limit` acting as a per-competitor defensive cap for
-unusually large schemas and `max_expansion_branches` controlling follow-up
+unusually large analysis plans and `max_expansion_branches` controlling follow-up
 breadth.
 
 This keeps provider calls, source normalization, costs, and evidence metadata in
@@ -293,7 +294,7 @@ The production Docker service passes the same variables through
 older LangChain code paths, but new configuration should use `LANGSMITH_*`.
 When inspecting one `rivalens_competitive_analysis` run, expand
 `scope_planner` for the `rivalens_scope_planner` span, which summarizes the
-normalized competitor scope, selected industry, active schema, and final
+normalized competitor scope, selected industry, and final
 analysis directions. Then expand `source_collection` and look for child spans
 named `rivalens_collect_evidence`, `rivalens_process_subquery`,
 `rivalens_retriever_search`, `rivalens_scrape_url`,

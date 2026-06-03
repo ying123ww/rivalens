@@ -17,15 +17,15 @@ class KnowledgeStructuringAgent:
             message_type="evidence",
             sender="collection",
         )
-        active_schema = state.get("active_knowledge_schema", {})
+        industry_direction_plan = state.get("industry_direction_plan", {})
         evidence_items = self._accepted_evidence_items(state)
 
         knowledge_facts = self._build_knowledge_facts(evidence_items)
-        knowledge = self._build_competitor_knowledge(evidence_items, active_schema)
+        knowledge = self._build_competitor_knowledge(evidence_items)
         competitors = self._enrich_competitors(
             state.get("competitors") or task.get("competitors", []),
             evidence_items,
-            active_schema,
+            industry_direction_plan,
         )
         message = create_agent_message(
             sender="knowledge_structuring",
@@ -56,7 +56,9 @@ class KnowledgeStructuringAgent:
                     "input": {
                         "query": task.get("query", ""),
                         "evidence_count": len(evidence_items),
-                        "active_schema_id": active_schema.get("id"),
+                        "selected_industry": (
+                            industry_direction_plan.get("industry") or {}
+                        ).get("industry_id"),
                         "message_id": evidence_message.get("id") if evidence_message else None,
                     },
                     "output": {
@@ -77,7 +79,6 @@ class KnowledgeStructuringAgent:
     def _build_competitor_knowledge(
         self,
         evidence_items: list[dict[str, Any]],
-        active_schema: dict[str, Any],
     ) -> list[CompetitorKnowledge]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for evidence in evidence_items:
@@ -155,7 +156,7 @@ class KnowledgeStructuringAgent:
                 feature_tree.append(
                     {
                         "id": f"feature_{index}_{feature_index}",
-                        "category": self._guess_feature_category(normalized_text, active_schema),
+                        "category": "core_feature",
                         "name": title or text[:80],
                         "description": text[:500],
                         "availability": "unknown",
@@ -168,7 +169,6 @@ class KnowledgeStructuringAgent:
                 {
                     "id": f"knowledge_{index}",
                     "competitor": competitor,
-                    "active_schema_id": active_schema.get("id", ""),
                     "feature_tree": feature_tree,
                     "pricing_model": {
                         "plans": pricing_plans,
@@ -181,19 +181,6 @@ class KnowledgeStructuringAgent:
                         "confidence": self._average_confidence(pricing_plans),
                     },
                     "user_personas": persona_signals,
-                    "industry_extensions": {
-                        extension.get("id", ""): {
-                            "name": extension.get("name", ""),
-                            "description": extension.get("description", ""),
-                            "evidence_ids": self._extension_evidence_ids(
-                                extension.get("id", ""),
-                                competitor_evidence,
-                            ),
-                            "confidence": extension.get("confidence", 0.5),
-                        }
-                        for extension in active_schema.get("industry_extensions", [])
-                        if extension.get("id")
-                    },
                     "evidence_ids": evidence_ids,
                     "confidence": self._average_confidence(competitor_evidence),
                 }
@@ -243,7 +230,7 @@ class KnowledgeStructuringAgent:
         self,
         competitors: list[Any],
         evidence_items: list[dict[str, Any]],
-        active_schema: dict[str, Any],
+        industry_direction_plan: dict[str, Any],
     ) -> list[dict[str, Any]]:
         profiles_by_competitor: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for evidence in evidence_items:
@@ -262,11 +249,7 @@ class KnowledgeStructuringAgent:
                 and evidence.get("competitor")
             ]
 
-        selected_industry = (
-            active_schema.get("selected_industry", {}).get("name", "")
-            if isinstance(active_schema, dict)
-            else ""
-        )
+        selected_industry = (industry_direction_plan.get("industry") or {}).get("name", "")
         enriched = []
         for competitor in normalized:
             profile = dict(competitor)
@@ -339,43 +322,8 @@ class KnowledgeStructuringAgent:
             return ""
         return " ".join(str(text).split())[:220]
 
-    def _guess_feature_category(self, text: str, active_schema: dict[str, Any]) -> str:
-        for extension in active_schema.get("industry_extensions", []):
-            extension_id = extension.get("id", "")
-            extension_name = extension.get("name", "")
-            tokens = [token for token in extension_id.replace("_", " ").split() if token]
-            tokens.extend(token for token in extension_name.lower().split() if token)
-            if any(token in text for token in tokens):
-                return extension_id
-        return "core_feature"
-
-    def _extension_evidence_ids(
-        self,
-        extension_id: str,
-        evidence_items: list[dict[str, Any]],
-    ) -> list[str]:
-        if not extension_id:
-            return []
-        matched = []
-        for evidence in evidence_items:
-            schema_field_ids = set(evidence.get("schema_field_ids", []) or [])
-            evidence_dimension_ids = {
-                self._evidence_analysis_dimension_id(evidence),
-                str(evidence.get("dimension_id", "") or ""),
-            }
-            if extension_id not in schema_field_ids and extension_id not in evidence_dimension_ids:
-                continue
-            evidence_id = evidence.get("id", "")
-            if evidence_id:
-                matched.append(evidence_id)
-        return list(dict.fromkeys(matched))
-
     def _evidence_analysis_dimension_id(self, evidence: dict[str, Any]) -> str:
-        return str(
-            evidence.get("analysis_dimension_id")
-            or evidence.get("dimension_id")
-            or ""
-        )
+        return str(evidence.get("analysis_dimension_id") or "")
 
     def _average_confidence(self, items: list[dict[str, Any]]) -> float:
         confidences = [float(item.get("confidence", 0.5)) for item in items]

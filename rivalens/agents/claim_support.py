@@ -84,12 +84,8 @@ class ClaimSupportReviewer:
                     "id": f"claim_support_{claim_id or len(reviews) + 1}",
                     "claim_id": claim_id,
                     "branch_id": claim.get("branch_id", ""),
-                    "analysis_dimension_id": claim.get(
-                        "analysis_dimension_id",
-                        claim.get("dimension", ""),
-                    ),
+                    "analysis_dimension_id": claim.get("analysis_dimension_id", ""),
                     "report_section_id": claim.get("report_section_id", ""),
-                    "dimension": claim.get("dimension", ""),
                     "support_status": status,
                     "evidence_ids": evidence_ids,
                     "unsupported_phrases": unsupported_phrases,
@@ -285,7 +281,6 @@ class ClaimSupportReviewer:
 
         dimension = str(
             claim.get("analysis_dimension_id")
-            or claim.get("dimension")
             or "source_evidence"
         )
         claim_text = str(claim.get("claim", ""))
