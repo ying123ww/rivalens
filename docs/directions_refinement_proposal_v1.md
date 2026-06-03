@@ -11,7 +11,7 @@
 
 当前 `ai_tools_llm` 的 13 个方向（model_capabilities、benchmarks、inference_speed 等）适合比较底层模型 API，但如果用户要分析的是 **AI 产品**（如 Cursor vs Windsurf、Perplexity vs ChatGPT Search、Midjourney vs DALL-E），这些方向完全覆盖不到产品层面的差异。
 
-**缺失的产品级维度：** 战略定位、目标用户画像、使用场景、产品功能矩阵、交互体验、商业模式、增长策略、生态壁垒等。
+**缺失的产品级覆盖：** 旧方案需要补足能由 Agent 按行业、用户问题和已采证据动态选择的产品层分析方向，而不是绑定到固定维度清单。
 
 ### 1.2 行业粒度不均匀
 

@@ -9,6 +9,7 @@ from fastapi import WebSocketDisconnect
 
 from backend.server.server_utils import (
     CustomLogsHandler,
+    _is_websocket_disconnect_error,
     handle_start_command,
     handle_websocket_communication,
 )
@@ -144,6 +145,13 @@ class InspectingStreamingManager:
 
 
 class CustomLogsHandlerTest(unittest.IsolatedAsyncioTestCase):
+    def test_starlette_not_connected_runtime_is_disconnect(self):
+        self.assertTrue(
+            _is_websocket_disconnect_error(
+                RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+            )
+        )
+
     async def test_send_json_records_disconnect_when_websocket_is_closed(self):
         handler = CustomLogsHandler(ClosedWebSocket(), f"disconnect probe {uuid4()}")
         try:

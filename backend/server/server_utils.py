@@ -116,7 +116,7 @@ class CustomLogsHandler:
             self.websocket_closed = True
             self.websocket = None
             self._record_websocket_disconnect(exc, summary)
-            log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+            log_method = logger.info if _is_websocket_disconnect_error(exc) else logger.error
             log_method(
                 "WebSocket log batch send failed; server-side logging will continue: %s: %s",
                 type(exc).__name__,
@@ -132,7 +132,7 @@ class CustomLogsHandler:
             self.websocket = None
             self.pending_log_batch = []
             self._record_websocket_disconnect(exc, data)
-            log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+            log_method = logger.info if _is_websocket_disconnect_error(exc) else logger.error
             log_method(
                 "WebSocket send failed; live updates stopped but server-side logging will continue: %s: %s",
                 type(exc).__name__,
@@ -244,6 +244,8 @@ def _is_websocket_disconnect_error(exc: Exception) -> bool:
         or "client disconnected" in error_msg
         or "connectionclosed" in error_msg
         or "close message has been sent" in error_msg
+        or "websocket is not connected" in error_msg
+        or "need to call \"accept\" first" in error_msg
         or "no close frame received" in error_msg
     )
 
@@ -277,7 +279,7 @@ async def _safe_websocket_send_json(websocket, data: Dict[str, Any]) -> bool:
             await websocket.send_json(data)
         return True
     except Exception as exc:
-        log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+        log_method = logger.info if _is_websocket_disconnect_error(exc) else logger.error
         log_method(
             "Unable to send WebSocket message: %s: %s",
             type(exc).__name__,
@@ -293,7 +295,7 @@ async def _safe_websocket_send_text(websocket, data: str) -> bool:
             await websocket.send_text(data)
         return True
     except Exception as exc:
-        log_method = logger.warning if _is_websocket_disconnect_error(exc) else logger.error
+        log_method = logger.info if _is_websocket_disconnect_error(exc) else logger.error
         log_method(
             "Unable to send WebSocket text message: %s: %s",
             type(exc).__name__,
@@ -862,10 +864,10 @@ async def handle_websocket_communication(websocket, manager, report_store=None):
                     })
             except Exception as e:
                 if _is_websocket_disconnect_error(e):
-                    logger.warning("WebSocket disconnected while handling messages: %s: %s", type(e).__name__, e)
+                    logger.info("WebSocket disconnected while handling messages: %s: %s", type(e).__name__, e)
                 else:
                     logger.error(f"WebSocket error: {str(e)}\n{traceback.format_exc()}")
-                print(f"WebSocket error: {e}")
+                    print(f"WebSocket error: {e}")
                 break
     finally:
         if running_task and not running_task.done():
