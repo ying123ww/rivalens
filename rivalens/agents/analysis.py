@@ -3,7 +3,7 @@
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
-from rivalens.report_sections import primary_report_section_id
+from rivalens.report_routing import primary_report_section_id
 from rivalens.schema import AnalysisClaim, CompetitorAnalysisState
 from rivalens.text_quality import clean_text, is_low_quality_text
 

@@ -10,7 +10,7 @@ from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.search_query_builder import SearchQueryBuilder
 from rivalens.agents.success_criteria import normalize_success_criteria
 from rivalens.file_context import format_rag_context
-from rivalens.report_sections import primary_report_section_id
+from rivalens.report_routing import primary_report_section_id
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
 from rivalens.research.evidence_collector import _trace_collection_task
 from rivalens.research.trace_context import langsmith_extra_for_trace_context

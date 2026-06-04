@@ -396,7 +396,7 @@ class IndustryDirectionSkillTest(unittest.TestCase):
         self.assertEqual(user_dimension["schema_field_ids"], ["direction_user_direction_1"])
         self.assertEqual(
             user_dimension["report_targets"][0]["section_id"],
-            "target_users",
+            "user_direction_1",
         )
         self.assertEqual(
             result["messages"][-1]["payload"]["analysis_dimensions"],

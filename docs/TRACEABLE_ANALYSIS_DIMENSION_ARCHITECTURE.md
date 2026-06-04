@@ -1,6 +1,6 @@
 # Traceable Analysis Dimension Architecture
 
-本文档是 Rivalens 后续重构 `PlanningAgent -> CollectionAgent -> KnowledgeStructuringAgent -> AnalysisAgent -> ReportWriterAgent` 链路的指导大纲。目标是把调研方向、知识结构、证据、分析结论和报告章节拆成语义清楚的对象，并通过显式 ID 保持可追溯。
+本文档是 Rivalens 后续重构 `PlanningAgent -> CollectionAgent -> KnowledgeStructuringAgent -> AnalysisAgent -> ReportWriterAgent` 链路的指导大纲。目标是把调研方向、知识结构、证据、分析结论和动态报告章节拆成语义清楚的对象，并通过显式 ID 保持可追溯。
 
 ## 背景
 
@@ -14,7 +14,7 @@ public source URL
 -> report section and citation
 ```
 
-当前系统已经有 Planning、Collection、Knowledge、Analysis、ClaimSupport、Writer 等 Agent，但维度身份在多个对象之间复用同一个字符串字段，导致职责边界变模糊。
+当前系统已经有 Planning、Collection、Knowledge、Analysis、ClaimSupport、Writer 等 Agent，但维度身份、证据归属和报告章节在多个对象之间复用同一个字符串字段，导致职责边界变模糊。
 
 ## 当前真实链路
 
@@ -30,7 +30,7 @@ PlanningAgent
 -> PublisherAgent
 ```
 
-当前维度链路大致如下：
+当前维度和章节链路大致如下：
 
 ```text
 IndustryDirectionPlan.final_directions[].direction_id
@@ -42,7 +42,7 @@ IndustryDirectionPlan.final_directions[].direction_id
 -> EvidenceItem.analysis_dimension_id
 -> KnowledgeFact.analysis_dimension_id / report_section_id
 -> AnalysisClaim.analysis_dimension_id / report_section_id
--> ReportWriterAgent fixed product section routing
+-> ReportWriterAgent dynamic section routing
 ```
 
 证据支持链路大致如下：
@@ -60,7 +60,7 @@ EvidenceItem.id
 
 ```text
 AnalysisClaim.analysis_dimension_id = claim 属于哪个分析维度
-AnalysisClaim.report_section_id     = claim 进入哪个固定报告小节
+AnalysisClaim.report_section_id     = claim 进入哪个任务级动态报告小节
 AnalysisClaim.evidence_ids          = claim 由哪些 EvidenceItem 支撑
 ```
 
@@ -94,7 +94,7 @@ ReportWriterAgent section id
 
 ### 5. Writer 曾经按固定产品小节猜测第三章路由
 
-旧版 `ReportWriterAgent` 主要遍历固定产品分析小节，再用 mapping / aliases 把 claim 塞进去。行业特定维度或用户自定义方向可能无法进入正文第三章，只剩附录或总结中残留。
+旧版 `ReportWriterAgent` 主要遍历固定产品分析小节，再用 mapping / aliases 把 claim 塞进去。行业特定维度或用户自定义方向可能无法进入正文第三章，只剩附录或总结中残留。新的第三章不应继续依赖固定 10 小节，而应由本次任务的 `AnalysisDimension` 和显式章节规划生成。
 
 ## 目标架构
 
@@ -106,29 +106,31 @@ AnalysisDimension
 -> KnowledgeFact / CompetitorKnowledge
 -> AnalysisClaim
 -> ReportSectionMapping
--> fixed product analysis section
+-> dynamic report section
 ```
 
 核心原则：
 
 - `AnalysisDimension` 表示这次任务要研究什么，不直接等于报告第三章的小节。
 - `IndustryDirectionPlan` 表示本次任务选中的行业和最终分析方向；不再单独维护 `ActiveKnowledgeSchema`。
-- 报告第三章仍然保留固定 10 个产品分析小节，保证输出结构稳定。
-- 每个 `AnalysisDimension` 必须显式映射到 1 个 primary product section，可选映射到少量 secondary product sections。
+- 报告第三章由动态分析维度总览和任务级动态章节组成，不再固定为 10 个产品分析小节。
+- 每个 `AnalysisDimension` 必须显式映射到 1 个 primary report section，可选映射到少量 secondary report sections。
+- `report_section_id` 必须来自本次任务的章节规划或 `AnalysisDimension.report_targets`，而不是来自全局固定小节 taxonomy。
 - `EvidenceItem` 必须显式绑定到 `analysis_dimension_id`。
 - `KnowledgeFact` 应把 accepted evidence 结构化成可分析事实。
 - `AnalysisClaim` 应优先基于 KnowledgeFact 生成，同时保留 evidence IDs。
-- `ReportWriterAgent` 应按固定 10 小节生成第三章，并通过显式 mapping 选择 claims，而不是依赖 aliases 猜测。
+- `ReportWriterAgent` 应按动态章节规划生成第三章，并通过显式 mapping 选择 claims，而不是依赖 aliases 猜测。
 
-## 推荐对象模型
+## 当前目标实现落点
 
-## 当前实现落点
-
-- 固定 10 个第三章 product sections 和默认维度映射集中在 `rivalens/report_sections.py`。
 - `PlanningAgent` 负责从 `IndustryDirectionPlan.final_directions` 生成 `state["analysis_dimensions"]`，并为每个维度写入 `report_targets`。
+- `AnalysisDimension.report_targets` 是当前运行时的章节 mapping 存储；如果后续新增 `ReportSectionPlan`，它应从这些 target 归一化生成，而不是绕过维度主轴。
+- `rivalens/report_routing.py` 只负责动态章节路由：默认把每个分析维度映射到自己的任务级 section id，不维护全局固定产品小节 taxonomy。
 - `CollectionAgent` 只消费 `analysis_dimensions` 生成非 profile 搜索分支；行业搜索词从 `industry_direction_plan.industry` 读取。
 - `EvidenceItem`、`KnowledgeFact`、`AnalysisClaim` 和 ClaimSupport verification task 均应保留 `analysis_dimension_id`；报告正文路由使用 `report_section_id`。
-- `ReportWriterAgent` 仍输出固定 10 小节，但只按 `report_section_id` / `report_targets` 选择 claims，不再使用 aliases 或 dimension string 猜测章节。
+- `ReportWriterAgent` 输出“动态分析维度总览 + 动态章节正文”，并只按 `report_section_id` / `report_targets` 选择 claims，不再使用 aliases 或 dimension string 猜测章节。
+
+## 推荐对象模型
 
 ### AnalysisDimension
 
@@ -153,19 +155,19 @@ AnalysisDimension
     "report_order": 9,
     "report_targets": [
         {
-            "section_id": "product_features",
+            "section_id": "trust_security_compliance",
             "role": "primary",
-            "reason": "安全、权限、隐私和合规披露属于可观察的产品能力和企业级能力。"
+            "reason": "安全、权限、隐私和合规披露是本次任务需要单独展开的核心分析章节。"
         },
         {
-            "section_id": "strategic_positioning",
+            "section_id": "enterprise_adoption_barriers",
             "role": "secondary",
-            "reason": "如果竞品把安全合规作为企业级信任定位，则可进入战略定位。"
+            "reason": "如果安全合规直接影响企业采购、迁移或准入门槛，可作为企业采用章节的 secondary material。"
         },
         {
-            "section_id": "signature_features",
+            "section_id": "differentiation_moat",
             "role": "secondary",
-            "reason": "如果安全合规能力形成明显差异化卖点，则可进入特色功能。"
+            "reason": "如果安全合规形成明显差异化护城河，可作为差异化章节的 secondary material。"
         }
     ],
 }
@@ -174,7 +176,7 @@ AnalysisDimension
 它回答：
 
 ```text
-这次任务要研究什么，以及研究结果应该落到哪些固定报告小节？
+这次任务要研究什么，以及研究结果应该落到哪些任务级动态报告小节？
 ```
 
 ### IndustryDirectionPlan
@@ -274,7 +276,7 @@ AnalysisClaim 应主要从 KnowledgeFact 生成，并保留证据绑定。
     "analysis_dimension_id": "baseline_trust_security_compliance",
     "knowledge_fact_ids": ["fact_1", "fact_2"],
     "evidence_ids": ["ev_1", "ev_2"],
-    "report_section_id": "product_features",
+    "report_section_id": "trust_security_compliance",
     "claim": "Acme 在安全合规公开透明度上强于 X，因为其公开披露了 SSO、审计日志和合规认证。",
     "competitors": ["Acme"],
     "confidence": 0.78,
@@ -287,59 +289,74 @@ AnalysisClaim 应主要从 KnowledgeFact 生成，并保留证据绑定。
 这些结构化事实支持什么分析判断？
 ```
 
-### ProductAnalysisSection / ReportSectionMapping
+### ReportSectionPlan / ReportSectionMapping
 
-第三章的展示结构应继续使用固定 10 个 product sections。它们是报告 UI 和读者认知上的稳定槽位，不是调研维度本身。
+第三章的展示结构应由本次任务动态生成。Writer 可以先输出一个“分析维度总览”，再根据 `AnalysisDimension.report_targets` 或归一化后的 `ReportSectionPlan` 生成若干动态章节。
+
+`ReportSectionPlan` 回答：
 
 ```text
-3.1 strategic_positioning
-3.2 target_users
-3.3 business_model
-3.4 operation_strategy
-3.5 product_features
-3.6 product_flow
-3.7 product_structure
-3.8 interaction_design
-3.9 signature_features
-3.10 user_reputation
+本次报告第三章应该有哪些动态章节，顺序是什么，每节由哪些分析维度支撑？
 ```
 
-`ReportSectionMapping` 是 `AnalysisDimension` 和固定 10 小节之间的桥。
+```python
+[
+    {
+        "section_id": "trust_security_compliance",
+        "number": "3.1",
+        "title": "信任、安全与合规",
+        "description": "比较竞品在安全、权限、隐私、合规和企业采购信任门槛上的公开证据。",
+        "analysis_dimension_ids": ["baseline_trust_security_compliance"],
+        "source": "analysis_dimension_primary_target",
+    },
+    {
+        "section_id": "enterprise_adoption_barriers",
+        "number": "3.2",
+        "title": "企业采用与迁移门槛",
+        "description": "比较竞品在部署、集成、迁移、SLA、采购准入等方面的公开信号。",
+        "analysis_dimension_ids": ["migration_switching_cost", "sla_reliability"],
+        "source": "analysis_dimension_grouping",
+    },
+]
+```
+
+`ReportSectionMapping` 是 `AnalysisDimension` 和动态报告章节之间的桥。
 
 ```python
 {
     "analysis_dimension_id": "baseline_trust_security_compliance",
-    "primary_section_id": "product_features",
-    "secondary_section_ids": ["strategic_positioning", "signature_features"],
+    "primary_section_id": "trust_security_compliance",
+    "secondary_section_ids": ["enterprise_adoption_barriers", "differentiation_moat"],
     "schema_field_ids": ["direction_baseline_trust_security_compliance"],
-    "mapping_reason": "该维度主要描述可观察的产品级信任能力；当它构成定位或差异化卖点时，可作为 secondary material 进入对应小节。",
+    "mapping_reason": "该维度本身足以形成独立章节；当它影响企业采用或差异化护城河时，可作为 secondary material 进入对应动态章节。",
 }
 ```
 
 它回答：
 
 ```text
-一个动态研究维度应该进入固定 10 小节里的哪些位置？
+一个动态研究维度应该进入本次报告第三章里的哪些位置？
 ```
 
 LLM 可以参与生成 mapping，但输出必须受限和可校验：
 
-- `primary_section_id` 必须属于固定 10 个 section id。
+- `primary_section_id` 必须来自本次任务的 `ReportSectionPlan`，或由 `AnalysisDimension.report_targets` 显式创建。
 - 每个 `AnalysisDimension` 必须有且只能有 1 个 primary section。
 - `secondary_section_ids` 应控制数量，避免同一 claim 被重复写进多个小节。
-- Writer 不应临时自由改写 mapping；发现未映射维度时应记录质量问题或进入迁移诊断输出。
+- Writer 不应临时自由改写 mapping；发现未映射维度时应记录质量问题或进入诊断输出。
+- 动态章节数量不要求固定，但应受信息覆盖和可读性约束；没有证据支撑的章节不应被强行展开。
 
 ### ReportSection
 
-Report section 是固定 product section 的一次渲染结果。它聚合映射到该小节的 dimensions、claims 和 evidence。
+Report section 是一个任务级动态章节的一次渲染结果。它聚合映射到该章节的 dimensions、claims 和 evidence。
 
 ```python
 {
-    "id": "report_section_product_features",
-    "section_id": "product_features",
-    "number": "3.5",
-    "title": "产品功能",
-    "mapped_analysis_dimension_ids": ["baseline_trust_security_compliance", "core_product_supply"],
+    "id": "report_section_trust_security_compliance",
+    "section_id": "trust_security_compliance",
+    "number": "3.1",
+    "title": "信任、安全与合规",
+    "mapped_analysis_dimension_ids": ["baseline_trust_security_compliance"],
     "claim_ids": ["claim_1", "claim_2"],
     "evidence_ids": ["ev_1", "ev_2"],
 }
@@ -348,7 +365,7 @@ Report section 是固定 product section 的一次渲染结果。它聚合映射
 它回答：
 
 ```text
-固定第三章小节如何汇总映射进来的分析维度和证据化 claims？
+第三章动态章节如何汇总映射进来的分析维度和证据化 claims？
 ```
 
 ## 推荐端到端链路
@@ -381,8 +398,8 @@ ClaimSupportReviewer
   -> verification task keeps analysis_dimension_id
 
 ReportWriterAgent
-  -> fixed product sections
-  -> ReportSectionMapping from AnalysisDimension.report_targets
+  -> dynamic analysis dimension overview
+  -> ReportSectionPlan / ReportSectionMapping from AnalysisDimension.report_targets
   -> section claims by report_section_id and analysis_dimension_id
   -> citation refs by AnalysisClaim.evidence_ids -> EvidenceItem.url
 ```
@@ -394,7 +411,8 @@ ReportWriterAgent
 - Select industry and confirmed analysis directions.
 - Build `AnalysisDimension[]` as the canonical task dimensions.
 - Preserve provenance from `IndustryDirectionPlan.final_directions` into `AnalysisDimension.direction_id`.
-- Map every `AnalysisDimension` to one primary fixed product section and optional secondary product sections.
+- Map every `AnalysisDimension` to one primary dynamic report section and optional secondary report sections.
+- Keep dynamic section IDs stable inside the task so Collection, Analysis, ClaimSupport and Writer can share the same `report_section_id`.
 
 ### CollectionAgent
 
@@ -423,7 +441,7 @@ ReportWriterAgent
 
 ### ReportWriterAgent
 
-- Generate chapter three from the fixed 10 product sections.
+- Generate chapter three from a dynamic analysis dimension overview and task-specific dynamic report sections.
 - Select section claims by exact `report_section_id`, then validate against `analysis_dimension_id`.
 - Do not infer report sections from aliases, `dimension`, or `dimension_id`.
 - Preserve citations by resolving `claim.evidence_ids -> EvidenceItem.url`.
@@ -434,6 +452,7 @@ ReportWriterAgent
 
 - Add `analysis_dimensions` to PlanningAgent output.
 - Add `report_targets` or equivalent `ReportSectionMapping` to each analysis dimension.
+- Ensure report target section IDs are task-level dynamic IDs, not global fixed product-section IDs.
 - Add `analysis_dimension_id` to ResearchBranch, ResearchTask, EvidenceCollectionTask, EvidenceItem and AnalysisClaim.
 - Add `report_section_id` to AnalysisClaim or build an equivalent normalized claim-to-section index before writing.
 - Remove `AnalysisClaim.dimension`; keep lower-level `dimension_id` fields only where research/evidence trace contracts still read them.
@@ -449,7 +468,7 @@ ReportWriterAgent
 
 ### Phase 3: Make Writer mapping-driven
 
-- Keep fixed 10 product sections as the default third-chapter structure.
+- Generate chapter three from a dynamic analysis dimension overview and a task-level `ReportSectionPlan`.
 - Generate section contents from claims mapped by `report_section_id`.
 - Use `AnalysisDimension.report_targets` or `ReportSectionMapping` as the only primary routing source.
 - Add an "unmapped claims" section only for migration diagnostics, not as normal output.
@@ -469,10 +488,10 @@ ReportSection -> AnalysisClaim -> KnowledgeFact -> EvidenceItem -> URL
 A future implementation of this architecture should prove:
 
 - Planner writes non-empty `analysis_dimensions` for normal runs.
-- Every AnalysisDimension maps to exactly one primary fixed product section.
+- Every AnalysisDimension maps to exactly one primary dynamic report section.
 - Every non-profile EvidenceItem has an `analysis_dimension_id`.
 - Every important AnalysisClaim has `analysis_dimension_id` and non-empty `evidence_ids`.
-- Writer chapter three remains the fixed 10-section structure.
+- Writer chapter three contains a dynamic analysis dimension overview and dynamically generated sections.
 - Writer places claims through explicit `report_section_id` / `ReportSectionMapping`, not alias guessing.
 - KnowledgeStructuringAgent produces facts or structured knowledge that AnalysisAgent actually consumes.
 - A report citation can be traced back through claim, fact, evidence and URL.
@@ -482,6 +501,6 @@ A future implementation of this architecture should prove:
 
 Do not reintroduce `ActiveKnowledgeSchema` or `active_knowledge_schema.industry_extensions` as the report, collection, or evidence-traceability backbone.
 
-Do not use the fixed 10 product sections as the research backbone either. They are presentation slots.
+Do not use the old fixed 10 product sections as the research backbone or presentation backbone.
 
-The end-to-end research backbone should be `AnalysisDimension`; the third-chapter presentation backbone should be the fixed 10 product sections; the bridge between them should be explicit `ReportSectionMapping`.
+The end-to-end research backbone should be `AnalysisDimension`; the third-chapter presentation backbone should be the task-specific `ReportSectionPlan`; the bridge between them should be explicit `ReportSectionMapping` / `AnalysisDimension.report_targets`.

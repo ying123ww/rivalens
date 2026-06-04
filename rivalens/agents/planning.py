@@ -17,7 +17,7 @@ from rivalens.schema import (
     CompetitorAnalysisState,
     IndustryDirectionPlan,
 )
-from rivalens.report_sections import report_targets_for_dimension
+from rivalens.report_routing import report_targets_for_dimension
 
 
 def _competitor_names(competitors: Any) -> list[str]:
