@@ -155,7 +155,7 @@ class WebSocketManager:
             except Exception:
                 pass  # If this fails too, there's nothing more we can do
 
-    async def start_streaming(self, task, report_type, report_source, source_urls, document_urls, tone, websocket, headers=None, query_domains=[], mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None):
+    async def start_streaming(self, task, report_type, report_source, source_urls, document_urls, tone, websocket, headers=None, query_domains=[], mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, user_id=None):
         """Start streaming the output."""
         tone = Tone[tone]
         # add customized JSON config file path here
@@ -168,10 +168,11 @@ class WebSocketManager:
             mcp_enabled=mcp_enabled, mcp_strategy=mcp_strategy, mcp_configs=mcp_configs,
             max_search_results=max_search_results,
             industry_direction_plan=industry_direction_plan,
+            user_id=user_id,
         )
         return report
 
-async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, run_id=None):
+async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, run_id=None, user_id=None):
     """Run the agent."""    
     # Reuse the request-scoped log handler when the WebSocket entrypoint already
     # created one, otherwise create one for direct/backend-only calls.
@@ -181,17 +182,10 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
         else CustomLogsHandler(websocket, task)
     )
 
-    # Set up MCP configuration if enabled
+    # MCP configuration is passed via mcp_configs/mcp_strategy parameters to
+    # the researcher constructors.  _process_mcp_configs() in agent.py handles
+    # the actual setup without touching global env vars.
     if mcp_enabled and mcp_configs:
-        import os
-        current_retriever = os.getenv("RETRIEVER", "tavily")
-        if "mcp" not in current_retriever:
-            # Add MCP to existing retrievers
-            os.environ["RETRIEVER"] = f"{current_retriever},mcp"
-
-        # Set MCP strategy
-        os.environ["MCP_STRATEGY"] = mcp_strategy
-
         print(f"🔧 MCP enabled with strategy '{mcp_strategy}' and {len(mcp_configs)} server(s)")
         await logs_handler.send_json({
             "type": "logs",
@@ -210,6 +204,7 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
             industry_direction_plan=industry_direction_plan,
             industry_directions_confirmed=bool(industry_direction_plan),
             run_id=run_id,
+            user_id=user_id,
         )
         report = build_rivalens_structured_response(
             state if isinstance(state, dict) else {"report": str(state)},

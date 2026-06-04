@@ -846,7 +846,7 @@ export default function Home() {
                 isOpen={sidebarOpen}
                 toggleSidebar={toggleSidebar}
               />
-              
+
               <Hero
                 promptValue={promptValue}
                 setPromptValue={setPromptValue}
@@ -876,7 +876,7 @@ export default function Home() {
                 isOpen={sidebarOpen}
                 toggleSidebar={toggleSidebar}
               />
-              
+
               {chatBoxSettings.layoutType === 'copilot' ? (
                 <CopilotResearchContent
                   orderedData={orderedData}

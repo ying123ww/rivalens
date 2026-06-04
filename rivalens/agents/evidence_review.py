@@ -144,7 +144,7 @@ class EvidenceQualityReviewer:
                         code="no_success_criterion_match",
                         severity="medium",
                         evidence_id=evidence_id,
-                        message="Evidence item does not answer the branch success criteria.",
+                        message="正在评估当前来源与维度目标的匹配度。",
                         recommendation="Reject this source for this branch and narrow the follow-up query to missing criteria.",
                     )
                 )
@@ -157,7 +157,7 @@ class EvidenceQualityReviewer:
                         code="missing_source_url",
                         severity="high",
                         evidence_id=evidence_id,
-                        message="Evidence item has no source URL.",
+                        message="正在重新抓取来源链接。",
                         recommendation="Retry scraping or replace the source.",
                     )
                 )
@@ -169,7 +169,7 @@ class EvidenceQualityReviewer:
                         code="competitor_mismatch",
                         severity="high",
                         evidence_id=evidence_id,
-                        message="Evidence item does not match the branch competitor.",
+                        message="正在验证来源与目标竞品的匹配关系。",
                         recommendation="Reject this source or redirect collection.",
                     )
                 )
@@ -181,7 +181,7 @@ class EvidenceQualityReviewer:
                         code="dimension_mismatch",
                         severity="medium",
                         evidence_id=evidence_id,
-                        message="Evidence item does not match the branch schema dimension.",
+                        message="正在将来源归类到对应分析维度。",
                         recommendation="Use this source only for its matching dimension.",
                     )
                 )
@@ -193,7 +193,7 @@ class EvidenceQualityReviewer:
                         code="low_quality_text",
                         severity="high",
                         evidence_id=evidence_id,
-                        message="Evidence text appears garbled or unreadable.",
+                        message="正在清理和校验来源文本质量。",
                         recommendation="Reject this source and collect a cleaner source.",
                     )
                 )
@@ -255,7 +255,7 @@ class EvidenceQualityReviewer:
                     code="no_evidence",
                     severity="high",
                     evidence_id=None,
-                    message="Standard search returned no evidence.",
+                    message="证据收集中，尚未获取足够来源，正在进行补充检索。",
                     recommendation="Expand with a more targeted branch query.",
                 )
             )
@@ -268,7 +268,7 @@ class EvidenceQualityReviewer:
                     code="insufficient_source_count",
                     severity="medium",
                     evidence_id=None,
-                    message="Accepted evidence count is below the branch threshold.",
+                    message="当前可用证据数量偏低，正在扩展检索范围补充更多来源。",
                     recommendation="Expand collection with additional source-backed queries.",
                 )
             )
@@ -279,7 +279,7 @@ class EvidenceQualityReviewer:
                     code="missing_official_source",
                     severity="medium",
                     evidence_id=None,
-                    message="No accepted source appears to be an official competitor source.",
+                    message="正在检索官方来源，当前尚未匹配到竞品官方页面。",
                     recommendation="Expand collection toward official pages or docs.",
                 )
             )
@@ -290,7 +290,7 @@ class EvidenceQualityReviewer:
                     code="missing_pricing_page",
                     severity="medium",
                     evidence_id=None,
-                    message="Pricing branch lacks a pricing-page source.",
+                    message="定价维度正在检索官方定价页面来源。",
                     recommendation="Expand collection toward official pricing pages.",
                 )
             )
@@ -307,7 +307,7 @@ class EvidenceQualityReviewer:
                     code="missing_docs_or_security_source",
                     severity="medium",
                     evidence_id=None,
-                    message="Technical branch lacks docs or security-focused sources.",
+                    message="技术维度正在检索文档与安全合规相关来源。",
                     recommendation="Expand collection toward docs, trust, or security pages.",
                 )
             )
@@ -318,7 +318,7 @@ class EvidenceQualityReviewer:
                     code="missing_customer_or_review_source",
                     severity="medium",
                     evidence_id=None,
-                    message="Persona branch lacks review or customer evidence.",
+                    message="用户画像维度正在检索客户评价与案例来源。",
                     recommendation="Expand collection toward reviews, case studies, or use cases.",
                 )
             )

@@ -2,9 +2,19 @@ import os
 import sys
 import logging
 from typing import Any, Awaitable, Callable
+from uuid import uuid4
+
+from .trace_store import TraceStore, langsmith_trace_id_for_run
 
 RunRivalensTask = Callable[..., Awaitable[Any]]
 logger = logging.getLogger(__name__)
+_trace_store = TraceStore()
+
+
+def set_trace_store(store: TraceStore) -> None:
+    """Inject a shared TraceStore instance (e.g. from app.py)."""
+    global _trace_store
+    _trace_store = store
 
 
 def _ensure_repo_root_on_path() -> None:
@@ -23,30 +33,67 @@ def _resolve_run_rivalens_task() -> RunRivalensTask:
 
 async def run_rivalens_task(*args, **kwargs) -> Any:
     run_task = _resolve_run_rivalens_task()
-    state = await run_task(*args, **kwargs)
-    if isinstance(state, dict):
+    run_id = str(kwargs.get("run_id") or uuid4())
+    query = str(kwargs.get("query") or (args[0] if args else ""))
+    user_id = kwargs.get("user_id")
+    langsmith_trace_id = str(
+        kwargs.get("langsmith_trace_id") or langsmith_trace_id_for_run(run_id)
+    )
+    langsmith_thread_id = str(kwargs.get("langsmith_thread_id") or run_id)
+    kwargs.update(
+        {
+            "run_id": run_id,
+            "langsmith_trace_id": langsmith_trace_id,
+            "langsmith_thread_id": langsmith_thread_id,
+        }
+    )
+
+    if _trace_store.enabled:
         try:
-            from server.persistence import (
-                get_persistence_config,
-                persist_competitive_analysis_state,
+            _trace_store.start_run(
+                run_id=run_id,
+                query=query,
+                user_id=user_id,
+                langsmith_trace_id=langsmith_trace_id,
+                langsmith_thread_id=langsmith_thread_id,
             )
+        except Exception:
+            logger.exception("Failed to persist running Rivalens trace %s", run_id)
 
-            if not get_persistence_config().enabled:
-                logger.info("Rivalens persistence is disabled; skipping run persistence.")
-                return state
+    try:
+        state = await run_task(*args, **kwargs)
+    except Exception as exc:
+        if _trace_store.enabled:
+            try:
+                _trace_store.mark_failed_run(
+                    run_id=run_id,
+                    query=query,
+                    error=str(exc),
+                    user_id=user_id,
+                    langsmith_trace_id=langsmith_trace_id,
+                    langsmith_thread_id=langsmith_thread_id,
+                )
+            except Exception:
+                logger.exception("Failed to persist failed Rivalens run %s", run_id)
+        raise
 
-            result = persist_competitive_analysis_state(state)
+    if isinstance(state, dict) and _trace_store.enabled:
+        try:
+            result = _trace_store.persist_state(
+                state,
+                run_id=run_id,
+                user_id=user_id,
+            )
             logger.info(
-                "Persisted Rivalens run %s: competitors=%s directions=%s branches=%s tasks=%s evidence=%s claims=%s claim_reviews=%s",
+                "Persisted Rivalens trace %s: steps=%s transitions=%s evidence=%s claims=%s links=%s artifacts=%s",
                 result.run_id,
-                result.competitor_count,
-                result.direction_count,
-                result.research_branch_count,
-                result.research_task_count,
+                result.step_count,
+                result.transition_count,
                 result.evidence_count,
                 result.claim_count,
-                result.claim_support_review_count,
+                result.claim_evidence_count,
+                result.artifact_count,
             )
-        except Exception as exc:
-            logger.warning("Failed to persist Rivalens run: %s", exc)
+        except Exception:
+            logger.exception("Failed to persist Rivalens trace %s", run_id)
     return state
