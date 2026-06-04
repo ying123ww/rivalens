@@ -692,6 +692,13 @@ class CoverageReviewer:
                 ],
                 "coverage_terms": ["pricing", "price", "plan", "billing", "package", "enterprise", "free"],
             },
+            "business_model_pricing": {
+                "guiding_questions": [
+                    "What public pricing, packaging, plans, or billing units are available?",
+                    "Is there evidence of free tier, enterprise sales, or monetization model?",
+                ],
+                "coverage_terms": ["pricing", "price", "plan", "billing", "package", "enterprise", "free"],
+            },
             "pricing_model": {
                 "guiding_questions": [
                     "What public pricing, packaging, plans, or billing units are available?",

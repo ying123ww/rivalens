@@ -1012,6 +1012,7 @@ class CollectionAgent:
     def _effort_level(self, branch: ResearchBranch) -> str:
         if branch.get("dimension_id") in {
             "pricing_business_model",
+            "business_model_pricing",
             "technology_integrations",
             "compliance_risk",
             "competitive_moat",

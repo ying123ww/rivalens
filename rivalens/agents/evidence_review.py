@@ -283,7 +283,7 @@ class EvidenceQualityReviewer:
                     recommendation="Expand collection toward official pages or docs.",
                 )
             )
-        if self._dimension_matches(dimension_id, {"pricing_model", "pricing_business_model"}) and "pricing_page" not in source_types:
+        if self._dimension_matches(dimension_id, {"pricing_model", "pricing_business_model", "business_model_pricing"}) and "pricing_page" not in source_types:
             findings.append(
                 self._finding(
                     branch,
