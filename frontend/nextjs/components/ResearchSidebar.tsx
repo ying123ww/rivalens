@@ -26,15 +26,15 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (isOpen && 
-          sidebarRef.current && 
+      if (isOpen &&
+          sidebarRef.current &&
           !sidebarRef.current.contains(event.target as Node)) {
         toggleSidebar();
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
-    
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
@@ -43,7 +43,7 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
   // Format timestamp for display
   const formatTimestamp = (timestamp: number | string | Date | undefined) => {
     if (!timestamp) return 'Unknown time';
-    
+
     try {
       const date = new Date(timestamp);
       if (isNaN(date.getTime())) return 'Unknown time';
@@ -55,16 +55,16 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
 
   // Animation variants
   const sidebarVariants = {
-    open: { 
-      width: 'var(--sidebar-width)', 
-      transition: { type: 'spring', stiffness: 250, damping: 25 } 
+    open: {
+      width: 'var(--sidebar-width)',
+      transition: { type: 'spring', stiffness: 250, damping: 25 }
     },
-    closed: { 
-      width: 'var(--sidebar-min-width)', 
-      transition: { type: 'spring', stiffness: 250, damping: 25, delay: 0.1 } 
+    closed: {
+      width: 'var(--sidebar-min-width)',
+      transition: { type: 'spring', stiffness: 250, damping: 25, delay: 0.1 }
     }
   };
-  
+
   const fadeInVariants = {
     hidden: { opacity: 0, transition: { duration: 0.2 } },
     visible: { opacity: 1, transition: { duration: 0.3 } }
@@ -75,20 +75,20 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
       {/* Overlay for mobile */}
       <AnimatePresence>
         {isOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
-            className="sidebar-overlay md:hidden fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-40" 
+            className="sidebar-overlay md:hidden fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-40"
             onClick={toggleSidebar}
             aria-hidden="true"
           />
         )}
       </AnimatePresence>
-      
-      <motion.div 
-        ref={sidebarRef} 
+
+      <motion.div
+        ref={sidebarRef}
         className="fixed top-0 left-0 h-full sidebar-z-index"
         variants={sidebarVariants}
         initial={false}
@@ -99,10 +99,10 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
         } as React.CSSProperties}
       >
         {/* Sidebar content */}
-        <div 
-          className={`h-full transition-all duration-300 text-white overflow-hidden 
-            ${isOpen 
-              ? 'bg-gray-900/80 backdrop-blur-md shadow-2xl shadow-black/30 p-3 sm:p-4' 
+        <div
+          className={`h-full transition-all duration-300 text-white overflow-hidden
+            ${isOpen
+              ? 'bg-gray-900/80 backdrop-blur-md shadow-2xl shadow-black/30 p-3 sm:p-4'
               : 'bg-transparent p-0'
             }`}
         >
@@ -121,13 +121,13 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
               >
                 {/* Subtle glowing background */}
                 <div className="absolute inset-0 bg-gradient-to-br from-teal-500/15 via-cyan-400/12 to-blue-500/10 group-hover:from-teal-500/25 group-hover:via-cyan-400/20 group-hover:to-blue-500/15 transition-all duration-300 group-hover:shadow-[0_0_15px_rgba(20,184,166,0.3)]"></div>
-                
+
                 {/* Icon with subtle glow effect */}
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  className="h-5 sm:h-6 w-5 sm:w-6 relative text-teal-100/90 filter drop-shadow-[0_0_1px_rgba(45,212,191,0.5)]" 
-                  fill="none" 
-                  viewBox="0 0 24 24" 
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 sm:h-6 w-5 sm:w-6 relative text-teal-100/90 filter drop-shadow-[0_0_1px_rgba(45,212,191,0.5)]"
+                  fill="none"
+                  viewBox="0 0 24 24"
                   stroke="currentColor"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -161,15 +161,15 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
                 >
                   {/* Gradient background on hover */}
                   <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-gradient-to-br from-[#0cdbb6] via-[#1fd0f0] to-[#06dbee] transition-opacity duration-500"></div>
-                  
+
                   {/* Magical glow effect */}
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" 
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
                       style={{
                         boxShadow: 'inset 0 0 20px 5px rgba(255, 255, 255, 0.2)',
                         background: 'radial-gradient(circle at center, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0) 70%)'
                       }}>
                   </div>
-                  
+
                   <div className="relative z-10 flex items-center justify-center">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 sm:h-5 w-4 sm:w-5 mr-2 transition-transform duration-300 group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -193,13 +193,13 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
                   ) : (
                     <ul className="space-y-2 sm:space-y-3">
                       {history.map((item) => (
-                        <motion.li 
+                        <motion.li
                           key={item.id}
                           className="relative rounded-xl transition-all duration-300 overflow-hidden group bg-gray-900/40 hover:bg-gray-800/60 border border-gray-700/30 hover:border-gray-600/50 backdrop-blur-sm"
                           onMouseEnter={() => setHoveredItem(item.id)}
                           onMouseLeave={() => setHoveredItem(null)}
                         >
-                          
+
                           <Link
                             href={`/research/${item.id}`}
                             className="block w-full text-left p-3 sm:p-4 pr-10 min-h-[56px] relative"
@@ -224,7 +224,7 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
                               {formatTimestamp(item.timestamp || (item as any).updated_at || (item as any).created_at)}
                             </p>
                           </Link>
-                          
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -247,24 +247,24 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
           </AnimatePresence>
         </div>
       </motion.div>
-      
+
       {/* Custom scrollbar styles */}
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 5px;
         }
-        
+
         .custom-scrollbar::-webkit-scrollbar-track {
           background: rgba(15, 23, 42, 0.3);
           border-radius: 20px;
         }
-        
+
         .custom-scrollbar::-webkit-scrollbar-thumb {
           background: rgba(45, 212, 191, 0.3);
           border-radius: 20px;
           transition: all 0.3s;
         }
-        
+
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: rgba(45, 212, 191, 0.6);
         }

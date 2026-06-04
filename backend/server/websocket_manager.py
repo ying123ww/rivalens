@@ -182,17 +182,10 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
         else CustomLogsHandler(websocket, task)
     )
 
-    # Set up MCP configuration if enabled
+    # MCP configuration is passed via mcp_configs/mcp_strategy parameters to
+    # the researcher constructors.  _process_mcp_configs() in agent.py handles
+    # the actual setup without touching global env vars.
     if mcp_enabled and mcp_configs:
-        import os
-        current_retriever = os.getenv("RETRIEVER", "tavily")
-        if "mcp" not in current_retriever:
-            # Add MCP to existing retrievers
-            os.environ["RETRIEVER"] = f"{current_retriever},mcp"
-
-        # Set MCP strategy
-        os.environ["MCP_STRATEGY"] = mcp_strategy
-
         print(f"🔧 MCP enabled with strategy '{mcp_strategy}' and {len(mcp_configs)} server(s)")
         await logs_handler.send_json({
             "type": "logs",

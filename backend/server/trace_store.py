@@ -19,7 +19,6 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
-    MetaData,
     String,
     Table,
     Text,
@@ -34,18 +33,17 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection, Engine
 
+from .metadata import shared_metadata
 from .user_store import DEFAULT_DATABASE_URL, users
 
 
 TRACE_PERSISTENCE_ENABLED_ENV = "RIVALENS_TRACE_PERSISTENCE_ENABLED"
+AUTO_CREATE_TABLES_ENV = "RIVALENS_AUTO_CREATE_TABLES"
 JSON_DATA = JSON().with_variant(JSONB, "postgresql")
-
-metadata = MetaData()
-users.to_metadata(metadata)
 
 analysis_runs = Table(
     "analysis_runs",
-    metadata,
+    shared_metadata,
     Column("run_id", String(160), primary_key=True),
     Column(
         "user_id",
@@ -75,7 +73,7 @@ analysis_runs = Table(
 
 workflow_step_executions = Table(
     "workflow_step_executions",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -96,7 +94,7 @@ workflow_step_executions = Table(
 
 workflow_transitions = Table(
     "workflow_transitions",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -113,7 +111,7 @@ workflow_transitions = Table(
 
 agent_messages = Table(
     "agent_messages",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -133,7 +131,7 @@ agent_messages = Table(
 
 analysis_dimensions = Table(
     "analysis_dimensions",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -150,7 +148,7 @@ analysis_dimensions = Table(
 
 research_branches = Table(
     "research_branches",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -170,7 +168,7 @@ research_branches = Table(
 
 research_tasks = Table(
     "research_tasks",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -190,7 +188,7 @@ research_tasks = Table(
 
 evidence_items = Table(
     "evidence_items",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -218,7 +216,7 @@ evidence_items = Table(
 
 evidence_reviews = Table(
     "evidence_reviews",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -235,7 +233,7 @@ evidence_reviews = Table(
 
 coverage_assessments = Table(
     "coverage_assessments",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -251,7 +249,7 @@ coverage_assessments = Table(
 
 competitor_knowledge = Table(
     "competitor_knowledge",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -266,7 +264,7 @@ competitor_knowledge = Table(
 
 knowledge_facts = Table(
     "knowledge_facts",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -286,7 +284,7 @@ knowledge_facts = Table(
 
 analysis_claims = Table(
     "analysis_claims",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -307,7 +305,7 @@ analysis_claims = Table(
 
 claim_support_reviews = Table(
     "claim_support_reviews",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -324,7 +322,7 @@ claim_support_reviews = Table(
 
 report_sections = Table(
     "report_sections",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -339,7 +337,7 @@ report_sections = Table(
 
 artifacts = Table(
     "artifacts",
-    metadata,
+    shared_metadata,
     Column(
         "run_id",
         String(160),
@@ -357,7 +355,7 @@ artifacts = Table(
 
 knowledge_fact_evidence = Table(
     "knowledge_fact_evidence",
-    metadata,
+    shared_metadata,
     Column("run_id", String(160), primary_key=True),
     Column("knowledge_fact_id", String(180), primary_key=True),
     Column("evidence_id", String(180), primary_key=True),
@@ -375,7 +373,7 @@ knowledge_fact_evidence = Table(
 
 claim_evidence = Table(
     "claim_evidence",
-    metadata,
+    shared_metadata,
     Column("run_id", String(160), primary_key=True),
     Column("claim_id", String(180), primary_key=True),
     Column("evidence_id", String(180), primary_key=True),
@@ -393,7 +391,7 @@ claim_evidence = Table(
 
 claim_knowledge_facts = Table(
     "claim_knowledge_facts",
-    metadata,
+    shared_metadata,
     Column("run_id", String(160), primary_key=True),
     Column("claim_id", String(180), primary_key=True),
     Column("knowledge_fact_id", String(180), primary_key=True),
@@ -411,7 +409,7 @@ claim_knowledge_facts = Table(
 
 report_section_claims = Table(
     "report_section_claims",
-    metadata,
+    shared_metadata,
     Column("run_id", String(160), primary_key=True),
     Column("report_section_id", String(180), primary_key=True),
     Column("claim_id", String(180), primary_key=True),
@@ -496,6 +494,10 @@ class TraceStore:
         return _env_flag(TRACE_PERSISTENCE_ENABLED_ENV, default=True)
 
     @property
+    def auto_create_tables(self) -> bool:
+        return _env_flag(AUTO_CREATE_TABLES_ENV, default=True)
+
+    @property
     def engine(self) -> Engine:
         if self._engine is None:
             database_url = self._database_url or os.getenv(
@@ -509,7 +511,7 @@ class TraceStore:
         return self._engine
 
     def initialize(self) -> None:
-        metadata.create_all(self.engine)
+        shared_metadata.create_all(self.engine)
 
     def persist_state(
         self,

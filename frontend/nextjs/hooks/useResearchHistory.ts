@@ -317,14 +317,14 @@ export const useResearchHistory = () => {
       const response = await fetch(`/api/reports/${id}`, {
         method: 'DELETE',
       });
-      
-      if (!response.ok && response.status !== 404) {
+
+      if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
       }
-      
+
       // Update local state
       setHistory(prev => prev.filter(item => item.id !== id));
-      
+
       // Also update localStorage
       const localHistory = localStorage.getItem('researchHistory');
       if (localHistory) {
@@ -332,22 +332,11 @@ export const useResearchHistory = () => {
         const filteredHistory = parsedHistory.filter((item: any) => item.id !== id);
         localStorage.setItem('researchHistory', JSON.stringify(filteredHistory));
       }
-      
+
       return true;
     } catch (error) {
       console.error('Error deleting research:', error);
-      
-      // Update local state anyway
-      setHistory(prev => prev.filter(item => item.id !== id));
-      
-      // Update localStorage
-      const localHistory = localStorage.getItem('researchHistory');
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        const filteredHistory = parsedHistory.filter((item: any) => item.id !== id);
-        localStorage.setItem('researchHistory', JSON.stringify(filteredHistory));
-      }
-      
+      toast.error('删除失败，请检查后端是否运行');
       return false;
     }
   };

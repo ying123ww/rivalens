@@ -1,15 +1,36 @@
 import aiofiles
 import asyncio
+import atexit
 import importlib
 import json
+import os
 import subprocess
 import sys
 import traceback
-from typing import Any
-from colorama import Fore, Style, init
-import os
-from enum import Enum
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from enum import Enum
+from typing import Any
+
+from colorama import Fore, Style, init
+
+_LLM_THREAD_POOL_SIZE = int(os.getenv("RIVALENS_LLM_THREAD_POOL_SIZE", "64"))
+_llm_executor = ThreadPoolExecutor(
+    max_workers=_LLM_THREAD_POOL_SIZE,
+    thread_name_prefix="rivalens-llm",
+)
+atexit.register(_llm_executor.shutdown, wait=False)
+
+
+def _get_llm_executor() -> ThreadPoolExecutor:
+    """Dedicated thread pool for LLM API calls.
+
+    Using a separate pool avoids the process-default executor (``min(32, cpu+4)``
+    threads) becoming a bottleneck when deep research fires many concurrent
+    ``asyncio.gather``-ed LLM calls.
+    """
+    return _llm_executor
+
 
 _SUPPORTED_PROVIDERS = {
     "openai",
@@ -294,7 +315,7 @@ class GenericLLMProvider:
             loop = asyncio.get_running_loop()
             context = copy_context()
             output = await loop.run_in_executor(
-                None, lambda: context.run(self.llm.invoke, messages, **kwargs)
+                _get_llm_executor(), lambda: context.run(self.llm.invoke, messages, **kwargs)
             )
 
             res = output.content

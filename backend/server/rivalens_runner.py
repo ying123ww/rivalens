@@ -8,7 +8,13 @@ from .trace_store import TraceStore, langsmith_trace_id_for_run
 
 RunRivalensTask = Callable[..., Awaitable[Any]]
 logger = logging.getLogger(__name__)
-trace_store = TraceStore()
+_trace_store = TraceStore()
+
+
+def set_trace_store(store: TraceStore) -> None:
+    """Inject a shared TraceStore instance (e.g. from app.py)."""
+    global _trace_store
+    _trace_store = store
 
 
 def _ensure_repo_root_on_path() -> None:
@@ -42,9 +48,9 @@ async def run_rivalens_task(*args, **kwargs) -> Any:
         }
     )
 
-    if trace_store.enabled:
+    if _trace_store.enabled:
         try:
-            trace_store.start_run(
+            _trace_store.start_run(
                 run_id=run_id,
                 query=query,
                 user_id=user_id,
@@ -57,9 +63,9 @@ async def run_rivalens_task(*args, **kwargs) -> Any:
     try:
         state = await run_task(*args, **kwargs)
     except Exception as exc:
-        if trace_store.enabled:
+        if _trace_store.enabled:
             try:
-                trace_store.mark_failed_run(
+                _trace_store.mark_failed_run(
                     run_id=run_id,
                     query=query,
                     error=str(exc),
@@ -71,9 +77,9 @@ async def run_rivalens_task(*args, **kwargs) -> Any:
                 logger.exception("Failed to persist failed Rivalens run %s", run_id)
         raise
 
-    if isinstance(state, dict) and trace_store.enabled:
+    if isinstance(state, dict) and _trace_store.enabled:
         try:
-            result = trace_store.persist_state(
+            result = _trace_store.persist_state(
                 state,
                 run_id=run_id,
                 user_id=user_id,

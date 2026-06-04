@@ -52,6 +52,8 @@ from server.auth import (
     verify_password,
 )
 from server.report_store import ReportStore
+from server.rivalens_runner import set_trace_store
+from server.session_store import SessionStore
 from server.trace_store import TraceStore
 from server.user_store import DuplicateEmailError, UserStore
 
@@ -97,6 +99,8 @@ class IndustryDirectionRequest(BaseModel):
 
 user_store = UserStore()
 trace_store = TraceStore()
+set_trace_store(trace_store)
+session_store = SessionStore()
 
 
 @asynccontextmanager
@@ -119,22 +123,27 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning(f"Frontend directory not found: {frontend_path}")
 
+    # Apply any pending database migrations before starting the API.
     try:
-        user_store.initialize()
-        logger.info("Rivalens authentication table is ready")
+        from alembic.config import Config as AlembicConfig
+        from alembic.command import upgrade as alembic_upgrade
+
+        alembic_cfg = AlembicConfig(
+            os.path.join(os.path.dirname(__file__), "..", "..", "alembic.ini")
+        )
+        alembic_upgrade(alembic_cfg, "head")
+        logger.info("Database migrations applied")
     except Exception:
-        logger.exception("Rivalens authentication database initialization failed")
+        logger.exception("Database migration failed")
         raise
 
-    if trace_store.enabled:
-        try:
-            trace_store.initialize()
-            logger.info("Rivalens traceability tables are ready")
-        except Exception:
-            logger.exception("Rivalens traceability database initialization failed")
-            raise
-    else:
-        logger.info("Rivalens traceability persistence is disabled")
+    # One-shot: migrate legacy JSON report data into the SQL store.
+    try:
+        imported = await report_store.migrate_from_json()
+        if imported:
+            logger.info("Migrated %d reports from legacy JSON", imported)
+    except Exception:
+        logger.exception("Legacy report migration failed")
 
     logger.info("Rivalens API ready")
     yield
@@ -179,7 +188,7 @@ app.mount("/site", StaticFiles(directory=frontend_dir), name="site")
 # WebSocket manager
 manager = WebSocketManager()
 
-report_store = ReportStore(Path(os.getenv('REPORT_STORE_PATH', os.path.join('data', 'reports.json'))))
+report_store = ReportStore()
 
 # Constants
 DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
@@ -411,6 +420,118 @@ def login_user(request: LoginRequest):
 @app.get("/api/auth/me", response_model=UserPublic)
 def get_current_user(user: Dict[str, Any] = Depends(_require_current_user)):
     return to_public_user(user)
+
+
+# ── Session API ──────────────────────────────────────────────────
+
+
+class CreateSessionRequest(BaseModel):
+    title: str = "新对话"
+
+
+class UpdateSessionMemoryRequest(BaseModel):
+    messages: list[dict[str, Any]] = []
+
+
+class UpdateSessionMetaRequest(BaseModel):
+    title: str | None = None
+
+
+class AppendMessageRequest(BaseModel):
+    message: dict[str, Any]
+
+
+@app.get("/api/sessions")
+def list_sessions(
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    sessions = session_store.get_sidebar_sessions(user["id"])
+    return {"sessions": sessions}
+
+
+@app.post("/api/sessions", status_code=201)
+def create_session(
+    request: CreateSessionRequest,
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    session = session_store.create_session(user["id"], title=request.title)
+    return {"session": session}
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session(
+    session_id: str,
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session["user_id"] != str(user["id"]) and user["role"] != "admin":
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"session": session}
+
+
+@app.put("/api/sessions/{session_id}/memory")
+def update_session_memory(
+    session_id: str,
+    request: UpdateSessionMemoryRequest,
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session["user_id"] != str(user["id"]):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    session_store.update_session_memory(session_id, request.messages)
+    return {"success": True}
+
+
+@app.post("/api/sessions/{session_id}/messages")
+def append_message(
+    session_id: str,
+    request: AppendMessageRequest,
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session["user_id"] != str(user["id"]):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    session_store.append_message(session_id, request.message)
+    return {"success": True}
+
+
+@app.patch("/api/sessions/{session_id}")
+def update_session_meta(
+    session_id: str,
+    request: UpdateSessionMetaRequest,
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session["user_id"] != str(user["id"]):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    kwargs = {}
+    if request.title is not None:
+        kwargs["title"] = request.title
+    if kwargs:
+        session_store.update_session_meta(session_id, **kwargs)
+    return {"success": True}
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(
+    session_id: str,
+    user: dict[str, Any] = Depends(_require_current_user),
+):
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session["user_id"] != str(user["id"]) and user["role"] != "admin":
+        raise HTTPException(status_code=404, detail="会话不存在")
+    deleted = session_store.delete_session(session_id)
+    return {"success": deleted}
 
 
 @app.get("/api/trace/runs/{run_id}")

@@ -21,6 +21,7 @@ from rivalens.research.llm_provider.generic.base import (
 
 from ..prompts import PromptFamily
 from .costs import estimate_llm_cost
+from .llm_rate_limiter import get_llm_rate_limiter
 from .validators import Subtopics
 
 
@@ -97,6 +98,14 @@ async def create_chat_completion(
 
     provider = get_llm(llm_provider, **provider_kwargs)
     response = ""
+
+    # Rate-limit before the retry loop (don't re-limit on retries)
+    limiter = get_llm_rate_limiter()
+    if not await limiter.acquire(llm_provider):
+        raise RuntimeError(
+            f"LLM rate-limit timeout for {llm_provider}"
+        )
+
     # create response
     max_attempts = 1 if (stream and websocket is not None) else 10
     last_exception: Exception | None = None

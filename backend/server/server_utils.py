@@ -32,9 +32,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class CustomLogsHandler:
-    """Custom handler to capture streaming logs from the research process"""
+    """Captures streaming events from the research process and relays them to
+    the WebSocket.  Event data is kept in-memory only (``ordered_data``, report
+    text) and persisted to the database by the caller via ``report_store`` —
+    no JSON-file sidecar is written."""
+
     def __init__(self, websocket, task: str, research_id: str | None = None):
-        self.logs = []
         self.websocket = websocket
         self._send_lock = _get_websocket_send_lock(websocket)
         self.websocket_closed = False
@@ -42,28 +45,11 @@ class CustomLogsHandler:
         self.pending_log_batch: list[Dict[str, Any]] = []
         self.research_id = research_id or sanitize_filename(f"task_{int(time.time())}_{task}")
         self.ordered_data: list[Dict[str, Any]] = []
-        self.log_file = os.path.join("outputs", f"{self.research_id}.json")
         self.timestamp = datetime.now().isoformat()
-        # Initialize log file with metadata
-        os.makedirs("outputs", exist_ok=True)
-        with open(self.log_file, 'w') as f:
-            json.dump({
-                "timestamp": self.timestamp,
-                "events": [],
-                "content": {
-                    "query": "",
-                    "sources": [],
-                    "context": [],
-                    "report": "",
-                    "costs": 0.0
-                }
-            }, f, indent=2)
 
     async def send_json(self, data: Dict[str, Any]) -> None:
         """Store log data and send to websocket when it is still connected."""
         async with self._send_lock:
-            self._write_log_data(data)
-
             if data.get("type") == "logs":
                 self.pending_log_batch.append(data)
                 if len(self.pending_log_batch) >= self.log_batch_size:
@@ -80,7 +66,7 @@ class CustomLogsHandler:
             await self._send_websocket_locked(data)
 
     async def detach_websocket(self, output: str, metadata: Dict[str, Any] | None = None) -> None:
-        """Stop live streaming while keeping server-side JSON logging active."""
+        """Stop live streaming while keeping server-side logging active."""
         async with self._send_lock:
             self.websocket_closed = True
             self.websocket = None
@@ -91,7 +77,6 @@ class CustomLogsHandler:
                 "output": output,
                 "metadata": metadata or {},
             }
-            self._write_log_data(disconnect_event)
             self._append_ordered_data(disconnect_event)
 
     async def flush_log_batch(self) -> None:
@@ -178,30 +163,6 @@ class CustomLogsHandler:
             return default
         return max(minimum, parsed)
 
-    def _write_log_data(self, data: Dict[str, Any]) -> None:
-        # Read current log file
-        with open(self.log_file, 'r') as f:
-            log_data = json.load(f)
-            
-        # Update appropriate section based on data type
-        if data.get('type') == 'logs':
-            log_data['events'].append({
-                "timestamp": datetime.now().isoformat(),
-                "type": "event",
-                "data": data
-            })
-        elif data.get('type') == 'report':
-            log_data['content']['report'] = (
-                log_data['content'].get('report', '') + str(data.get('output', ''))
-            )
-        else:
-            # Update content section for other types of data
-            log_data['content'].update(data)
-            
-        # Save updated log file
-        with open(self.log_file, 'w') as f:
-            json.dump(log_data, f, indent=2)
-
     def _append_ordered_data(self, data: Dict[str, Any]) -> None:
         data_type = data.get("type")
         if not data_type:
@@ -213,7 +174,7 @@ class CustomLogsHandler:
     def _record_websocket_disconnect(self, exc: Exception, failed_data: Dict[str, Any]) -> None:
         failed_type = failed_data.get("type")
         failed_content = failed_data.get("content")
-        self._write_log_data({
+        self._append_ordered_data({
             "type": "logs",
             "content": "websocket_disconnected",
             "output": (
@@ -332,14 +293,10 @@ class Researcher:
             quote_paths=True,
             include_legacy_md_key=True,
         )
-        
-        # Get the JSON log path that was created by CustomLogsHandler
-        json_relative_path = os.path.relpath(self.logs_handler.log_file)
-        
+
         return {
             "output": {
                 **file_paths,  # Include PDF, DOCX, and MD paths
-                "json": json_relative_path
             }
         }
 
@@ -540,8 +497,6 @@ async def handle_start_command(
             quote_paths=True,
             include_legacy_md_key=True,
         )
-        # Add JSON log path to file_paths
-        file_paths["json"] = os.path.relpath(logs_handler.log_file)
         file_paths["research_id"] = research_id
         await send_file_paths(logs_handler, file_paths)
         await upsert_run_report(

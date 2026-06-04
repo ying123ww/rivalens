@@ -9,7 +9,6 @@ from sqlalchemy import (
     Column,
     DateTime,
     Index,
-    MetaData,
     String,
     Table,
     Text,
@@ -24,14 +23,13 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
+from .metadata import shared_metadata
 
 DEFAULT_DATABASE_URL = "postgresql://rivalens:123456@localhost:5433/rivalens"
 
-metadata = MetaData()
-
 users = Table(
     "users",
-    metadata,
+    shared_metadata,
     Column("id", Uuid(as_uuid=True), primary_key=True),
     Column("email", String(320), nullable=False),
     Column("display_name", String(80), nullable=False),
@@ -78,7 +76,7 @@ class UserStore:
         return self._engine
 
     def initialize(self) -> None:
-        metadata.create_all(self.engine)
+        shared_metadata.create_all(self.engine)
 
     def create_user(
         self,

@@ -20,7 +20,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <div className="fixed right-4 top-4 z-[120] flex items-center gap-3 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 shadow-lg shadow-black/20">
+      <div className="fixed right-4 top-1.5 sm:top-3.5 z-[120] flex items-center gap-3 rounded-lg border border-gray-700 bg-gray-900/80 backdrop-blur-md px-3 py-2 shadow-lg shadow-black/20">
         <div className="hidden text-right sm:block">
           <p className="text-xs font-semibold text-gray-100">
             {user.display_name}
