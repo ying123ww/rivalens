@@ -448,7 +448,7 @@ class ClaimSupportReviewer:
             for item in evidence_items
             if item.get("source_type")
         ]
-        if dimension == "pricing_model":
+        if dimension in {"pricing_model", "pricing_business_model", "business_model_pricing"}:
             preferred = ["pricing_page", "official_site", "docs"]
         elif dimension == "user_personas":
             preferred = ["review", "official_site", "marketplace"]
