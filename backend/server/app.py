@@ -11,7 +11,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message="Valid config keys have changed in V2")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, BackgroundTasks, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, BackgroundTasks, HTTPException, Depends, Header
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -38,10 +38,22 @@ from rivalens.agents.industry_direction import (
 )
 from rivalens.schema import IndustryDirectionPlanPayload
 
+from server.auth import (
+    AUTH_COOKIE_NAME,
+    AuthResponse,
+    InvalidTokenError,
+    LoginRequest,
+    RegisterRequest,
+    UserPublic,
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    to_public_user,
+    verify_password,
+)
 from server.report_store import ReportStore
-from server.persistence import get_persistence_config, initialize_database, redact_url
-
-# Database services are available through Docker, but no tables are created yet.
+from server.trace_store import TraceStore
+from server.user_store import DuplicateEmailError, UserStore
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -83,6 +95,10 @@ class IndustryDirectionRequest(BaseModel):
     confirmed: bool = False
 
 
+user_store = UserStore()
+trace_store = TraceStore()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -102,32 +118,25 @@ async def lifespan(app: FastAPI):
             logger.debug(f"Static assets mounted from: {static_path}")
     else:
         logger.warning(f"Frontend directory not found: {frontend_path}")
-    
-    persistence_config = get_persistence_config()
-    if not persistence_config.enabled:
-        logger.info(
-            "Rivalens persistence is disabled; set "
-            "RIVALENS_PERSISTENCE_ENABLED=true to enable PostgreSQL persistence."
-        )
-    elif persistence_config.auto_create_tables:
+
+    try:
+        user_store.initialize()
+        logger.info("Rivalens authentication table is ready")
+    except Exception:
+        logger.exception("Rivalens authentication database initialization failed")
+        raise
+
+    if trace_store.enabled:
         try:
-            initialize_database()
-            logger.info("Rivalens persistence tables are ready")
-        except Exception as exc:
-            logger.warning("Rivalens persistence initialization failed: %s", exc)
+            trace_store.initialize()
+            logger.info("Rivalens traceability tables are ready")
+        except Exception:
+            logger.exception("Rivalens traceability database initialization failed")
+            raise
     else:
-        logger.info(
-            "Rivalens automatic table creation is disabled; set "
-            "RIVALENS_AUTO_CREATE_TABLES=true to enable it."
-        )
-    if persistence_config.enabled:
-        logger.info(
-            "Rivalens API ready - persistence targets configured: postgres=%s redis=%s",
-            redact_url(persistence_config.database_url),
-            persistence_config.redis_url,
-        )
-    else:
-        logger.info("Rivalens API ready - persistence targets are not active.")
+        logger.info("Rivalens traceability persistence is disabled")
+
+    logger.info("Rivalens API ready")
     yield
     # Shutdown
     logger.info("Research API shutting down")
@@ -316,6 +325,118 @@ async def serve_frontend():
     
     return HTMLResponse(content=content)
 
+
+def _build_auth_response(user: Dict[str, Any]) -> AuthResponse:
+    access_token, expires_in = create_access_token(str(user["id"]))
+    return AuthResponse(
+        access_token=access_token,
+        expires_in=expires_in,
+        user=to_public_user(user),
+    )
+
+
+def _require_current_user(
+    authorization: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="需要登录",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = decode_access_token(authorization.removeprefix("Bearer ").strip())
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    user = user_store.get_user_by_id(payload["sub"])
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="用户不存在",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if user["status"] != "active":
+        raise HTTPException(status_code=403, detail="账户已停用")
+    return user
+
+
+def _optional_websocket_user(websocket: WebSocket) -> Dict[str, Any] | None:
+    token = websocket.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        payload = decode_access_token(token)
+    except InvalidTokenError:
+        return None
+    user = user_store.get_user_by_id(payload["sub"])
+    if user is None or user["status"] != "active":
+        return None
+    return user
+
+
+@app.post("/api/auth/register", response_model=AuthResponse, status_code=201)
+def register_user(request: RegisterRequest):
+    try:
+        user = user_store.create_user(
+            email=request.email,
+            display_name=request.display_name,
+            password_hash=hash_password(request.password.get_secret_value()),
+        )
+    except DuplicateEmailError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _build_auth_response(user)
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+def login_user(request: LoginRequest):
+    user = user_store.get_user_by_email(request.email)
+    if user is None or not verify_password(
+        request.password.get_secret_value(),
+        user["password_hash"],
+    ):
+        raise HTTPException(status_code=401, detail="邮箱或密码错误")
+    if user["status"] != "active":
+        raise HTTPException(status_code=403, detail="账户已停用")
+
+    updated_user = user_store.record_successful_login(user["id"]) or user
+    return _build_auth_response(updated_user)
+
+
+@app.get("/api/auth/me", response_model=UserPublic)
+def get_current_user(user: Dict[str, Any] = Depends(_require_current_user)):
+    return to_public_user(user)
+
+
+@app.get("/api/trace/runs/{run_id}")
+def get_trace_run(
+    run_id: str,
+    user: Dict[str, Any] = Depends(_require_current_user),
+):
+    if not trace_store.enabled:
+        raise HTTPException(status_code=503, detail="流程溯源持久化未启用")
+    try:
+        trace = trace_store.get_run_trace(run_id)
+    except Exception as exc:
+        logger.exception("Failed to read Rivalens trace %s", run_id)
+        raise HTTPException(status_code=503, detail="流程溯源数据暂时不可用") from exc
+    if trace is None:
+        raise HTTPException(status_code=404, detail="未找到流程溯源记录")
+    owner_id = trace["run"].get("user_id")
+    if (
+        owner_id
+        and str(owner_id) != str(user["id"])
+        and user["role"] != "admin"
+    ):
+        raise HTTPException(status_code=404, detail="未找到流程溯源记录")
+    return trace
+
+
 @app.get("/report/{research_id}")
 async def read_report(request: Request, research_id: str):
     docx_path = os.path.join('outputs', f"{research_id}.docx")
@@ -353,7 +474,7 @@ async def download_output_file(file_path: str):
     )
 
 
-# Simplified API routes - no database persistence
+# 报告路由仍使用文件存储。
 @app.get("/api/reports")
 async def get_all_reports(report_ids: str = None):
     report_ids_list = report_ids.split(",") if report_ids else None
@@ -617,6 +738,10 @@ async def delete_file(filename: str):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    user = _optional_websocket_user(websocket)
+    websocket.scope.setdefault("rivalens", {})["user_id"] = (
+        str(user["id"]) if user else None
+    )
     await manager.connect(websocket)
     try:
         await handle_websocket_communication(websocket, manager, report_store=report_store)

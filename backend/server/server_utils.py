@@ -390,6 +390,9 @@ async def handle_start_command(
     )
     if not research_id:
         research_id = sanitize_filename(f"task_{int(time.time())}_{task}")
+    scope = getattr(websocket, "scope", None)
+    rivalens_scope = scope.get("rivalens", {}) if isinstance(scope, dict) else {}
+    user_id = rivalens_scope.get("user_id")
 
     # Create logs handler with websocket and task
     logs_handler = CustomLogsHandler(websocket, task, research_id=research_id)
@@ -519,6 +522,7 @@ async def handle_start_command(
             mcp_configs,
             max_search_results,
             industry_direction_plan,
+            user_id,
         )
         report = (
             str(report_payload.get("report", ""))

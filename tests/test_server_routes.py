@@ -61,6 +61,15 @@ class ServerRoutesTest(unittest.TestCase):
 
         self.assertEqual(handlers, ["get_report_status"])
 
+    def test_trace_run_route_exists(self):
+        handlers = [
+            endpoint
+            for method, path, endpoint in _app_routes()
+            if method == "GET" and path == "/api/trace/runs/{run_id}"
+        ]
+
+        self.assertEqual(handlers, ["get_trace_run"])
+
 
 if __name__ == "__main__":
     unittest.main()

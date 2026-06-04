@@ -43,6 +43,7 @@ class RivalensStructuredResponseTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_agent_rivalens_returns_structured_response(self):
         async def fake_run_rivalens_task(**kwargs):
+            self.assertEqual(kwargs["user_id"], "user-id")
             state = self._state()
             state["task"]["run_id"] = kwargs["run_id"]
             return state
@@ -58,6 +59,7 @@ class RivalensStructuredResponseTest(unittest.IsolatedAsyncioTestCase):
                 websocket=None,
                 stream_output=None,
                 run_id="rid",
+                user_id="user-id",
             )
 
         self.assertIsInstance(response, dict)

@@ -14,22 +14,76 @@ intelligence. The main package is `rivalens`, with these primary domains:
 The generic research implementation lives inside `rivalens/research` as the web
 research engine beneath Rivalens agents.
 
-## Persistence
+## PostgreSQL Data
 
-Docker Compose provisions two persistence services:
+PostgreSQL stores user authentication and durable business provenance.
+LangSmith remains responsible for detailed execution observability such as
+model/tool spans, prompts, outputs, latency, token usage, and cost. PostgreSQL
+stores the domain relationships needed to replay and visualize why a report
+contains a claim.
 
-- `postgres`: PostgreSQL 16, default database `rivalens`.
-- `redis`: Redis 7 with append-only persistence enabled.
+The backend creates the `users` table at startup through
+`backend/server/user_store.py`. The equivalent PostgreSQL script is
+`backend/server/sql_table_create/001_users.sql`.
 
-The application receives these endpoints through `DATABASE_URL` and `REDIS_URL`.
-PostgreSQL data is stored in the `rivalens-postgres-data` Docker volume, and
-Redis data is stored in `rivalens-redis-data`. `backend/server/persistence.py`
-defines the traceability tables for run scope, confirmed directions, collection
-DAG nodes, evidence, coverage and evidence review gates, structured knowledge,
-analysis claims, claim-support reviews, and compact Agent events. Automatic
-table creation is disabled by default; set `RIVALENS_AUTO_CREATE_TABLES=true`
-to enable SQLAlchemy `create_all()` on backend startup, or run the SQL scripts
-under `backend/server/sql_table_create` manually.
+The user table stores:
+
+- `id`: stable UUID identity.
+- `email`: normalized lowercase login identifier with a unique index.
+- `display_name`: user-facing name.
+- `password_hash`: salted scrypt digest; plaintext passwords are never stored.
+- `role` and `status`: authorization role and account availability.
+- `email_verified_at` and `last_login_at`: verification and login audit fields.
+- `created_at` and `updated_at`: account audit timestamps.
+
+It intentionally does not store LangSmith API keys, trace payloads, raw
+passwords, or access tokens. Configure authentication with:
+
+```env
+DATABASE_URL=postgresql://rivalens:123456@localhost:5433/rivalens
+AUTH_JWT_SECRET=replace-with-a-long-random-secret
+AUTH_ACCESS_TOKEN_TTL_SECONDS=86400
+RIVALENS_TRACE_PERSISTENCE_ENABLED=true
+```
+
+The backend exposes `POST /api/auth/register`, `POST /api/auth/login`, and
+`GET /api/auth/me`. The Next.js proxy stores the returned access token in an
+HTTP-only cookie.
+
+`backend/server/trace_store.py` creates the traceability tables. The equivalent
+PostgreSQL script is `backend/server/sql_table_create/002_traceability.sql`.
+Each Rivalens run receives a `running` record before execution. Completed runs
+are stored transactionally at the backend workflow boundary, and failed runs
+retain an auditable `analysis_runs` status when the database is available.
+
+The traceability chain is:
+
+```text
+analysis_runs
+  -> workflow_step_executions / workflow_transitions / agent_messages
+  -> analysis_dimensions -> research_branches -> research_tasks
+  -> evidence_items -> knowledge_facts -> analysis_claims
+  -> report_sections -> artifacts
+```
+
+Critical many-to-many provenance uses actual relation tables:
+
+- `knowledge_fact_evidence`: facts to source evidence.
+- `claim_evidence`: claims to source evidence.
+- `claim_knowledge_facts`: claims to structured facts.
+- `report_section_claims`: report sections to claims.
+
+`analysis_runs.langsmith_trace_id` is also used as the explicit LangSmith root
+run ID, while `langsmith_thread_id` groups the business run. PostgreSQL stores
+compact Agent event summaries and structured business payloads rather than
+duplicating complete LangSmith traces or raw scraped pages.
+
+Authenticated clients can use `GET /api/trace/runs/{run_id}` to retrieve a
+visualization-ready workflow graph and the complete business provenance bundle
+for a run. The primary WebSocket flow reads the HttpOnly authentication cookie
+during the handshake and passes the user ID into `analysis_runs`. Runs with a
+`user_id` are visible only to their owner or an admin; system or legacy runs
+without an owner remain visible to authenticated users.
 
 ## Architecture
 

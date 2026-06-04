@@ -2,6 +2,7 @@
 
 import os
 from typing import Any
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
 from langgraph.graph import END, StateGraph
 
@@ -48,8 +49,18 @@ def _workflow_run_config(
     competitors = task.get("competitors") or []
     if not isinstance(competitors, list):
         competitors = [competitors]
+    business_run_id = str(
+        task.get("run_id")
+        or uuid5(NAMESPACE_URL, f"rivalens-task:{task.get('query', '')}")
+    )
+    trace_id = _langsmith_trace_id(
+        business_run_id,
+        task.get("langsmith_trace_id"),
+    )
+    thread_id = str(task.get("langsmith_thread_id") or business_run_id)
 
-    return {
+    config = {
+        "run_id": UUID(trace_id),
         "run_name": "rivalens_competitive_analysis",
         "tags": [
             "rivalens",
@@ -59,6 +70,9 @@ def _workflow_run_config(
         "metadata": {
             "workflow": "competitive_analysis",
             "entrypoint": "run_competitive_analysis_task",
+            "business_run_id": business_run_id,
+            "thread_id": thread_id,
+            "langsmith_trace_id": trace_id,
             "collector": "CollectionAgent",
             "query_length": len(task.get("query", "")),
             "competitor_count": len(competitors),
@@ -95,6 +109,18 @@ def _workflow_run_config(
             ),
         },
     }
+    if task.get("user_id"):
+        config["metadata"]["user_id"] = str(task["user_id"])
+    return config
+
+
+def _langsmith_trace_id(run_id: str, explicit_trace_id: Any = None) -> str:
+    if explicit_trace_id:
+        return str(UUID(str(explicit_trace_id)))
+    try:
+        return str(UUID(run_id))
+    except ValueError:
+        return str(uuid5(NAMESPACE_URL, f"rivalens:{run_id}"))
 
 
 def build_competitive_analysis_graph(
@@ -175,8 +201,21 @@ async def run_competitive_analysis_task(
     The signature matches backend callers while keeping Rivalens as the only
     active workflow.
     """
+    run_id = str(kwargs.get("run_id") or uuid4())
     task = {
-        "run_id": kwargs.get("run_id"),
+        "run_id": run_id,
+        "user_id": kwargs.get("user_id"),
+        "langsmith_trace_id": _langsmith_trace_id(
+            run_id,
+            kwargs.get("langsmith_trace_id"),
+        ),
+        "langsmith_thread_id": str(kwargs.get("langsmith_thread_id") or run_id),
+        "langsmith_trace_url": kwargs.get("langsmith_trace_url"),
+        "langsmith_project": (
+            os.getenv("LANGSMITH_PROJECT")
+            or os.getenv("LANGCHAIN_PROJECT")
+            or ""
+        ),
         "query": query,
         "competitors": kwargs.get("competitors", []),
         "files": kwargs.get("files", kwargs.get("file_paths", [])),

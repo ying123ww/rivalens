@@ -155,7 +155,7 @@ class WebSocketManager:
             except Exception:
                 pass  # If this fails too, there's nothing more we can do
 
-    async def start_streaming(self, task, report_type, report_source, source_urls, document_urls, tone, websocket, headers=None, query_domains=[], mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None):
+    async def start_streaming(self, task, report_type, report_source, source_urls, document_urls, tone, websocket, headers=None, query_domains=[], mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, user_id=None):
         """Start streaming the output."""
         tone = Tone[tone]
         # add customized JSON config file path here
@@ -168,10 +168,11 @@ class WebSocketManager:
             mcp_enabled=mcp_enabled, mcp_strategy=mcp_strategy, mcp_configs=mcp_configs,
             max_search_results=max_search_results,
             industry_direction_plan=industry_direction_plan,
+            user_id=user_id,
         )
         return report
 
-async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, run_id=None):
+async def run_agent(task, report_type, report_source, source_urls, document_urls, tone: Tone, websocket, stream_output=stream_output, headers=None, query_domains=[], config_path="", return_researcher=False, mcp_enabled=False, mcp_strategy="fast", mcp_configs=[], max_search_results=None, industry_direction_plan=None, run_id=None, user_id=None):
     """Run the agent."""    
     # Reuse the request-scoped log handler when the WebSocket entrypoint already
     # created one, otherwise create one for direct/backend-only calls.
@@ -210,6 +211,7 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
             industry_direction_plan=industry_direction_plan,
             industry_directions_confirmed=bool(industry_direction_plan),
             run_id=run_id,
+            user_id=user_id,
         )
         report = build_rivalens_structured_response(
             state if isinstance(state, dict) else {"report": str(state)},
