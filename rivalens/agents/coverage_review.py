@@ -4,6 +4,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from rivalens.research.source_identity import identify_source_url
 from rivalens.agents.source_gap_advisor import (
     LLMSourceGapAdvisor,
     SourceGapAdvisor,
@@ -13,7 +14,14 @@ from rivalens.agents.success_criteria import (
     evidence_matches_success_criterion,
     normalize_success_criteria,
 )
-from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch, SourceMetrics
+from rivalens.schema import (
+    CoverageAssessment,
+    EvidenceQualityStability,
+    EvidenceReviewResult,
+    QualityStabilityGap,
+    ResearchBranch,
+    SourceMetrics,
+)
 from rivalens.schema.competitive import EvidenceType
 
 
@@ -31,6 +39,7 @@ class CoverageReviewer:
         source_metrics: SourceMetrics | None = None,
         research_task_ids: list[str] | None = None,
     ) -> CoverageAssessment:
+        coverage_assessment_id = self._coverage_assessment_id(branch)
         accepted_ids = set(evidence_review.get("accepted_evidence_ids", []))
         rejected_ids = list(evidence_review.get("rejected_evidence_ids", []))
         accepted_evidence = [
@@ -47,6 +56,13 @@ class CoverageReviewer:
         )
         source_type_gaps = source_gap_assessment["gaps"]
         quality_gap_codes = self.quality_gap_codes(evidence_review)
+        quality_stability = self._quality_stability(
+            evidence_items,
+            evidence_review,
+        )
+        quality_stability_gaps = self._quality_stability_gaps(
+            quality_stability,
+        )
         guiding_questions = branch.get("guiding_questions", [])
         success_criteria = normalize_success_criteria(
             branch.get("success_criteria", []),
@@ -65,18 +81,25 @@ class CoverageReviewer:
             missing_questions=missing_questions,
             missing_criteria=criterion_coverage["missing_criteria"],
             source_type_gaps=source_type_gaps,
+            quality_stability_gaps=quality_stability_gaps,
             evidence_review=evidence_review,
         )
-        follow_up_specs = (
+        raw_follow_up_specs = (
             self._follow_up_task_specs(
                 branch,
                 missing_questions,
                 criterion_coverage["missing_criteria"],
                 source_type_gaps,
+                quality_stability_gaps,
                 evidence_review,
             )
             if next_action in {"collect_more", "refine_query"}
             else []
+        )
+        follow_up_specs = self._annotated_follow_up_specs(
+            branch,
+            coverage_assessment_id,
+            raw_follow_up_specs,
         )
         routing = self._routing_from_review(
             branch=branch,
@@ -92,7 +115,7 @@ class CoverageReviewer:
         )
 
         return {
-            "id": f"coverage_{branch.get('id', 'unknown')}",
+            "id": coverage_assessment_id,
             "stage_contract": self._stage_contract(branch),
             "branch_id": branch.get("id", ""),
             "brief_id": branch.get("research_brief_id", ""),
@@ -104,6 +127,8 @@ class CoverageReviewer:
             "source_coverage_gaps": source_type_gaps,
             "source_gap_review": source_gap_assessment["review"],
             "source_metrics": source_metrics or {},
+            "quality_stability": quality_stability,
+            "quality_stability_gaps": quality_stability_gaps,
             "quality_gap_codes": quality_gap_codes,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
@@ -120,6 +145,56 @@ class CoverageReviewer:
             "decision": routing["decision"],
             "confidence": routing["confidence"],
         }
+
+    def _coverage_assessment_id(self, branch: ResearchBranch) -> str:
+        return f"coverage_{branch.get('id', 'unknown')}"
+
+    def _annotated_follow_up_specs(
+        self,
+        branch: ResearchBranch,
+        coverage_assessment_id: str,
+        follow_up_specs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        annotated = []
+        for spec in follow_up_specs:
+            enriched = dict(spec)
+            gap_code = str(enriched.get("generated_from_gap", ""))
+            enriched.setdefault(
+                "triggered_by_gap_type",
+                self._follow_up_gap_type(enriched),
+            )
+            enriched.setdefault("triggered_by_gap_code", gap_code)
+            enriched.setdefault("triggered_by_branch_id", branch.get("id", ""))
+            enriched.setdefault(
+                "triggered_by_coverage_assessment_id",
+                coverage_assessment_id,
+            )
+            criterion_id = self._follow_up_criterion_id(enriched)
+            if criterion_id:
+                enriched.setdefault("triggered_by_criterion_id", criterion_id)
+            annotated.append(enriched)
+        return annotated
+
+    def _follow_up_gap_type(self, spec: dict[str, Any]) -> str:
+        gap_code = str(spec.get("generated_from_gap", ""))
+        if spec.get("quality_stability_baseline"):
+            return "quality_stability"
+        if spec.get("decision_subtype") == "source_type_search":
+            return "source_coverage"
+        if gap_code in {"missing_success_criterion", "missing_guiding_question"}:
+            return "success_criterion"
+        if spec.get("success_criteria"):
+            return "success_criterion"
+        if gap_code in {"retry_source_quality", "no_evidence"}:
+            return "evidence_quality"
+        return "coverage"
+
+    def _follow_up_criterion_id(self, spec: dict[str, Any]) -> str:
+        criteria = spec.get("success_criteria", []) or []
+        if not criteria:
+            return ""
+        criterion = criteria[0]
+        return str(criterion.get("id", "")) if isinstance(criterion, dict) else ""
 
     def _stage_contract(self, branch: ResearchBranch) -> dict[str, Any]:
         search_stage = branch.get("search_stage", "focused")
@@ -259,6 +334,176 @@ class CoverageReviewer:
             "duplicate_group_count": len(source_metrics.get("duplicate_source_groups", [])),
         }
 
+    def _quality_stability(
+        self,
+        evidence_items: list[dict[str, Any]],
+        evidence_review: EvidenceReviewResult,
+    ) -> EvidenceQualityStability:
+        accepted_count = len(evidence_review.get("accepted_evidence_ids", []))
+        rejected_ids = set(evidence_review.get("rejected_evidence_ids", []))
+        rejected_count = len(rejected_ids)
+        total_count = accepted_count + rejected_count
+        rejection_code_counts: dict[str, int] = {}
+        high_severity_rejection_count = 0
+        reliable_rejection_count = 0
+        reliable_codes = {
+            "missing_source_url",
+            "low_quality_text",
+            "no_success_criterion_match",
+        }
+
+        for finding in evidence_review.get("findings", []):
+            evidence_id = finding.get("evidence_id")
+            if evidence_id not in rejected_ids:
+                continue
+            code = str(finding.get("code", ""))
+            if not code:
+                continue
+            rejection_code_counts[code] = rejection_code_counts.get(code, 0) + 1
+            if finding.get("severity") == "high":
+                high_severity_rejection_count += 1
+            if code in reliable_codes:
+                reliable_rejection_count += 1
+
+        rejected_ratio = round(
+            rejected_count / total_count,
+            3,
+        ) if total_count else 0.0
+        status = "stable"
+        if rejected_count:
+            status = "mixed_quality"
+        if total_count >= 3 and (
+            rejected_ratio >= 0.67
+            or high_severity_rejection_count >= 2
+            or reliable_rejection_count >= 3
+        ):
+            status = "unstable"
+
+        return {
+            "status": status,
+            "accepted_count": accepted_count,
+            "rejected_count": rejected_count,
+            "total_evidence_count": total_count,
+            "rejected_ratio": rejected_ratio,
+            "high_severity_rejection_count": high_severity_rejection_count,
+            "reliable_rejection_count": reliable_rejection_count,
+            "rejection_code_counts": rejection_code_counts,
+            "excluded_canonical_urls": self._rejected_canonical_urls(
+                evidence_items,
+                rejected_ids,
+            ),
+        }
+
+    def _quality_stability_gaps(
+        self,
+        quality_stability: EvidenceQualityStability,
+    ) -> list[QualityStabilityGap]:
+        if quality_stability.get("status") != "unstable":
+            return []
+
+        rejection_code_counts = quality_stability.get("rejection_code_counts", {})
+        triggering_codes = [
+            code
+            for code, _count in sorted(
+                rejection_code_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ][:5]
+        code = (
+            "mixed_quality_high_rejected_ratio"
+            if quality_stability.get("rejected_ratio", 0.0) >= 0.67
+            else "mixed_quality_high_severity_rejections"
+        )
+        return [
+            {
+                "gap_type": "quality_stability",
+                "code": code,
+                "recommended_action": "refine_query",
+                "accepted_count": int(quality_stability.get("accepted_count", 0)),
+                "rejected_count": int(quality_stability.get("rejected_count", 0)),
+                "total_evidence_count": int(
+                    quality_stability.get("total_evidence_count", 0),
+                ),
+                "rejected_ratio": float(quality_stability.get("rejected_ratio", 0.0)),
+                "high_severity_rejection_count": int(
+                    quality_stability.get("high_severity_rejection_count", 0),
+                ),
+                "triggering_finding_codes": triggering_codes,
+                "excluded_canonical_urls": list(
+                    quality_stability.get("excluded_canonical_urls", []),
+                ),
+                "reason": (
+                    "Most collected sources were rejected or unusable; retry with "
+                    "a more stable source query before treating the branch as ready."
+                ),
+                "expected_improvement": (
+                    "Reduce rejected evidence and collect readable, source-backed "
+                    "evidence for the same branch."
+                ),
+                "blocking": False,
+            }
+        ]
+
+    def _rejected_canonical_urls(
+        self,
+        evidence_items: list[dict[str, Any]],
+        rejected_ids: set[str],
+    ) -> list[str]:
+        excluded = []
+        for evidence in evidence_items:
+            if evidence.get("id", "") not in rejected_ids:
+                continue
+            source_cache = evidence.get("source_cache") or {}
+            canonical_url = (
+                evidence.get("canonical_url")
+                or source_cache.get("canonical_url")
+                or identify_source_url(evidence.get("url", "")).canonical_url
+            )
+            if canonical_url and canonical_url not in excluded:
+                excluded.append(canonical_url)
+        return excluded
+
+    def _quality_stability_follow_up_spec(
+        self,
+        branch: ResearchBranch,
+        gap: QualityStabilityGap,
+    ) -> dict[str, Any]:
+        excluded_urls = list(gap.get("excluded_canonical_urls", []))
+        query_lines = [
+            self._base_query(
+                branch,
+                "stable public source readable content",
+            ),
+            "Retry reason: previous collected sources were mostly unusable or off-target.",
+            "Find a different stable public source with readable evidence.",
+        ]
+        if excluded_urls:
+            query_lines.append(
+                "Avoid previously unusable source URLs: "
+                + ", ".join(excluded_urls[:5])
+            )
+        return {
+            "objective": f"Refine collection after mixed-quality evidence: {gap.get('code', '')}",
+            "query": "\n".join(query_lines),
+            "generated_from_gap": gap.get("code", ""),
+            "triggering_finding_codes": list(gap.get("triggering_finding_codes", [])),
+            "baseline_accepted_count": int(gap.get("accepted_count", 0)),
+            "decision_action": "scope_refinement",
+            "decision_subtype": "query_refinement",
+            "reason": str(gap.get("reason", "")),
+            "retry_reason": str(gap.get("reason", "")),
+            "expected_improvement": str(gap.get("expected_improvement", "")),
+            "quality_stability_baseline": dict(gap),
+            "excluded_canonical_urls": excluded_urls,
+            "search_stage": "focused",
+            "dimension_id": branch.get("dimension_id", ""),
+            "dimension_name": branch.get("dimension_name", ""),
+            "dimension_type": branch.get("dimension_type", ""),
+            "parent_dimension_id": branch.get("parent_dimension_id", ""),
+            "target_source_types": self.fallback_target_source_types(branch),
+            "expected_claim_types": list(branch.get("expected_claim_types", [])),
+        }
+
     def _source_gap(
         self,
         code: str,
@@ -388,10 +633,18 @@ class CoverageReviewer:
         missing_questions: list[str],
         missing_criteria: list[dict[str, Any]],
         source_type_gaps: list[dict[str, Any]],
+        quality_stability_gaps: list[QualityStabilityGap],
         evidence_review: EvidenceReviewResult,
     ) -> str:
         if accepted_count == 0:
             if evidence_review.get("required_action") == "retry":
+                return "refine_query"
+            return "collect_more"
+        if quality_stability_gaps:
+            if any(
+                gap.get("recommended_action") == "refine_query"
+                for gap in quality_stability_gaps
+            ):
                 return "refine_query"
             return "collect_more"
         if source_type_gaps or missing_questions or missing_criteria:
@@ -404,6 +657,7 @@ class CoverageReviewer:
         missing_questions: list[str],
         missing_criteria: list[dict[str, Any]],
         source_type_gaps: list[dict[str, Any]],
+        quality_stability_gaps: list[QualityStabilityGap],
         evidence_review: EvidenceReviewResult,
     ) -> list[dict[str, Any]]:
         specs = []
@@ -426,6 +680,11 @@ class CoverageReviewer:
                 }
             )
             return specs[:2]
+
+        for gap in quality_stability_gaps:
+            specs.append(self._quality_stability_follow_up_spec(branch, gap))
+            if len(specs) >= 3:
+                return specs[:3]
 
         if self._has_finding(evidence_review, "no_evidence"):
             specs.append(
@@ -558,7 +817,11 @@ class CoverageReviewer:
     ) -> list[dict[str, Any]]:
         candidates = [
             self._entity_resolution_candidate(branch, evidence_review),
-            self._query_refinement_candidate(evidence_review, follow_up_specs),
+            self._query_refinement_candidate(
+                evidence_review,
+                follow_up_specs,
+                next_action,
+            ),
             self._source_discovery_candidate(
                 missing_questions,
                 follow_up_specs,
@@ -610,19 +873,23 @@ class CoverageReviewer:
         self,
         evidence_review: EvidenceReviewResult,
         follow_up_specs: list[dict[str, Any]],
+        next_action: str,
     ) -> dict[str, Any]:
         refinement_specs = [
             spec
             for spec in follow_up_specs
             if spec.get("decision_action") == "scope_refinement"
         ]
-        if evidence_review.get("required_action") != "retry" or not refinement_specs:
+        if (
+            evidence_review.get("required_action") != "retry"
+            and next_action != "refine_query"
+        ) or not refinement_specs:
             return self._candidate("scope_refinement", "query_refinement", 0.0, [], [])
         return self._candidate(
             "scope_refinement",
             "query_refinement",
             0.86,
-            ["Source-level review rejected all usable focused evidence."],
+            ["Focused evidence needs query refinement before analysis."],
             refinement_specs,
         )
 

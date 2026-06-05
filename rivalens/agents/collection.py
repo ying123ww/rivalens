@@ -668,10 +668,20 @@ class CollectionAgent:
             "query": branch.get("query", ""),
             "research_goal": branch.get("research_goal", brief.get("objective", "")),
             "target_urls": branch.get("target_urls", []),
+            "excluded_canonical_urls": branch.get("excluded_canonical_urls", []),
+            "retry_reason": branch.get("retry_reason", ""),
             "source_hints": branch.get("source_hints", []),
             "target_source_types": branch.get("target_source_types", []),
             "expected_claim_types": list(branch.get("expected_claim_types", [])),
             "generated_from_gap": generated_from_gap,
+            "triggered_by_gap_type": branch.get("triggered_by_gap_type", ""),
+            "triggered_by_gap_code": branch.get("triggered_by_gap_code", ""),
+            "triggered_by_branch_id": branch.get("triggered_by_branch_id", ""),
+            "triggered_by_coverage_assessment_id": branch.get(
+                "triggered_by_coverage_assessment_id",
+                "",
+            ),
+            "triggered_by_criterion_id": branch.get("triggered_by_criterion_id", ""),
             "decision_action": branch.get("decision_action", ""),
             "decision_subtype": branch.get("decision_subtype", ""),
             "search_queries": branch.get("search_queries", [branch.get("query", "")]),
@@ -731,6 +741,16 @@ class CollectionAgent:
             ),
             "task_context": branch.get("task_context", ""),
             "target_urls": branch.get("target_urls", []),
+            "excluded_canonical_urls": branch.get("excluded_canonical_urls", []),
+            "retry_reason": branch.get("retry_reason", ""),
+            "triggered_by_gap_type": branch.get("triggered_by_gap_type", ""),
+            "triggered_by_gap_code": branch.get("triggered_by_gap_code", ""),
+            "triggered_by_branch_id": branch.get("triggered_by_branch_id", ""),
+            "triggered_by_coverage_assessment_id": branch.get(
+                "triggered_by_coverage_assessment_id",
+                "",
+            ),
+            "triggered_by_criterion_id": branch.get("triggered_by_criterion_id", ""),
         }
 
     def _build_child_branches(
@@ -797,9 +817,33 @@ class CollectionAgent:
                     "search_queries": follow_up_spec.get("search_queries", [query]),
                     "success_criteria": success_criteria,
                     "target_urls": follow_up_spec.get("target_urls", []),
+                    "excluded_canonical_urls": list(
+                        follow_up_spec.get("excluded_canonical_urls", []),
+                    ),
+                    "retry_reason": follow_up_spec.get("retry_reason", ""),
                     "search_stage": follow_up_spec.get("search_stage", "focused"),
                     "generated_from_gap": follow_up_spec.get(
                         "generated_from_gap",
+                        "",
+                    ),
+                    "triggered_by_gap_type": follow_up_spec.get(
+                        "triggered_by_gap_type",
+                        "",
+                    ),
+                    "triggered_by_gap_code": follow_up_spec.get(
+                        "triggered_by_gap_code",
+                        "",
+                    ),
+                    "triggered_by_branch_id": follow_up_spec.get(
+                        "triggered_by_branch_id",
+                        "",
+                    ),
+                    "triggered_by_coverage_assessment_id": follow_up_spec.get(
+                        "triggered_by_coverage_assessment_id",
+                        "",
+                    ),
+                    "triggered_by_criterion_id": follow_up_spec.get(
+                        "triggered_by_criterion_id",
                         "",
                     ),
                     "decision_action": follow_up_spec.get("decision_action", ""),

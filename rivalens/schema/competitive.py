@@ -135,6 +135,11 @@ class EvidenceCollectionTask(TypedDict, total=False):
     depth: int
     search_stage: str
     generated_from_gap: str
+    triggered_by_gap_type: str
+    triggered_by_gap_code: str
+    triggered_by_branch_id: str
+    triggered_by_coverage_assessment_id: str
+    triggered_by_criterion_id: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     source_hints: list[str]
@@ -151,6 +156,8 @@ class EvidenceCollectionTask(TypedDict, total=False):
     dimension_type: str
     parent_dimension_id: str
     target_urls: list[str]
+    excluded_canonical_urls: list[str]
+    retry_reason: str
     query: str
     research_goal: str
     search_queries: list[str]
@@ -236,8 +243,15 @@ class ResearchBranch(TypedDict, total=False):
     success_criteria: list[SuccessCriterion]
     task_context: str
     target_urls: list[str]
+    excluded_canonical_urls: list[str]
+    retry_reason: str
     search_stage: str
     generated_from_gap: str
+    triggered_by_gap_type: str
+    triggered_by_gap_code: str
+    triggered_by_branch_id: str
+    triggered_by_coverage_assessment_id: str
+    triggered_by_criterion_id: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     source_hints: list[str]
@@ -300,10 +314,17 @@ class ResearchTask(TypedDict, total=False):
     success_criteria: list[SuccessCriterion]
     task_context: str
     target_urls: list[str]
+    excluded_canonical_urls: list[str]
+    retry_reason: str
     source_hints: list[str]
     target_source_types: list[str]
     expected_claim_types: list[str]
     generated_from_gap: str
+    triggered_by_gap_type: str
+    triggered_by_gap_code: str
+    triggered_by_branch_id: str
+    triggered_by_coverage_assessment_id: str
+    triggered_by_criterion_id: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     reason: str
@@ -324,11 +345,19 @@ class FollowUpTaskSpec(TypedDict, total=False):
     dimension_type: str
     parent_dimension_id: str
     target_urls: list[str]
+    excluded_canonical_urls: list[str]
+    retry_reason: str
     target_source_types: list[str]
     expected_claim_types: list[str]
     generated_from_gap: str
+    triggered_by_gap_type: str
+    triggered_by_gap_code: str
+    triggered_by_branch_id: str
+    triggered_by_coverage_assessment_id: str
+    triggered_by_criterion_id: str
     triggering_finding_codes: list[str]
     baseline_accepted_count: int
+    quality_stability_baseline: dict[str, Any]
     reason: str
     search_stage: SearchStage
 
@@ -413,6 +442,37 @@ class SourceMetrics(TypedDict, total=False):
     source_cache_stored_count: int
 
 
+QualityStabilityStatus = Literal["stable", "mixed_quality", "unstable"]
+
+
+class QualityStabilityGap(TypedDict, total=False):
+    gap_type: Literal["quality_stability"]
+    code: str
+    recommended_action: CoverageNextAction
+    rejected_ratio: float
+    high_severity_rejection_count: int
+    rejected_count: int
+    accepted_count: int
+    total_evidence_count: int
+    triggering_finding_codes: list[str]
+    excluded_canonical_urls: list[str]
+    reason: str
+    expected_improvement: str
+    blocking: bool
+
+
+class EvidenceQualityStability(TypedDict, total=False):
+    status: QualityStabilityStatus
+    accepted_count: int
+    rejected_count: int
+    total_evidence_count: int
+    rejected_ratio: float
+    high_severity_rejection_count: int
+    reliable_rejection_count: int
+    rejection_code_counts: dict[str, int]
+    excluded_canonical_urls: list[str]
+
+
 class CoverageAssessment(TypedDict, total=False):
     id: str
     stage_contract: StageContract
@@ -426,6 +486,8 @@ class CoverageAssessment(TypedDict, total=False):
     source_coverage_gaps: list[SourceCoverageGap]
     source_gap_review: dict[str, Any]
     source_metrics: SourceMetrics
+    quality_stability: EvidenceQualityStability
+    quality_stability_gaps: list[QualityStabilityGap]
     quality_gap_codes: list[str]
     covered_questions: list[str]
     missing_questions: list[str]
@@ -445,6 +507,12 @@ class CoverageAssessment(TypedDict, total=False):
 
 CoverageGapStatus = Literal["open", "resolved", "blocked"]
 BranchCoverageStatus = Literal["ready_for_analysis", "needs_followup", "blocked"]
+ImprovementAssessmentStatus = Literal[
+    "improved",
+    "not_improved",
+    "worse",
+    "inconclusive",
+]
 
 
 class BranchCoverageGap(TypedDict, total=False):
@@ -465,6 +533,26 @@ class BranchCoverageGap(TypedDict, total=False):
     reason: str
 
 
+class BranchImprovementAssessment(TypedDict, total=False):
+    id: str
+    root_branch_id: str
+    parent_branch_id: str
+    follow_up_branch_id: str
+    gap_type: str
+    gap_code: str
+    criterion_id: str
+    baseline_coverage_assessment_id: str
+    follow_up_coverage_assessment_id: str
+    status: ImprovementAssessmentStatus
+    baseline: dict[str, Any]
+    follow_up: dict[str, Any]
+    deltas: dict[str, Any]
+    resolved_gap: bool
+    improved_signals: list[str]
+    regression_signals: list[str]
+    notes: str
+
+
 class BranchCoverageState(TypedDict, total=False):
     id: str
     root_branch_id: str
@@ -478,6 +566,7 @@ class BranchCoverageState(TypedDict, total=False):
     found_source_types: list[str]
     success_criteria: list[SuccessCriterion]
     coverage_gaps: list[BranchCoverageGap]
+    improvement_assessments: list[BranchImprovementAssessment]
     open_gap_codes: list[str]
     resolved_gap_codes: list[str]
     blocked_gap_codes: list[str]

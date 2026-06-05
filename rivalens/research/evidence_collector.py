@@ -53,6 +53,9 @@ def _trace_collection_task(collection_task: dict[str, Any]) -> dict[str, Any]:
             collection_task.get("target_source_types", []),
         )[:5],
         "target_url_count": len(collection_task.get("target_urls", []) or []),
+        "excluded_canonical_url_count": len(
+            collection_task.get("excluded_canonical_urls", []) or [],
+        ),
         "source_hints": list(collection_task.get("source_hints", []))[:10],
     })
 
@@ -144,6 +147,10 @@ class ResearchEngineEvidenceCollector:
             **{
                 RIVALENS_SEARCH_QUERIES_KEY: collection_task.get("search_queries", []),
                 RIVALENS_TRACE_CONTEXT_KEY: trace_context,
+                "rivalens_excluded_canonical_urls": collection_task.get(
+                    "excluded_canonical_urls",
+                    [],
+                ),
             },
         )
 

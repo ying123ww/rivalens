@@ -8,6 +8,7 @@ from rivalens.agents.success_criteria import (
     normalize_success_criteria,
 )
 from rivalens.schema import (
+    BranchImprovementAssessment,
     BranchCoverageState,
     CoverageAssessment,
     EvidenceItem,
@@ -110,6 +111,13 @@ class BranchCoverageStateBuilder:
                     assessments_by_branch,
                 ),
             )
+            improvement_assessments = self._improvement_assessments(
+                root,
+                branch_ids,
+                children_by_parent,
+                assessments_by_branch,
+                coverage_gaps,
+            )
             unresolved_criteria = [
                 criterion
                 for criterion in success_criteria
@@ -147,6 +155,7 @@ class BranchCoverageStateBuilder:
                     "found_source_types": found_source_types,
                     "success_criteria": success_criteria,
                     "coverage_gaps": coverage_gaps,
+                    "improvement_assessments": improvement_assessments,
                     "open_gap_codes": sorted(open_gap_codes),
                     "resolved_gap_codes": sorted(
                         {
@@ -411,6 +420,432 @@ class BranchCoverageStateBuilder:
                         },
                     )
         return gaps
+
+    def _improvement_assessments(
+        self,
+        root: ResearchBranch,
+        branch_ids: list[str],
+        children_by_parent: dict[str, list[ResearchBranch]],
+        assessments_by_branch: dict[str, list[CoverageAssessment]],
+        coverage_gaps: list[dict[str, Any]],
+    ) -> list[BranchImprovementAssessment]:
+        assessments = []
+        assessment_by_id = {
+            assessment.get("id", ""): assessment
+            for branch_id in branch_ids
+            for assessment in assessments_by_branch.get(branch_id, [])
+            if assessment.get("id")
+        }
+
+        for parent_id in branch_ids:
+            for child in children_by_parent.get(parent_id, []):
+                child_id = child.get("id", "")
+                if child_id not in branch_ids:
+                    continue
+                gap_code = str(
+                    child.get("triggered_by_gap_code")
+                    or child.get("generated_from_gap", "")
+                )
+                if not gap_code:
+                    continue
+                follow_up_assessment = self._latest_assessment(
+                    assessments_by_branch,
+                    child_id,
+                )
+                if not follow_up_assessment:
+                    continue
+
+                baseline_assessment_id = str(
+                    child.get("triggered_by_coverage_assessment_id", ""),
+                )
+                baseline_assessment = assessment_by_id.get(
+                    baseline_assessment_id,
+                ) or self._latest_assessment(assessments_by_branch, parent_id)
+                if not baseline_assessment:
+                    continue
+
+                gap_type = str(
+                    child.get("triggered_by_gap_type")
+                    or self._infer_gap_type(gap_code, child),
+                )
+                criterion_id = str(child.get("triggered_by_criterion_id", ""))
+                resolved_gap = self._resolved_gap(
+                    gap_type,
+                    gap_code,
+                    criterion_id,
+                    baseline_assessment,
+                    follow_up_assessment,
+                    coverage_gaps,
+                )
+                assessments.append(
+                    self._build_improvement_assessment(
+                        root=root,
+                        parent_branch_id=parent_id,
+                        child=child,
+                        gap_type=gap_type,
+                        gap_code=gap_code,
+                        criterion_id=criterion_id,
+                        baseline_assessment=baseline_assessment,
+                        follow_up_assessment=follow_up_assessment,
+                        resolved_gap=resolved_gap,
+                    ),
+                )
+        return assessments
+
+    def _build_improvement_assessment(
+        self,
+        *,
+        root: ResearchBranch,
+        parent_branch_id: str,
+        child: ResearchBranch,
+        gap_type: str,
+        gap_code: str,
+        criterion_id: str,
+        baseline_assessment: CoverageAssessment,
+        follow_up_assessment: CoverageAssessment,
+        resolved_gap: bool,
+    ) -> BranchImprovementAssessment:
+        baseline = self._assessment_snapshot(baseline_assessment)
+        follow_up = self._assessment_snapshot(follow_up_assessment)
+        deltas = self._snapshot_deltas(baseline, follow_up)
+        improved_signals, regression_signals = self._improvement_signals(
+            gap_type,
+            baseline,
+            follow_up,
+            deltas,
+            resolved_gap,
+            list(child.get("target_source_types", [])),
+        )
+        status = self._improvement_status(
+            resolved_gap,
+            improved_signals,
+            regression_signals,
+        )
+        child_id = child.get("id", "")
+        return {
+            "id": "_".join(
+                [
+                    "improvement",
+                    root.get("id", "root"),
+                    parent_branch_id,
+                    child_id,
+                    gap_code,
+                ],
+            ),
+            "root_branch_id": root.get("id", ""),
+            "parent_branch_id": parent_branch_id,
+            "follow_up_branch_id": child_id,
+            "gap_type": gap_type,
+            "gap_code": gap_code,
+            "criterion_id": criterion_id,
+            "baseline_coverage_assessment_id": baseline_assessment.get("id", ""),
+            "follow_up_coverage_assessment_id": follow_up_assessment.get("id", ""),
+            "status": status,
+            "baseline": baseline,
+            "follow_up": follow_up,
+            "deltas": deltas,
+            "resolved_gap": resolved_gap,
+            "improved_signals": improved_signals,
+            "regression_signals": regression_signals,
+            "notes": self._improvement_notes(status, improved_signals, regression_signals),
+        }
+
+    def _latest_assessment(
+        self,
+        assessments_by_branch: dict[str, list[CoverageAssessment]],
+        branch_id: str,
+    ) -> CoverageAssessment | None:
+        assessments = assessments_by_branch.get(branch_id, [])
+        return assessments[-1] if assessments else None
+
+    def _infer_gap_type(self, gap_code: str, branch: ResearchBranch) -> str:
+        if gap_code.startswith("mixed_quality_"):
+            return "quality_stability"
+        if gap_code in {"missing_success_criterion", "missing_guiding_question"}:
+            return "success_criterion"
+        if branch.get("target_source_types"):
+            return "source_coverage"
+        return "coverage"
+
+    def _resolved_gap(
+        self,
+        gap_type: str,
+        gap_code: str,
+        criterion_id: str,
+        baseline_assessment: CoverageAssessment,
+        follow_up_assessment: CoverageAssessment,
+        coverage_gaps: list[dict[str, Any]],
+    ) -> bool:
+        if gap_type == "quality_stability":
+            follow_up_quality = follow_up_assessment.get("quality_stability", {})
+            repeated_codes = {
+                str(gap.get("code", ""))
+                for gap in follow_up_assessment.get("quality_stability_gaps", [])
+            }
+            return (
+                follow_up_quality.get("status") != "unstable"
+                and gap_code not in repeated_codes
+            )
+
+        baseline_assessment_id = baseline_assessment.get("id", "")
+        for gap in coverage_gaps:
+            if gap.get("code") != gap_code:
+                continue
+            if gap.get("opened_by_coverage_assessment_id") != baseline_assessment_id:
+                continue
+            if criterion_id and gap.get("criterion_id") != criterion_id:
+                continue
+            return gap.get("status") == "resolved"
+        return False
+
+    def _assessment_snapshot(
+        self,
+        assessment: CoverageAssessment,
+    ) -> dict[str, Any]:
+        quality = assessment.get("quality_stability", {})
+        source_metrics = assessment.get("source_metrics", {})
+        accepted_count = int(
+            quality.get(
+                "accepted_count",
+                len(assessment.get("accepted_evidence_ids", [])),
+            ),
+        )
+        rejected_count = int(
+            quality.get(
+                "rejected_count",
+                len(assessment.get("rejected_evidence_ids", [])),
+            ),
+        )
+        total_count = accepted_count + rejected_count
+        rejected_ratio = float(
+            quality.get(
+                "rejected_ratio",
+                round(rejected_count / total_count, 3) if total_count else 0.0,
+            ),
+        )
+        return {
+            "coverage_assessment_id": assessment.get("id", ""),
+            "branch_id": assessment.get("branch_id", ""),
+            "quality_status": quality.get("status", ""),
+            "accepted_count": accepted_count,
+            "rejected_count": rejected_count,
+            "total_evidence_count": total_count,
+            "rejected_ratio": rejected_ratio,
+            "independent_source_count": int(
+                source_metrics.get("independent_source_count", 0),
+            ),
+            "unique_canonical_url_count": int(
+                source_metrics.get("unique_canonical_url_count", 0),
+            ),
+            "unique_domain_count": int(source_metrics.get("unique_domain_count", 0)),
+            "primary_source_count": int(source_metrics.get("primary_source_count", 0)),
+            "source_gap_count": len(
+                assessment.get("source_coverage_gaps")
+                or assessment.get("source_type_gaps", []),
+            ),
+            "quality_gap_count": len(assessment.get("quality_stability_gaps", [])),
+            "satisfied_criteria_count": len(
+                assessment.get("satisfied_criteria", []),
+            ),
+            "partial_criteria_count": len(assessment.get("partial_criteria", [])),
+            "missing_criteria_count": len(assessment.get("missing_criteria", [])),
+            "covered_question_count": len(assessment.get("covered_questions", [])),
+            "missing_question_count": len(assessment.get("missing_questions", [])),
+            "found_source_types": list(assessment.get("found_source_types", [])),
+        }
+
+    def _snapshot_deltas(
+        self,
+        baseline: dict[str, Any],
+        follow_up: dict[str, Any],
+    ) -> dict[str, Any]:
+        numeric_fields = [
+            "accepted_count",
+            "rejected_count",
+            "total_evidence_count",
+            "rejected_ratio",
+            "independent_source_count",
+            "unique_canonical_url_count",
+            "unique_domain_count",
+            "primary_source_count",
+            "source_gap_count",
+            "quality_gap_count",
+            "satisfied_criteria_count",
+            "partial_criteria_count",
+            "missing_criteria_count",
+            "covered_question_count",
+            "missing_question_count",
+        ]
+        deltas: dict[str, Any] = {}
+        for field in numeric_fields:
+            baseline_value = baseline.get(field, 0)
+            follow_up_value = follow_up.get(field, 0)
+            if isinstance(baseline_value, float) or isinstance(follow_up_value, float):
+                deltas[f"{field}_delta"] = round(
+                    float(follow_up_value) - float(baseline_value),
+                    3,
+                )
+            else:
+                deltas[f"{field}_delta"] = int(follow_up_value) - int(baseline_value)
+        return deltas
+
+    def _improvement_signals(
+        self,
+        gap_type: str,
+        baseline: dict[str, Any],
+        follow_up: dict[str, Any],
+        deltas: dict[str, Any],
+        resolved_gap: bool,
+        target_source_types: list[str],
+    ) -> tuple[list[str], list[str]]:
+        improved = []
+        regressions = []
+        if resolved_gap:
+            improved.append("original_gap_resolved")
+
+        self._append_delta_signal(
+            deltas,
+            "accepted_count_delta",
+            positive_signal="accepted_count_increased",
+            negative_signal="accepted_count_decreased",
+            improved=improved,
+            regressions=regressions,
+        )
+        self._append_delta_signal(
+            deltas,
+            "rejected_ratio_delta",
+            positive_signal="rejected_ratio_increased",
+            negative_signal="rejected_ratio_decreased",
+            improved=regressions,
+            regressions=improved,
+        )
+        self._append_delta_signal(
+            deltas,
+            "independent_source_count_delta",
+            positive_signal="independent_source_count_increased",
+            negative_signal="independent_source_count_decreased",
+            improved=improved,
+            regressions=regressions,
+        )
+        self._append_delta_signal(
+            deltas,
+            "unique_canonical_url_count_delta",
+            positive_signal="unique_canonical_url_count_increased",
+            negative_signal="unique_canonical_url_count_decreased",
+            improved=improved,
+            regressions=regressions,
+        )
+        self._append_delta_signal(
+            deltas,
+            "primary_source_count_delta",
+            positive_signal="primary_source_count_increased",
+            negative_signal="primary_source_count_decreased",
+            improved=improved,
+            regressions=regressions,
+        )
+        self._append_delta_signal(
+            deltas,
+            "missing_criteria_count_delta",
+            positive_signal="missing_criteria_count_increased",
+            negative_signal="missing_criteria_count_decreased",
+            improved=regressions,
+            regressions=improved,
+        )
+        self._append_delta_signal(
+            deltas,
+            "satisfied_criteria_count_delta",
+            positive_signal="satisfied_criteria_count_increased",
+            negative_signal="satisfied_criteria_count_decreased",
+            improved=improved,
+            regressions=regressions,
+        )
+        self._append_delta_signal(
+            deltas,
+            "missing_question_count_delta",
+            positive_signal="missing_question_count_increased",
+            negative_signal="missing_question_count_decreased",
+            improved=regressions,
+            regressions=improved,
+        )
+        self._append_delta_signal(
+            deltas,
+            "quality_gap_count_delta",
+            positive_signal="quality_gap_count_increased",
+            negative_signal="quality_gap_count_decreased",
+            improved=regressions,
+            regressions=improved,
+        )
+
+        quality_delta = self._quality_status_delta(
+            str(baseline.get("quality_status", "")),
+            str(follow_up.get("quality_status", "")),
+        )
+        if quality_delta > 0:
+            improved.append("quality_status_improved")
+        elif quality_delta < 0:
+            regressions.append("quality_status_worsened")
+
+        if gap_type == "source_coverage":
+            found_source_types = set(follow_up.get("found_source_types", []))
+            if set(target_source_types).intersection(found_source_types):
+                improved.append("target_source_type_collected")
+
+        return list(dict.fromkeys(improved)), list(dict.fromkeys(regressions))
+
+    def _append_delta_signal(
+        self,
+        deltas: dict[str, Any],
+        field: str,
+        *,
+        positive_signal: str,
+        negative_signal: str,
+        improved: list[str],
+        regressions: list[str],
+    ) -> None:
+        delta = float(deltas.get(field, 0))
+        if delta > 0:
+            improved.append(positive_signal)
+        elif delta < 0:
+            regressions.append(negative_signal)
+
+    def _quality_status_delta(self, baseline: str, follow_up: str) -> int:
+        score = {
+            "": 0,
+            "unstable": 1,
+            "mixed_quality": 2,
+            "stable": 3,
+        }
+        return score.get(follow_up, 0) - score.get(baseline, 0)
+
+    def _improvement_status(
+        self,
+        resolved_gap: bool,
+        improved_signals: list[str],
+        regression_signals: list[str],
+    ) -> str:
+        if resolved_gap:
+            return "improved"
+        if len(improved_signals) >= 2 and not regression_signals:
+            return "improved"
+        if regression_signals and not improved_signals:
+            return "worse"
+        if improved_signals and regression_signals:
+            return "inconclusive"
+        return "not_improved"
+
+    def _improvement_notes(
+        self,
+        status: str,
+        improved_signals: list[str],
+        regression_signals: list[str],
+    ) -> str:
+        if status == "improved":
+            return "Follow-up branch shows measurable improvement over its baseline."
+        if status == "worse":
+            return "Follow-up branch regressed against the baseline metrics."
+        if status == "inconclusive":
+            return "Follow-up branch has mixed improvement and regression signals."
+        return "Follow-up branch did not produce measurable improvement."
 
     def _resolved_evidence_ids_for_gap(
         self,

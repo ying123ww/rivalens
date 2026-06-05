@@ -12,6 +12,8 @@ import random
 
 from langsmith import traceable
 
+from rivalens.research.source_identity import identify_source_url
+
 from ..actions.agent_creator import choose_agent
 from ..actions.query_processing import get_search_results, plan_research_outline
 from ..actions.utils import stream_output
@@ -1101,6 +1103,8 @@ class ResearchConductor:
                 # Separate results that already have content from those needing scraping
                 for result in search_results:
                     url = result.get("href") or result.get("url")
+                    if url and self._is_excluded_source_url(url):
+                        continue
                     raw_content = result.get("raw_content")
                     if result.get("content_is_full_text"):
                         raw_content = raw_content or result.get("body")
@@ -1121,6 +1125,15 @@ class ResearchConductor:
         random.shuffle(new_search_urls)
 
         return new_search_urls, prefetched_content
+
+    def _is_excluded_source_url(self, url: str) -> bool:
+        excluded_canonical_urls = set(
+            self.researcher.kwargs.get("rivalens_excluded_canonical_urls", []) or []
+        )
+        if not excluded_canonical_urls:
+            return False
+        canonical_url = identify_source_url(url).canonical_url
+        return canonical_url in excluded_canonical_urls
 
     async def _scrape_data_by_urls(self, sub_query, query_domains: list | None = None):
         """

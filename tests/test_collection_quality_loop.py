@@ -4,10 +4,12 @@ import asyncio
 from typing import Any
 
 from rivalens.agents.collection import CollectionAgent
+from rivalens.agents.coverage_state import BranchCoverageStateBuilder
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.source_metrics import SourceMetricsBuilder
 from rivalens.agents.source_gap_advisor import SourceGapDecision
 from rivalens.agents.success_criteria import normalize_success_criteria
+from rivalens.research.skills.researcher import ResearchConductor
 
 
 class FakeSourceGapAdvisor:
@@ -145,6 +147,77 @@ class FakeEvidenceCollector:
         }
 
 
+class FakeMixedQualityEvidenceCollector:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def collect(
+        self,
+        collection_task: dict[str, Any],
+        mode: Any,
+        source_urls: list[str],
+        verbose: bool,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append(dict(collection_task))
+        if collection_task.get("generated_from_gap") == "mixed_quality_high_rejected_ratio":
+            evidence_items = [
+                {
+                    "title": "Acme stable pricing source",
+                    "url": "https://stable.example/acme-pricing",
+                    "source_type": "news",
+                    "excerpt": "Acme pricing plans and billing packaging are described clearly.",
+                    "confidence": 0.83,
+                },
+                {
+                    "title": "Acme official billing note",
+                    "url": "https://stable.example/acme-billing",
+                    "source_type": "official_site",
+                    "excerpt": "Acme public billing information describes plans and invoices.",
+                    "confidence": 0.88,
+                },
+            ]
+        else:
+            evidence_items = [
+                {
+                    "title": "Acme usable pricing mention",
+                    "url": "https://good.example/acme-pricing",
+                    "source_type": "news",
+                    "excerpt": "Acme pricing plans are discussed in readable public evidence.",
+                    "confidence": 0.75,
+                },
+                {
+                    "title": "Broken scrape A",
+                    "url": "https://bad.example/a",
+                    "source_type": "news",
+                    "excerpt": "�����",
+                    "confidence": 0.2,
+                },
+                {
+                    "title": "Broken scrape B",
+                    "url": "https://bad.example/b",
+                    "source_type": "news",
+                    "excerpt": "�����",
+                    "confidence": 0.2,
+                },
+                {
+                    "title": "Broken scrape C",
+                    "url": "https://bad.example/c",
+                    "source_type": "news",
+                    "excerpt": "�����",
+                    "confidence": 0.2,
+                },
+            ]
+        return {
+            "task": collection_task,
+            "mode": str(mode),
+            "query": collection_task.get("query", ""),
+            "context": "",
+            "evidence_items": evidence_items,
+            "costs": 0.0,
+        }
+
+
 def test_success_criteria_do_not_carry_source_targets():
     normalized = normalize_success_criteria(
         [
@@ -228,6 +301,119 @@ def test_source_metrics_builder_counts_independent_sources():
         if group["reason"] == "same_canonical_url"
     )
     assert duplicate_group["evidence_ids"] == ["ev_1", "ev_2"]
+
+
+def test_mixed_quality_evidence_triggers_differential_retry():
+    collector = FakeMixedQualityEvidenceCollector()
+    source_gap_advisor = FakeSourceGapAdvisor()
+    agent = CollectionAgent(
+        evidence_collector=collector,
+        coverage_reviewer=CoverageReviewer(source_gap_advisor=source_gap_advisor),
+        max_branch_depth=1,
+        max_expansion_branches=4,
+        max_concurrent_collections=1,
+    )
+    state = {
+        "task": {
+            "query": "Compare Acme market signals.",
+            "competitors": ["Acme"],
+            "verbose": False,
+        },
+        "competitors": ["Acme"],
+        "analysis_dimensions": [
+            {
+                "id": "market_growth",
+                "name": "Market Growth",
+                "source_hints": [],
+                "guiding_questions": [],
+                "schema_field_ids": ["market_growth"],
+            }
+        ],
+    }
+
+    result = asyncio.run(agent.run(state))
+
+    root = next(
+        branch
+        for branch in result["research_branches"]
+        if branch["id"] == "collect_acme_market_growth"
+    )
+    child = next(
+        branch
+        for branch in result["research_branches"]
+        if branch.get("parent_id") == root["id"]
+    )
+    root_coverage = next(
+        assessment
+        for assessment in result["coverage_assessments"]
+        if assessment["branch_id"] == root["id"]
+    )
+    child_coverage = next(
+        assessment
+        for assessment in result["coverage_assessments"]
+        if assessment["branch_id"] == child["id"]
+    )
+
+    assert root_coverage["quality_stability"]["status"] == "unstable"
+    assert root_coverage["quality_stability"]["accepted_count"] == 1
+    assert root_coverage["quality_stability"]["rejected_count"] == 3
+    assert root_coverage["quality_stability_gaps"][0]["code"] == (
+        "mixed_quality_high_rejected_ratio"
+    )
+    assert root_coverage["selected_follow_up_specs"][0]["decision_action"] == (
+        "scope_refinement"
+    )
+    assert child["generated_from_gap"] == "mixed_quality_high_rejected_ratio"
+    assert child["excluded_canonical_urls"] == [
+        "https://bad.example/a",
+        "https://bad.example/b",
+        "https://bad.example/c",
+    ]
+    follow_up_call = next(
+        call
+        for call in collector.calls
+        if call.get("generated_from_gap") == "mixed_quality_high_rejected_ratio"
+    )
+    assert follow_up_call["excluded_canonical_urls"] == child["excluded_canonical_urls"]
+    assert child_coverage["quality_stability"]["status"] == "stable"
+    assert child_coverage["quality_stability"]["rejected_count"] == 0
+
+    summary = next(
+        item
+        for item in result["branch_coverage_states"]
+        if item["root_branch_id"] == root["id"]
+    )
+    improvement = next(
+        item
+        for item in summary["improvement_assessments"]
+        if item["gap_code"] == "mixed_quality_high_rejected_ratio"
+    )
+    assert child["triggered_by_gap_type"] == "quality_stability"
+    assert child["triggered_by_coverage_assessment_id"] == root_coverage["id"]
+    assert improvement["gap_type"] == "quality_stability"
+    assert improvement["status"] == "improved"
+    assert improvement["resolved_gap"] is True
+    assert improvement["baseline"]["rejected_ratio"] == 0.75
+    assert improvement["follow_up"]["rejected_ratio"] == 0.0
+    assert improvement["deltas"]["rejected_ratio_delta"] == -0.75
+    assert "quality_status_improved" in improvement["improved_signals"]
+
+
+def test_research_conductor_filters_excluded_canonical_urls():
+    class DummyResearcher:
+        kwargs = {
+            "rivalens_excluded_canonical_urls": [
+                "https://bad.example/a",
+            ]
+        }
+
+    conductor = ResearchConductor.__new__(ResearchConductor)
+    conductor.researcher = DummyResearcher()
+
+    assert conductor._is_excluded_source_url(
+        "https://www.bad.example/a?utm_source=retry"
+    )
+    assert not conductor._is_excluded_source_url("https://bad.example/b")
 
 
 def test_coverage_review_does_not_synthesize_dimension_guiding_questions():
@@ -398,6 +584,154 @@ def test_collection_quality_loop_expands_llm_source_gap():
     assert resolved_gap["resolved_by_branch_ids"] == [child_branches[0]["id"]]
     assert resolved_gap["resolved_by_evidence_ids"] == follow_up_review["accepted_evidence_ids"]
     assert summary["success_criteria"][0]["status"] == "satisfied"
+    improvement = next(
+        item
+        for item in summary["improvement_assessments"]
+        if item["gap_code"] == "needs_pricing_page_source"
+    )
+    assert child_branches[0]["triggered_by_gap_type"] == "source_coverage"
+    assert child_branches[0]["triggered_by_coverage_assessment_id"] == root_coverage["id"]
+    assert improvement["gap_type"] == "source_coverage"
+    assert improvement["status"] == "improved"
+    assert improvement["resolved_gap"] is True
+    assert "original_gap_resolved" in improvement["improved_signals"]
+    assert "target_source_type_collected" in improvement["improved_signals"]
+
+
+def test_branch_improvement_assessment_tracks_success_criterion_resolution():
+    builder = BranchCoverageStateBuilder(
+        CoverageReviewer(source_gap_advisor=FakeSourceGapAdvisor()),
+    )
+    root = {
+        "id": "collect_acme_product",
+        "competitor": "Acme",
+        "dimension_id": "product",
+        "dimension_name": "Product",
+        "analysis_dimension_id": "product",
+        "success_criteria": [
+            {
+                "id": "feature_signal",
+                "description": "Identify public feature capabilities.",
+            },
+            {
+                "id": "security_signal",
+                "description": "Identify security compliance controls.",
+            },
+        ],
+    }
+    child = {
+        "id": "collect_acme_product_d1_1",
+        "parent_id": root["id"],
+        "competitor": "Acme",
+        "dimension_id": "product",
+        "dimension_name": "Product",
+        "analysis_dimension_id": "product",
+        "generated_from_gap": "missing_success_criterion",
+        "triggered_by_gap_type": "success_criterion",
+        "triggered_by_gap_code": "missing_success_criterion",
+        "triggered_by_coverage_assessment_id": "coverage_collect_acme_product",
+        "triggered_by_criterion_id": "security_signal",
+        "success_criteria": [root["success_criteria"][1]],
+    }
+    evidence_items = [
+        {
+            "id": "ev_root",
+            "branch_id": root["id"],
+            "url": "https://acme.example/features",
+            "source_type": "official_site",
+            "excerpt": "Acme public feature capabilities are described.",
+        },
+        {
+            "id": "ev_child",
+            "branch_id": child["id"],
+            "url": "https://acme.example/security",
+            "source_type": "docs",
+            "excerpt": "Acme security compliance controls are documented.",
+        },
+    ]
+    evidence_reviews = [
+        {
+            "id": "ev_review_collect_acme_product",
+            "branch_id": root["id"],
+            "accepted_evidence_ids": ["ev_root"],
+            "rejected_evidence_ids": [],
+        },
+        {
+            "id": "ev_review_collect_acme_product_d1_1",
+            "branch_id": child["id"],
+            "accepted_evidence_ids": ["ev_child"],
+            "rejected_evidence_ids": [],
+        },
+    ]
+    coverage_assessments = [
+        {
+            "id": "coverage_collect_acme_product",
+            "branch_id": root["id"],
+            "accepted_evidence_ids": ["ev_root"],
+            "rejected_evidence_ids": [],
+            "quality_stability": {
+                "status": "stable",
+                "accepted_count": 1,
+                "rejected_count": 0,
+                "rejected_ratio": 0.0,
+            },
+            "source_metrics": {
+                "accepted_evidence_count": 1,
+                "independent_source_count": 1,
+                "unique_canonical_url_count": 1,
+                "unique_domain_count": 1,
+                "primary_source_count": 0,
+            },
+            "satisfied_criteria": [root["success_criteria"][0]],
+            "partial_criteria": [],
+            "missing_criteria": [root["success_criteria"][1]],
+            "covered_questions": [],
+            "missing_questions": [],
+        },
+        {
+            "id": "coverage_collect_acme_product_d1_1",
+            "branch_id": child["id"],
+            "accepted_evidence_ids": ["ev_child"],
+            "rejected_evidence_ids": [],
+            "quality_stability": {
+                "status": "stable",
+                "accepted_count": 1,
+                "rejected_count": 0,
+                "rejected_ratio": 0.0,
+            },
+            "source_metrics": {
+                "accepted_evidence_count": 1,
+                "independent_source_count": 1,
+                "unique_canonical_url_count": 1,
+                "unique_domain_count": 1,
+                "primary_source_count": 0,
+            },
+            "satisfied_criteria": [root["success_criteria"][1]],
+            "partial_criteria": [],
+            "missing_criteria": [],
+            "covered_questions": [],
+            "missing_questions": [],
+        },
+    ]
+
+    states = builder.build(
+        [root, child],
+        evidence_reviews,
+        evidence_items,
+        coverage_assessments,
+    )
+
+    summary = states[0]
+    improvement = summary["improvement_assessments"][0]
+    resolved_gap = summary["coverage_gaps"][0]
+    assert resolved_gap["gap_type"] == "success_criterion"
+    assert resolved_gap["status"] == "resolved"
+    assert improvement["gap_type"] == "success_criterion"
+    assert improvement["criterion_id"] == "security_signal"
+    assert improvement["status"] == "improved"
+    assert improvement["resolved_gap"] is True
+    assert improvement["deltas"]["missing_criteria_count_delta"] == -1
+    assert "missing_criteria_count_decreased" in improvement["improved_signals"]
 
 
 def test_unresolved_llm_source_gap_does_not_block_branch_coverage():

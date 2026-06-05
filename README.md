@@ -194,8 +194,8 @@ missing, consumes LLM-advised source-gap decisions, and narrows follow-up tasks
 to the missing criteria or source coverage gaps instead of throwing away
 partially useful evidence. `BranchCoverageStateBuilder` then aggregates each root branch
 and its follow-up children into `branch_coverage_states`, recording current open
-gap codes, resolved/blocked gap records, and the final coverage status on the
-root branch. `KnowledgeStructuringAgent` first tries
+gap codes, resolved/blocked gap records, explicit parent/child improvement
+assessments, and the final coverage status on the root branch. `KnowledgeStructuringAgent` first tries
 the configured knowledge-fact LLM extractor, then validates, normalizes, and
 deduplicates the returned candidates into `KnowledgeFact` atoms that cite
 accepted `EvidenceItem` IDs. If the LLM is not configured, fails, or returns no
@@ -275,7 +275,9 @@ depth, and budget in
 `CompetitorAnalysisState.coverage_assessments`. After collection finishes,
 `CompetitorAnalysisState.branch_coverage_states` records each root branch/group
 status, accepted evidence IDs, source types found, success-criteria status, and
-gap lifecycle.
+gap lifecycle. It also records `improvement_assessments` for follow-up children,
+including the triggering gap, baseline/follow-up coverage snapshots, metric
+deltas, resolved-gap status, and improved/regression signals.
 
 `ResearchRoutingAction` is intentionally a shared routing vocabulary, not the
 stage boundary. Consumers should distinguish stages with `search_stage` and the
@@ -301,6 +303,16 @@ metrics such as `accepted_evidence_count`, `unique_canonical_url_count`,
 duplicate source groups. These metrics are stored on `CoverageAssessment` and
 passed to `LLMSourceGapAdvisor` so source-gap decisions do not rely on raw
 accepted evidence count alone.
+`CoverageReviewer` also records `quality_stability` for the whole evidence
+batch. When a branch has usable evidence but most attempted sources were
+rejected for reliable usability reasons such as unreadable text, missing usable
+content, or no success-criterion match, it opens a `quality_stability` gap and
+creates a query-refinement follow-up. That follow-up carries
+`excluded_canonical_urls`, so the next standard research pass filters previously
+unusable URLs before scraping. Follow-up branches carry structured
+`triggered_by_*` fields, allowing `BranchCoverageStateBuilder` to demonstrate
+before/after improvement across quality stability, source coverage, and success
+criteria.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.
