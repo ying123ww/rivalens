@@ -277,7 +277,8 @@ depth, and budget in
 status, accepted evidence IDs, source types found, success-criteria status, and
 gap lifecycle. It also records `improvement_assessments` for follow-up children,
 including the triggering gap, baseline/follow-up coverage snapshots, metric
-deltas, resolved-gap status, and improved/regression signals.
+deltas, resolved-gap status, resolved evidence/branch IDs, and
+improved/regression signals.
 
 `ResearchRoutingAction` is intentionally a shared routing vocabulary, not the
 stage boundary. Consumers should distinguish stages with `search_stage` and the
@@ -310,9 +311,10 @@ content, or no success-criterion match, it opens a `quality_stability` gap and
 creates a query-refinement follow-up. That follow-up carries
 `excluded_canonical_urls`, so the next standard research pass filters previously
 unusable URLs before scraping. Follow-up branches carry structured
-`triggered_by_*` fields, allowing `BranchCoverageStateBuilder` to demonstrate
-before/after improvement across quality stability, source coverage, and success
-criteria.
+`triggered_by_*` fields, including the triggering evidence review and coverage
+assessment IDs. `BranchCoverageStateBuilder` then demonstrates before/after
+improvement across quality stability, source coverage, and success criteria,
+including which follow-up evidence IDs resolved the gap.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.

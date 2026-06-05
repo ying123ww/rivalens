@@ -99,6 +99,7 @@ class CoverageReviewer:
         follow_up_specs = self._annotated_follow_up_specs(
             branch,
             coverage_assessment_id,
+            evidence_review,
             raw_follow_up_specs,
         )
         routing = self._routing_from_review(
@@ -153,6 +154,7 @@ class CoverageReviewer:
         self,
         branch: ResearchBranch,
         coverage_assessment_id: str,
+        evidence_review: EvidenceReviewResult,
         follow_up_specs: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         annotated = []
@@ -164,10 +166,15 @@ class CoverageReviewer:
                 self._follow_up_gap_type(enriched),
             )
             enriched.setdefault("triggered_by_gap_code", gap_code)
+            enriched.setdefault("parent_branch_id", branch.get("id", ""))
             enriched.setdefault("triggered_by_branch_id", branch.get("id", ""))
             enriched.setdefault(
                 "triggered_by_coverage_assessment_id",
                 coverage_assessment_id,
+            )
+            enriched.setdefault(
+                "triggered_by_evidence_review_id",
+                evidence_review.get("id", ""),
             )
             criterion_id = self._follow_up_criterion_id(enriched)
             if criterion_id:

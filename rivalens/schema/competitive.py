@@ -139,6 +139,7 @@ class EvidenceCollectionTask(TypedDict, total=False):
     triggered_by_gap_code: str
     triggered_by_branch_id: str
     triggered_by_coverage_assessment_id: str
+    triggered_by_evidence_review_id: str
     triggered_by_criterion_id: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
@@ -225,6 +226,7 @@ class ResearchBranch(TypedDict, total=False):
     id: str
     research_brief_id: str
     parent_id: str | None
+    parent_branch_id: str | None
     parent_task_id: str | None
     parent_dimension_id: str
     depth: int
@@ -251,6 +253,7 @@ class ResearchBranch(TypedDict, total=False):
     triggered_by_gap_code: str
     triggered_by_branch_id: str
     triggered_by_coverage_assessment_id: str
+    triggered_by_evidence_review_id: str
     triggered_by_criterion_id: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
@@ -299,6 +302,7 @@ class ResearchTask(TypedDict, total=False):
     id: str
     brief_id: str
     parent_task_id: str | None
+    parent_branch_id: str | None
     branch_id: str
     competitor: str
     analysis_dimension_id: str
@@ -324,6 +328,7 @@ class ResearchTask(TypedDict, total=False):
     triggered_by_gap_code: str
     triggered_by_branch_id: str
     triggered_by_coverage_assessment_id: str
+    triggered_by_evidence_review_id: str
     triggered_by_criterion_id: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
@@ -334,6 +339,7 @@ class ResearchTask(TypedDict, total=False):
 class FollowUpTaskSpec(TypedDict, total=False):
     objective: str
     query: str
+    parent_branch_id: str
     success_criteria: list[SuccessCriterion]
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
@@ -354,6 +360,7 @@ class FollowUpTaskSpec(TypedDict, total=False):
     triggered_by_gap_code: str
     triggered_by_branch_id: str
     triggered_by_coverage_assessment_id: str
+    triggered_by_evidence_review_id: str
     triggered_by_criterion_id: str
     triggering_finding_codes: list[str]
     baseline_accepted_count: int
@@ -548,6 +555,10 @@ class BranchImprovementAssessment(TypedDict, total=False):
     follow_up: dict[str, Any]
     deltas: dict[str, Any]
     resolved_gap: bool
+    resolved_gap_codes: list[str]
+    unresolved_gap_codes: list[str]
+    resolved_by_branch_ids: list[str]
+    resolved_by_evidence_ids: list[str]
     improved_signals: list[str]
     regression_signals: list[str]
     notes: str

@@ -353,6 +353,11 @@ def test_mixed_quality_evidence_triggers_differential_retry():
         for assessment in result["coverage_assessments"]
         if assessment["branch_id"] == child["id"]
     )
+    root_evidence_review = next(
+        review
+        for review in result["evidence_reviews"]
+        if review["branch_id"] == root["id"]
+    )
 
     assert root_coverage["quality_stability"]["status"] == "unstable"
     assert root_coverage["quality_stability"]["accepted_count"] == 1
@@ -389,10 +394,16 @@ def test_mixed_quality_evidence_triggers_differential_retry():
         if item["gap_code"] == "mixed_quality_high_rejected_ratio"
     )
     assert child["triggered_by_gap_type"] == "quality_stability"
+    assert child["parent_branch_id"] == root["id"]
     assert child["triggered_by_coverage_assessment_id"] == root_coverage["id"]
+    assert child["triggered_by_evidence_review_id"] == root_evidence_review["id"]
     assert improvement["gap_type"] == "quality_stability"
     assert improvement["status"] == "improved"
     assert improvement["resolved_gap"] is True
+    assert improvement["resolved_gap_codes"] == ["mixed_quality_high_rejected_ratio"]
+    assert improvement["unresolved_gap_codes"] == []
+    assert improvement["resolved_by_branch_ids"] == [child["id"]]
+    assert improvement["resolved_by_evidence_ids"] == child_coverage["accepted_evidence_ids"]
     assert improvement["baseline"]["rejected_ratio"] == 0.75
     assert improvement["follow_up"]["rejected_ratio"] == 0.0
     assert improvement["deltas"]["rejected_ratio_delta"] == -0.75
@@ -590,10 +601,16 @@ def test_collection_quality_loop_expands_llm_source_gap():
         if item["gap_code"] == "needs_pricing_page_source"
     )
     assert child_branches[0]["triggered_by_gap_type"] == "source_coverage"
+    assert child_branches[0]["parent_branch_id"] == pricing_root["id"]
     assert child_branches[0]["triggered_by_coverage_assessment_id"] == root_coverage["id"]
+    assert child_branches[0]["triggered_by_evidence_review_id"] == root_evidence_review["id"]
     assert improvement["gap_type"] == "source_coverage"
     assert improvement["status"] == "improved"
     assert improvement["resolved_gap"] is True
+    assert improvement["resolved_gap_codes"] == ["needs_pricing_page_source"]
+    assert improvement["unresolved_gap_codes"] == []
+    assert improvement["resolved_by_branch_ids"] == [child_branches[0]["id"]]
+    assert improvement["resolved_by_evidence_ids"] == follow_up_review["accepted_evidence_ids"]
     assert "original_gap_resolved" in improvement["improved_signals"]
     assert "target_source_type_collected" in improvement["improved_signals"]
 
@@ -630,6 +647,7 @@ def test_branch_improvement_assessment_tracks_success_criterion_resolution():
         "triggered_by_gap_type": "success_criterion",
         "triggered_by_gap_code": "missing_success_criterion",
         "triggered_by_coverage_assessment_id": "coverage_collect_acme_product",
+        "triggered_by_evidence_review_id": "ev_review_collect_acme_product",
         "triggered_by_criterion_id": "security_signal",
         "success_criteria": [root["success_criteria"][1]],
     }
@@ -730,6 +748,10 @@ def test_branch_improvement_assessment_tracks_success_criterion_resolution():
     assert improvement["criterion_id"] == "security_signal"
     assert improvement["status"] == "improved"
     assert improvement["resolved_gap"] is True
+    assert improvement["resolved_gap_codes"] == ["missing_success_criterion"]
+    assert improvement["unresolved_gap_codes"] == []
+    assert improvement["resolved_by_branch_ids"] == [child["id"]]
+    assert improvement["resolved_by_evidence_ids"] == ["ev_child"]
     assert improvement["deltas"]["missing_criteria_count_delta"] == -1
     assert "missing_criteria_count_decreased" in improvement["improved_signals"]
 

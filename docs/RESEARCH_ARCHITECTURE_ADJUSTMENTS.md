@@ -19,7 +19,7 @@
 - `EvidenceQualityReviewer` 对每次 standard evidence result 做 source-level accept / reject。
 - `SourceMetricsBuilder` 在 evidence review 后只统计 accepted evidence 的 canonical URL、domain、content hash、source type、primary source 和 duplicate groups；它不直接决定补采。
 - `CoverageReviewer` 负责显式传入的 guiding question / success criteria 覆盖、accepted-source metrics、mixed-quality stability，并把 LLM source-gap advisor 或 quality-stability gap 的裁决物化成 gap-driven follow-up tasks；它不再按 dimension id 兜底生成 guiding questions 或 coverage terms。
-- `CoverageReviewer` 的 follow-up task 继续使用结构化 `decision_action`、`decision_subtype`、`generated_from_gap`、`target_source_types` 和 `search_stage` 字段，并补充 `triggered_by_*` trace 字段指向触发它的 branch、coverage assessment、gap type/code 和 criterion。
+- `CoverageReviewer` 的 follow-up task 继续使用结构化 `decision_action`、`decision_subtype`、`generated_from_gap`、`target_source_types` 和 `search_stage` 字段，并补充 `triggered_by_*` trace 字段指向触发它的 branch、evidence review、coverage assessment、gap type/code 和 criterion。
 - `BranchCoverageStateBuilder` 将 root branch 及其 follow-up children 汇总成 `branch_coverage_states`，记录当前 open gap codes、resolved/blocked gap records、follow-up improvement assessments，并把最终 `coverage_status` 回写到 root branch。
 - `ClaimSupportReviewer` 只做 claim-level citation support review，不再通过 collection 专用 verification 通道回到 `source_collection`。
 
@@ -70,7 +70,7 @@ Collection input fields have separate meanings:
 - Unresolved non-blocking source gaps do not block a branch when the content criteria are satisfied.
 - `CoverageAssessment.source_metrics` records deterministic accepted-source metrics. `CoverageReviewer` and `LLMSourceGapAdvisor` consume these metrics so `accepted_evidence_count` cannot falsely stand in for independent source count.
 - `CoverageAssessment.quality_stability` records accepted/rejected ratio and reliable rejection codes for the whole evidence batch. High mixed-quality instability opens a `quality_stability` gap and creates a query-refinement child branch carrying `excluded_canonical_urls`, preventing the retry from scraping the same unusable pages again.
-- `BranchCoverageState.improvement_assessments` compares each follow-up child against the triggering parent coverage baseline. It records baseline/follow-up snapshots, metric deltas, resolved-gap status, and deterministic improved/regression signals for quality stability, source coverage, and success-criteria follow-ups.
+- `BranchCoverageState.improvement_assessments` compares each follow-up child against the triggering parent coverage baseline. It records baseline/follow-up snapshots, metric deltas, resolved/unresolved gap codes, resolved branch/evidence IDs, and deterministic improved/regression signals for quality stability, source coverage, and success-criteria follow-ups.
 - `expected_claim_types` is carried through branch, brief, task, and collection-task payloads as analysis typing context. Collection does not carry an implicit `risk_level`; claim risk is assigned later on `AnalysisClaim.claim_risk_level` and consumed by `ClaimSupportReviewer`.
 - `EvidenceItem.canonical_url`, `source_domain`, `scraped_content_sha256`, and `source_cache` record crawler identity/cache metadata for trace replay and future source metrics; they do not change evidence acceptance semantics.
 

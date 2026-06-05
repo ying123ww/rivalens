@@ -653,6 +653,7 @@ class CollectionAgent:
             "id": f"task_{branch['id']}",
             "brief_id": branch.get("research_brief_id", brief.get("id", "")),
             "parent_task_id": branch.get("parent_task_id"),
+            "parent_branch_id": branch.get("parent_branch_id", branch.get("parent_id")),
             "branch_id": branch["id"],
             "competitor": branch.get("competitor", ""),
             "analysis_dimension_id": branch.get(
@@ -681,6 +682,10 @@ class CollectionAgent:
                 "triggered_by_coverage_assessment_id",
                 "",
             ),
+            "triggered_by_evidence_review_id": branch.get(
+                "triggered_by_evidence_review_id",
+                "",
+            ),
             "triggered_by_criterion_id": branch.get("triggered_by_criterion_id", ""),
             "decision_action": branch.get("decision_action", ""),
             "decision_subtype": branch.get("decision_subtype", ""),
@@ -702,7 +707,10 @@ class CollectionAgent:
             "research_task_id": research_task.get("id", ""),
             "research_brief_id": research_task.get("brief_id", branch.get("research_brief_id", "")),
             "branch_id": branch["id"],
-            "parent_branch_id": branch.get("parent_id"),
+            "parent_branch_id": research_task.get(
+                "parent_branch_id",
+                branch.get("parent_branch_id", branch.get("parent_id")),
+            ),
             "depth": branch.get("depth", 0),
             "search_stage": research_task.get("search_stage", branch.get("search_stage", "")),
             "generated_from_gap": research_task.get("generated_from_gap", branch.get("generated_from_gap", "")),
@@ -748,6 +756,10 @@ class CollectionAgent:
             "triggered_by_branch_id": branch.get("triggered_by_branch_id", ""),
             "triggered_by_coverage_assessment_id": branch.get(
                 "triggered_by_coverage_assessment_id",
+                "",
+            ),
+            "triggered_by_evidence_review_id": branch.get(
+                "triggered_by_evidence_review_id",
                 "",
             ),
             "triggered_by_criterion_id": branch.get("triggered_by_criterion_id", ""),
@@ -798,6 +810,7 @@ class CollectionAgent:
                     "id": child_id,
                     "research_brief_id": parent.get("research_brief_id", f"brief_{parent['id']}"),
                     "parent_id": parent["id"],
+                    "parent_branch_id": parent["id"],
                     "depth": parent.get("depth", 0) + 1,
                     "path": list(parent.get("path", [])) + [topic],
                     "competitor": parent.get("competitor", ""),
@@ -840,6 +853,10 @@ class CollectionAgent:
                     ),
                     "triggered_by_coverage_assessment_id": follow_up_spec.get(
                         "triggered_by_coverage_assessment_id",
+                        "",
+                    ),
+                    "triggered_by_evidence_review_id": follow_up_spec.get(
+                        "triggered_by_evidence_review_id",
                         "",
                     ),
                     "triggered_by_criterion_id": follow_up_spec.get(

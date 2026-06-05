@@ -477,6 +477,15 @@ class BranchCoverageStateBuilder:
                     follow_up_assessment,
                     coverage_gaps,
                 )
+                resolution = self._resolution_provenance(
+                    gap_type,
+                    gap_code,
+                    criterion_id,
+                    baseline_assessment,
+                    follow_up_assessment,
+                    coverage_gaps,
+                    resolved_gap,
+                )
                 assessments.append(
                     self._build_improvement_assessment(
                         root=root,
@@ -488,6 +497,7 @@ class BranchCoverageStateBuilder:
                         baseline_assessment=baseline_assessment,
                         follow_up_assessment=follow_up_assessment,
                         resolved_gap=resolved_gap,
+                        resolution=resolution,
                     ),
                 )
         return assessments
@@ -504,6 +514,7 @@ class BranchCoverageStateBuilder:
         baseline_assessment: CoverageAssessment,
         follow_up_assessment: CoverageAssessment,
         resolved_gap: bool,
+        resolution: dict[str, Any],
     ) -> BranchImprovementAssessment:
         baseline = self._assessment_snapshot(baseline_assessment)
         follow_up = self._assessment_snapshot(follow_up_assessment)
@@ -545,9 +556,75 @@ class BranchCoverageStateBuilder:
             "follow_up": follow_up,
             "deltas": deltas,
             "resolved_gap": resolved_gap,
+            "resolved_gap_codes": list(resolution.get("resolved_gap_codes", [])),
+            "unresolved_gap_codes": list(resolution.get("unresolved_gap_codes", [])),
+            "resolved_by_branch_ids": list(
+                resolution.get("resolved_by_branch_ids", []),
+            ),
+            "resolved_by_evidence_ids": list(
+                resolution.get("resolved_by_evidence_ids", []),
+            ),
             "improved_signals": improved_signals,
             "regression_signals": regression_signals,
             "notes": self._improvement_notes(status, improved_signals, regression_signals),
+        }
+
+    def _resolution_provenance(
+        self,
+        gap_type: str,
+        gap_code: str,
+        criterion_id: str,
+        baseline_assessment: CoverageAssessment,
+        follow_up_assessment: CoverageAssessment,
+        coverage_gaps: list[dict[str, Any]],
+        resolved_gap: bool,
+    ) -> dict[str, Any]:
+        if gap_type == "quality_stability":
+            accepted_ids = list(follow_up_assessment.get("accepted_evidence_ids", []))
+            branch_id = str(follow_up_assessment.get("branch_id", ""))
+            return {
+                "resolved_gap_codes": [gap_code] if resolved_gap else [],
+                "unresolved_gap_codes": [] if resolved_gap else [gap_code],
+                "resolved_by_branch_ids": [branch_id]
+                if resolved_gap and branch_id
+                else [],
+                "resolved_by_evidence_ids": accepted_ids if resolved_gap else [],
+            }
+
+        baseline_assessment_id = baseline_assessment.get("id", "")
+        matched_gaps = [
+            gap
+            for gap in coverage_gaps
+            if gap.get("code") == gap_code
+            and gap.get("opened_by_coverage_assessment_id") == baseline_assessment_id
+            and (not criterion_id or gap.get("criterion_id") == criterion_id)
+        ]
+        if not matched_gaps:
+            return {
+                "resolved_gap_codes": [],
+                "unresolved_gap_codes": [gap_code],
+                "resolved_by_branch_ids": [],
+                "resolved_by_evidence_ids": [],
+            }
+
+        resolved_codes = []
+        unresolved_codes = []
+        resolved_branch_ids: list[str] = []
+        resolved_evidence_ids: list[str] = []
+        for gap in matched_gaps:
+            code = str(gap.get("code", ""))
+            if gap.get("status") == "resolved":
+                resolved_codes.append(code)
+                resolved_branch_ids.extend(gap.get("resolved_by_branch_ids", []))
+                resolved_evidence_ids.extend(gap.get("resolved_by_evidence_ids", []))
+            else:
+                unresolved_codes.append(code)
+
+        return {
+            "resolved_gap_codes": list(dict.fromkeys(resolved_codes)),
+            "unresolved_gap_codes": list(dict.fromkeys(unresolved_codes)),
+            "resolved_by_branch_ids": list(dict.fromkeys(resolved_branch_ids)),
+            "resolved_by_evidence_ids": list(dict.fromkeys(resolved_evidence_ids)),
         }
 
     def _latest_assessment(
