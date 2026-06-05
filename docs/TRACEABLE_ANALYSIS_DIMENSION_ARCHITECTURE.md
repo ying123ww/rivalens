@@ -88,9 +88,9 @@ ReportWriterAgent section id
 
 旧版 `KnowledgeStructuringAgent` 会给每个 competitor 的每个 extension 填 evidence IDs。该字段不是主链路需要的证据聚合对象，已经移除；精确证据绑定由 `KnowledgeFact.evidence_ids` 和 `AnalysisClaim.evidence_ids` 承担。
 
-### 4. Knowledge 没有成为主路径
+### 4. Knowledge 已成为主路径
 
-当前 `AnalysisAgent` 优先从 accepted evidence 直接生成 claims。只有当 evidence-review path 没有生成 claims 时，才 fallback 到 `CompetitorKnowledge`。这让 KnowledgeStructuringAgent 更像旁路存档，而不是主分析输入。
+当前 `KnowledgeStructuringAgent` 优先用已配置的 LLM 从 accepted evidence 抽取 `KnowledgeFact` atoms，再把候选事实压回受控 schema：必须引用有效 `EvidenceItem.id`，必须绑定 `analysis_dimension_id`，并按 `normalized_key` 去重。LLM 未配置、调用失败或没有返回有效事实时，agent 会 fallback 到规则抽取。随后本地 atomization policy 会判断 fact 是否过宽；pricing evidence 命中 free tier、plan price、quote-only、usage-based billing、annual discount 等信号时，会被拆成对应原子 facts。`AnalysisAgent` 优先按 competitor、analysis dimension、claim type、subject、predicate 和 normalized fact key 聚合这些 facts，再生成 `AnalysisClaim`。只有当 `KnowledgeFact` 不可用时，才 fallback 到 direct evidence 或 `CompetitorKnowledge`。
 
 ### 5. Writer 曾经按固定产品小节猜测第三章路由
 
@@ -127,7 +127,7 @@ AnalysisDimension
 - `AnalysisDimension.report_targets` 是当前运行时的章节 mapping 存储；如果后续新增 `ReportSectionPlan`，它应从这些 target 归一化生成，而不是绕过维度主轴。
 - `rivalens/report_routing.py` 只负责动态章节路由：默认把每个分析维度映射到自己的任务级 section id，不维护全局固定产品小节 taxonomy。
 - `CollectionAgent` 只消费 `analysis_dimensions` 生成非 profile 搜索分支；行业搜索词从 `industry_direction_plan.industry` 读取。
-- `EvidenceItem`、`KnowledgeFact`、`AnalysisClaim` 和 ClaimSupport verification task 均应保留 `analysis_dimension_id`；报告正文路由使用 `report_section_id`。
+- `EvidenceItem`、`KnowledgeFact` 和 `AnalysisClaim` 均应保留 `analysis_dimension_id`；报告正文路由使用 `report_section_id`。
 - `ReportWriterAgent` 输出“动态分析维度总览 + 动态章节正文”，并只按 `report_section_id` / `report_targets` 选择 claims，不再使用 aliases 或 dimension string 猜测章节。
 
 ## 推荐对象模型
@@ -250,6 +250,11 @@ EvidenceItem 应显式绑定分析维度。
     "competitor": "Acme",
     "analysis_dimension_id": "baseline_trust_security_compliance",
     "schema_field_id": "direction_baseline_trust_security_compliance",
+    "fact_type": "trust_compliance_signal",
+    "subject": "Acme trust center",
+    "predicate": "documents",
+    "object": "SSO and audit log controls",
+    "normalized_key": "acme|baseline_trust_security_compliance|trust_compliance_signal|documents|sso_audit_log_controls",
     "statement": "Acme publicly documents SSO and audit log controls.",
     "value": {
         "capability": "SSO and audit logs",
@@ -395,7 +400,8 @@ AnalysisAgent
 ClaimSupportReviewer
   -> ClaimSupportReview.claim_id
   -> ClaimSupportReview.evidence_ids
-  -> verification task keeps analysis_dimension_id
+  -> ClaimSupportReview.analysis_dimension_id
+  -> ClaimSupportReview.recommended_action
 
 ReportWriterAgent
   -> dynamic analysis dimension overview
@@ -422,13 +428,16 @@ ReportWriterAgent
 
 ### KnowledgeStructuringAgent
 
-- Turn accepted EvidenceItem records into KnowledgeFact records.
+- Turn accepted EvidenceItem records into KnowledgeFact records, using the configured LLM extractor first and deterministic rules as fallback.
 - Attach every KnowledgeFact to one analysis dimension and one optional schema field.
+- Reject LLM fact candidates that do not cite accepted evidence IDs, then normalize subject, predicate, object, fact type, confidence, and `normalized_key` before handoff.
+- Apply the local atomization policy before handoff; split broad pricing facts into free-tier, plan-price, quote-only, usage-based-billing, and annual-discount atoms when the cited evidence supports them.
 - Populate CompetitorKnowledge from KnowledgeFact, not from broad competitor-level evidence buckets.
 
 ### AnalysisAgent
 
 - Generate claims from KnowledgeFact first.
+- Group KnowledgeFact records by competitor, analysis dimension, claim type, subject, predicate, and normalized fact key.
 - Fall back to direct evidence-derived claims only when KnowledgeFact is unavailable, and record that source explicitly.
 - Preserve `analysis_dimension_id`, `knowledge_fact_ids`, and `evidence_ids`.
 - Attach `report_section_id` from the dimension mapping when producing or normalizing claims.
@@ -436,7 +445,8 @@ ReportWriterAgent
 ### ClaimSupportReviewer
 
 - Review only claim-bound evidence.
-- Keep verification tasks tied to the original claim and `analysis_dimension_id`.
+- Emit structured support status, recommended action, unsupported phrases, and suggested revision when needed.
+- Do not trigger a collection-specific verification path.
 - Do not rewrite dimensions through natural language.
 
 ### ReportWriterAgent
@@ -476,7 +486,7 @@ ReportWriterAgent
 ### Phase 4: Tighten traceability and observability
 
 - Add agent events recording dimension counts, fact counts, claim counts, and unmapped IDs.
-- Make claim-support verification preserve `analysis_dimension_id`.
+- Make claim-support review preserve `analysis_dimension_id` and emit structured `recommended_action`.
 - Add backend/frontend support for replaying:
 
 ```text

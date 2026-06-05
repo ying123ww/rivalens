@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
@@ -12,22 +11,6 @@ from rivalens.schema import ClaimSupportReview, CompetitorAnalysisState
 
 class ClaimSupportReviewer:
     """Check whether claims are sufficiently supported by accepted evidence."""
-
-    def __init__(
-        self,
-        enable_verification: bool | None = None,
-        max_verification_tasks: int | None = None,
-    ) -> None:
-        self.enable_verification = (
-            enable_verification
-            if enable_verification is not None
-            else self._env_flag("RIVALENS_ENABLE_CLAIM_VERIFICATION", False)
-        )
-        self.max_verification_tasks = (
-            max_verification_tasks
-            if max_verification_tasks is not None
-            else self._env_int("RIVALENS_MAX_CLAIM_VERIFICATION_TASKS", 8, minimum=1)
-        )
 
     def review(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         analysis_message = latest_message_for(
@@ -45,40 +28,64 @@ class ClaimSupportReviewer:
             for evidence in state.get("evidence_items", [])
             if evidence.get("id")
         }
+        knowledge_fact_by_id = {
+            fact.get("id", ""): fact
+            for fact in state.get("knowledge_facts", [])
+            if fact.get("id")
+        }
         reviews: list[ClaimSupportReview] = []
         supported_count = 0
         weak_count = 0
-        verification_rounds = int(state.get("verification_rounds", 0) or 0)
-        verification_enabled = self.enable_verification and verification_rounds == 0
-        verification_task_candidates: list[dict[str, Any]] = []
+        contradicted_count = 0
+        unverifiable_count = 0
+        accepted_count = 0
+        revision_count = 0
+        suppressed_count = 0
 
         for claim in claims:
             claim_id = claim.get("id", "")
-            claim_text = str(claim.get("claim", ""))
             evidence_ids = [
                 evidence_id
                 for evidence_id in claim.get("evidence_ids", [])
                 if evidence_id in evidence_by_id
             ]
             evidence_items = [evidence_by_id[evidence_id] for evidence_id in evidence_ids]
-            status, unsupported_phrases, reviewer_notes, confidence = self._support_status(
-                claim_text,
+            knowledge_fact_ids = [
+                fact_id
+                for fact_id in claim.get("knowledge_fact_ids", [])
+                if fact_id in knowledge_fact_by_id
+            ]
+            knowledge_facts = [
+                knowledge_fact_by_id[fact_id]
+                for fact_id in knowledge_fact_ids
+            ]
+            (
+                status,
+                recommended_action,
+                unsupported_phrases,
+                suggested_revision,
+                reviewer_notes,
+                confidence,
+            ) = self._review_claim_support(
+                claim,
                 evidence_items,
-                claim.get("confidence", 0.5),
+                knowledge_facts,
             )
             if status == "supported":
                 supported_count += 1
+            elif status == "unverifiable":
+                unverifiable_count += 1
+            elif status == "contradicted":
+                contradicted_count += 1
             elif status in {"weak", "contradicted"}:
                 weak_count += 1
 
-            follow_up_tasks = self._follow_up_tasks(
-                claim,
-                status,
-                unsupported_phrases,
-                evidence_items,
-                allow_verification=verification_enabled,
-            )
-            verification_task_candidates.extend(follow_up_tasks)
+            if recommended_action == "accept":
+                accepted_count += 1
+            elif recommended_action == "revise":
+                revision_count += 1
+            elif recommended_action == "suppress":
+                suppressed_count += 1
             reviews.append(
                 {
                     "id": f"claim_support_{claim_id or len(reviews) + 1}",
@@ -87,25 +94,16 @@ class ClaimSupportReviewer:
                     "analysis_dimension_id": claim.get("analysis_dimension_id", ""),
                     "report_section_id": claim.get("report_section_id", ""),
                     "support_status": status,
+                    "recommended_action": recommended_action,
                     "evidence_ids": evidence_ids,
+                    "knowledge_fact_ids": knowledge_fact_ids,
                     "unsupported_phrases": unsupported_phrases,
-                    "required_follow_up_tasks": follow_up_tasks,
+                    "required_follow_up_tasks": [],
+                    "suggested_revision": suggested_revision,
                     "reviewer_notes": reviewer_notes,
                     "confidence": confidence,
                 }
             )
-
-        verification_task_queue = self._merge_prioritized_follow_up_tasks(
-            verification_task_candidates,
-        )
-        tasks_by_claim_id = {
-            claim_id: task
-            for task in verification_task_queue
-            for claim_id in task.get("claim_ids", [])
-        }
-        for review in reviews:
-            claim_task = tasks_by_claim_id.get(review.get("claim_id", ""))
-            review["required_follow_up_tasks"] = [claim_task] if claim_task else []
 
         message = create_agent_message(
             sender="claim_support",
@@ -115,6 +113,11 @@ class ClaimSupportReviewer:
                 "review_count": len(reviews),
                 "supported_count": supported_count,
                 "weak_count": weak_count,
+                "contradicted_count": contradicted_count,
+                "unverifiable_count": unverifiable_count,
+                "accepted_count": accepted_count,
+                "revision_count": revision_count,
+                "suppressed_count": suppressed_count,
                 "reviews": reviews,
             },
             evidence_ids=[
@@ -126,7 +129,6 @@ class ClaimSupportReviewer:
 
         return {
             "claim_support_reviews": reviews,
-            "verification_task_queue": verification_task_queue,
             "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
             + [
@@ -137,104 +139,112 @@ class ClaimSupportReviewer:
                         "analysis_message_id": analysis_message.get("id") if analysis_message else None,
                         "claim_count": len(claims),
                         "evidence_count": len(evidence_by_id),
-                        "verification_rounds": verification_rounds,
-                        "verification_enabled": verification_enabled,
+                        "knowledge_fact_count": len(knowledge_fact_by_id),
                     },
                     "output": {
                         "review_count": len(reviews),
                         "supported_count": supported_count,
                         "weak_count": weak_count,
-                        "verification_task_count": len(verification_task_queue),
-                        "verification_task_candidate_count": len(verification_task_candidates),
-                        "max_verification_tasks": self.max_verification_tasks,
+                        "contradicted_count": contradicted_count,
+                        "unverifiable_count": unverifiable_count,
+                        "accepted_count": accepted_count,
+                        "revision_count": revision_count,
+                        "suppressed_count": suppressed_count,
                     },
                 }
             ],
         }
 
-    def _env_flag(self, env_name: str, default: bool) -> bool:
-        raw_value = os.getenv(env_name)
-        if raw_value in (None, ""):
-            return default
-        return raw_value.strip().lower() in {"1", "true", "yes", "on"}
-
-    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
-        raw_value = os.getenv(env_name)
-        if raw_value in (None, ""):
-            return default
-        try:
-            parsed = int(raw_value)
-        except (TypeError, ValueError):
-            return default
-        return max(minimum, parsed)
-
-    def _support_status(
+    def _review_claim_support(
         self,
-        claim_text: str,
+        claim: dict[str, Any],
         evidence_items: list[dict[str, Any]],
-        base_confidence: float,
-    ) -> tuple[str, list[str], str, float]:
+        knowledge_facts: list[dict[str, Any]],
+    ) -> tuple[str, str, list[str], str, str, float]:
+        claim_text = str(claim.get("claim", ""))
         try:
-            base_score = float(base_confidence)
+            base_score = float(claim.get("confidence", 0.5))
         except (TypeError, ValueError):
             base_score = 0.5
         if not evidence_items:
             return (
                 "unverifiable",
+                "evidence_gap",
                 ["missing evidence ids"],
+                "",
                 "Claim has no traceable evidence bindings.",
                 round(min(1.0, max(0.0, base_score * 0.6)), 2),
             )
 
-        evidence_text = " ".join(
-            " ".join(
-                str(part)
-                for part in [
-                    evidence.get("title", ""),
-                    evidence.get("excerpt", ""),
-                    evidence.get("url", ""),
-                ]
+        alignment_issue = self._alignment_issue(claim, evidence_items, knowledge_facts)
+        if alignment_issue:
+            return (
+                "contradicted",
+                "suppress",
+                [alignment_issue],
+                "",
+                "Claim bindings do not align with the cited evidence or facts.",
+                round(max(0.0, min(1.0, base_score * 0.5)), 2),
             )
-            for evidence in evidence_items
-        ).lower()
+
+        context_text = self._support_context(evidence_items, knowledge_facts)
         claim_tokens = self._support_terms(claim_text)
-        overlap = [token for token in claim_tokens if token in evidence_text]
+        context_tokens = set(self._support_terms(context_text))
+        overlap = [token for token in claim_tokens if token in context_tokens]
+        unsupported = [token for token in claim_tokens if token not in context_tokens][:6]
+        overclaim_terms = self._overclaim_terms(claim_text)
+        suggested_revision = self._suggested_revision(
+            claim,
+            evidence_items,
+            knowledge_facts,
+        )
+
+        if overclaim_terms and not self._overclaim_supported(overclaim_terms, context_text):
+            return (
+                "weak",
+                "revise",
+                overclaim_terms[:4],
+                suggested_revision,
+                "Claim uses comparative or superiority language that the bound evidence does not directly support.",
+                round(max(0.0, min(1.0, base_score * 0.75)), 2),
+            )
+
+        if not claim.get("knowledge_fact_ids"):
+            return (
+                "weak",
+                "revise",
+                unsupported or claim_tokens[:4],
+                suggested_revision,
+                "Claim is bound to evidence but not to structured KnowledgeFact records.",
+                round(max(0.0, min(1.0, base_score * 0.82)), 2),
+            )
 
         if overlap:
             return (
                 "supported",
+                "accept",
                 [],
+                "",
                 "Claim text is anchored in the accepted evidence snippets.",
                 round(min(1.0, max(0.0, base_score)), 2),
             )
 
-        if any(
-            keyword in evidence_text
-            for keyword in [
-                "no ",
-                "not ",
-                "lack",
-                "missing",
-                "insufficient",
-                "unclear",
-                "没有",
-                "缺少",
-                "不足",
-                "不明确",
-                "无法确认",
-            ]
-        ):
+        if self._context_has_uncertainty(context_text):
             return (
                 "weak",
-                claim_tokens[:3],
+                "revise",
+                unsupported or claim_tokens[:4],
+                suggested_revision,
                 "Evidence exists but does not directly substantiate the claim wording.",
                 round(max(0.0, min(1.0, base_score * 0.75)), 2),
             )
 
         return (
             "weak",
-            claim_tokens[:3],
-            "Evidence is traceable but the claim needs a tighter verification query.",
+            "revise",
+            unsupported or claim_tokens[:4],
+            suggested_revision,
+            "Evidence is traceable but the claim should be tightened to match cited facts.",
             round(max(0.0, min(1.0, base_score * 0.8)), 2),
         )
 
@@ -250,9 +260,18 @@ class ClaimSupportReviewer:
             "were",
             "been",
             "evidence",
+            "including",
             "public",
             "quality",
             "reviewed",
+            "signal",
+            "signals",
+            "contains",
+            "multiple",
+            "source",
+            "sources",
+            "shows",
+            "indicates",
         }
         terms = [
             token
@@ -268,192 +287,133 @@ class ClaimSupportReviewer:
             )
         return list(dict.fromkeys(terms))
 
-    def _follow_up_tasks(
+    def _support_context(
+        self,
+        evidence_items: list[dict[str, Any]],
+        knowledge_facts: list[dict[str, Any]],
+    ) -> str:
+        parts = []
+        for fact in knowledge_facts:
+            parts.extend(
+                [
+                    fact.get("statement", ""),
+                    fact.get("object", ""),
+                    " ".join(str(value) for value in (fact.get("value", {}) or {}).values()),
+                ]
+            )
+        for evidence in evidence_items:
+            parts.extend(
+                [
+                    evidence.get("title", ""),
+                    evidence.get("excerpt", ""),
+                    evidence.get("url", ""),
+                ]
+            )
+        return " ".join(str(part or "") for part in parts).lower()
+
+    def _alignment_issue(
         self,
         claim: dict[str, Any],
-        support_status: str,
-        unsupported_phrases: list[str],
         evidence_items: list[dict[str, Any]],
-        allow_verification: bool,
-    ) -> list[dict[str, Any]]:
-        if support_status == "supported" or not allow_verification:
-            return []
-
-        dimension = str(
-            claim.get("analysis_dimension_id")
-            or "source_evidence"
-        )
-        claim_text = str(claim.get("claim", ""))
-        competitors = claim.get("competitors", []) or []
-        competitor = competitors[0] if competitors else ""
-        query_focus = " ".join(
-            token
-            for token in unsupported_phrases[:3] + [dimension, claim_text[:120]]
-            if token
-        ).strip()
-        if not query_focus:
-            query_focus = claim_text[:120] or dimension
-
-        target_source_types = self._target_source_types(dimension, evidence_items)
-        return [
-            {
-                "objective": f"Verify claim: {claim_text[:120]}",
-                "query": "\n".join(
-                    [
-                        query_focus,
-                        f"Claim dimension: {dimension}",
-                        "Search for public evidence that directly supports or contradicts the claim.",
-                    ]
-                ),
-                "target_source_types": target_source_types,
-                "success_criteria": [
-                    {
-                        "id": "claim_verification",
-                        "description": f"Verify claim: {claim_text[:120]}",
-                        "target_source_types": target_source_types,
-                        "required_source_types": target_source_types,
-                        "kind": "claim_verification",
-                    }
-                ],
-                "generated_from_gap": f"verification:{claim.get('id', '')}",
-                "decision_action": "claim_verification",
-                "decision_subtype": "evidence_check",
-                "reason": "Claim support review marked this claim as weak or unverifiable.",
-                "search_stage": "verification",
-                "competitor": competitor,
-                "analysis_dimension_id": dimension,
-                "report_section_id": claim.get("report_section_id", ""),
-                "dimension_id": dimension,
-                "parent_branch_id": claim.get("branch_id", ""),
-                "claim_ids": [claim.get("id", "")],
-                "support_statuses": [support_status],
-                "unsupported_phrases": unsupported_phrases,
-                "priority": self._verification_priority(support_status),
-            }
+        knowledge_facts: list[dict[str, Any]],
+    ) -> str:
+        claim_competitors = [
+            str(competitor)
+            for competitor in claim.get("competitors", [])
+            if str(competitor or "").strip()
         ]
+        evidence_competitors = [
+            str(evidence.get("competitor", ""))
+            for evidence in evidence_items
+            if str(evidence.get("competitor", "")).strip()
+        ]
+        if claim_competitors and evidence_competitors and not any(
+            self._competitor_matches(claim_competitor, evidence_competitor)
+            for claim_competitor in claim_competitors
+            for evidence_competitor in evidence_competitors
+        ):
+            return "competitor_mismatch"
 
-    def _merge_prioritized_follow_up_tasks(
+        claim_dimension = str(claim.get("analysis_dimension_id", "") or "")
+        bound_dimensions = [
+            str(item.get("analysis_dimension_id", "") or "")
+            for item in [*evidence_items, *knowledge_facts]
+            if str(item.get("analysis_dimension_id", "") or "").strip()
+        ]
+        if claim_dimension and bound_dimensions and claim_dimension not in bound_dimensions:
+            return "dimension_mismatch"
+        return ""
+
+    def _competitor_matches(self, expected: str, observed: str) -> bool:
+        left = expected.strip().lower()
+        right = observed.strip().lower()
+        return bool(left and right and (left == right or left in right or right in left))
+
+    def _overclaim_terms(self, claim_text: str) -> list[str]:
+        normalized = claim_text.lower()
+        keywords = [
+            "best",
+            "leading",
+            "leader",
+            "dominant",
+            "strongest",
+            "outperform",
+            "outperforms",
+            "superior",
+            "most advanced",
+            "significant advantage",
+            "领先",
+            "最佳",
+            "最强",
+            "显著优势",
+            "绝对优势",
+        ]
+        return [keyword for keyword in keywords if keyword in normalized]
+
+    def _overclaim_supported(self, overclaim_terms: list[str], context_text: str) -> bool:
+        normalized = context_text.lower()
+        return any(term in normalized for term in overclaim_terms)
+
+    def _context_has_uncertainty(self, context_text: str) -> bool:
+        return any(
+            keyword in context_text
+            for keyword in [
+                "no ",
+                "not ",
+                "lack",
+                "missing",
+                "insufficient",
+                "unclear",
+                "没有",
+                "缺少",
+                "不足",
+                "不明确",
+                "无法确认",
+            ]
+        )
+
+    def _suggested_revision(
         self,
-        tasks: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
-        for task in tasks:
-            source_type = self._primary_source_type(task)
-            key = (
-                str(task.get("competitor", "")),
-                str(task.get("dimension_id", "")),
-                source_type,
-            )
-            if key not in grouped:
-                grouped[key] = self._new_merged_task(task, source_type)
-            else:
-                self._add_to_merged_task(grouped[key], task)
-
-        ranked = sorted(
-            grouped.values(),
-            key=lambda task: (
-                int(task.get("priority", 99)),
-                -len(task.get("claim_ids", [])),
-                str(task.get("competitor", "")),
-                str(task.get("dimension_id", "")),
-            ),
-        )
-        return ranked[: self.max_verification_tasks]
-
-    def _new_merged_task(self, task: dict[str, Any], source_type: str) -> dict[str, Any]:
-        merged = dict(task)
-        claim_ids = [claim_id for claim_id in task.get("claim_ids", []) if claim_id]
-        merged["claim_ids"] = claim_ids
-        merged["support_statuses"] = list(task.get("support_statuses", []) or [])
-        merged["unsupported_phrases"] = list(task.get("unsupported_phrases", []) or [])
-        merged["target_source_types"] = list(
-            dict.fromkeys([source_type] + list(task.get("target_source_types", []) or []))
-        )
-        merged["source_type"] = source_type
-        merged["merged_claim_count"] = len(claim_ids)
-        return merged
-
-    def _add_to_merged_task(self, merged: dict[str, Any], task: dict[str, Any]) -> None:
-        claim_ids = list(merged.get("claim_ids", []) or [])
-        for claim_id in task.get("claim_ids", []) or []:
-            if claim_id and claim_id not in claim_ids:
-                claim_ids.append(claim_id)
-        merged["claim_ids"] = claim_ids
-        merged["merged_claim_count"] = len(claim_ids)
-
-        merged["support_statuses"] = list(
-            dict.fromkeys(
-                list(merged.get("support_statuses", []) or [])
-                + list(task.get("support_statuses", []) or [])
-            )
-        )
-        merged["unsupported_phrases"] = list(
-            dict.fromkeys(
-                list(merged.get("unsupported_phrases", []) or [])
-                + list(task.get("unsupported_phrases", []) or [])
-            )
-        )[:8]
-        merged["target_source_types"] = list(
-            dict.fromkeys(
-                list(merged.get("target_source_types", []) or [])
-                + list(task.get("target_source_types", []) or [])
-            )
-        )
-        merged["priority"] = min(
-            int(merged.get("priority", 99)),
-            int(task.get("priority", 99)),
-        )
-
-        objectives = [str(merged.get("objective", "")), str(task.get("objective", ""))]
-        queries = [str(merged.get("query", "")), str(task.get("query", ""))]
-        merged["objective"] = self._merged_text("Verify grouped claims", objectives, limit=220)
-        merged["query"] = self._merged_text(
-            "Search for public evidence that directly supports or contradicts these grouped claims.",
-            queries,
-            limit=900,
-        )
-        merged["generated_from_gap"] = self._merged_gap_id(merged)
-        merged["reason"] = "Claim support review grouped multiple weak claims for one verification collection."
-
-    def _primary_source_type(self, task: dict[str, Any]) -> str:
-        source_types = task.get("target_source_types", []) or []
-        return str(source_types[0]) if source_types else "other"
-
-    def _verification_priority(self, support_status: str) -> int:
-        return {
-            "contradicted": 0,
-            "unverifiable": 1,
-            "weak": 2,
-        }.get(support_status, 9)
-
-    def _merged_gap_id(self, task: dict[str, Any]) -> str:
-        competitor = re.sub(r"[^a-zA-Z0-9]+", "_", str(task.get("competitor", "")).strip()).strip("_")
-        dimension = re.sub(r"[^a-zA-Z0-9]+", "_", str(task.get("dimension_id", "")).strip()).strip("_")
-        source_type = re.sub(r"[^a-zA-Z0-9]+", "_", str(task.get("source_type", "")).strip()).strip("_")
-        parts = [part for part in [competitor, dimension, source_type] if part]
-        return "verification_batch:" + ":".join(parts or ["claims"])
-
-    def _merged_text(self, prefix: str, values: list[str], limit: int) -> str:
-        deduped = [value for value in dict.fromkeys(values) if value]
-        text = "\n\n".join([prefix, *deduped])
-        return text[:limit]
-
-    def _target_source_types(
-        self,
-        dimension: str,
+        claim: dict[str, Any],
         evidence_items: list[dict[str, Any]],
-    ) -> list[str]:
-        observed = [
-            item.get("source_type", "other")
-            for item in evidence_items
-            if item.get("source_type")
-        ]
-        if dimension in {"pricing_model", "pricing_business_model", "business_model_pricing"}:
-            preferred = ["pricing_page", "official_site", "docs"]
-        elif dimension == "user_personas":
-            preferred = ["review", "official_site", "marketplace"]
-        elif dimension in {"feature_tree", "core_feature"}:
-            preferred = ["official_site", "docs", "marketplace"]
-        else:
-            preferred = ["official_site", "docs", "news"]
-        return list(dict.fromkeys(preferred + observed[:2]))
+        knowledge_facts: list[dict[str, Any]],
+    ) -> str:
+        competitor = (
+            (claim.get("competitors") or [""])[0]
+            or "the target competitor"
+        )
+        dimension = str(claim.get("analysis_dimension_id", "") or "the reviewed dimension")
+        source_text = ""
+        for fact in knowledge_facts:
+            source_text = str(fact.get("object") or fact.get("statement") or "").strip()
+            if source_text:
+                break
+        if not source_text:
+            for evidence in evidence_items:
+                source_text = str(evidence.get("excerpt") or evidence.get("title") or "").strip()
+                if source_text:
+                    break
+        source_text = " ".join(source_text.split())[:220]
+        if not source_text:
+            return ""
+        return f"{competitor} {dimension}: public evidence indicates {source_text}."

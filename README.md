@@ -93,8 +93,8 @@ flowchart TB
 
     Workflow --> Planner["PlanningAgent\nscope, industry directions"]
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
-    Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
-    Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
+    Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> KnowledgeFact"]
+    Workflow --> Analyst["AnalysisAgent\nKnowledgeFact -> AnalysisClaim"]
     Workflow --> ClaimSupport["ClaimSupportReviewer\nclaim citation support gate"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
@@ -189,9 +189,17 @@ competitor, dimension, source hints, success criteria, and task context as
 structured fields; `ResearchEngine` expands that seed into natural-language
 sub-queries using the structured collection context. `CoverageReviewer` records which criteria are satisfied, partial, or
 missing, then narrows follow-up tasks to the missing criteria instead of
-throwing away partially useful evidence. `KnowledgeStructuringAgent`
-structures the accepted evidence into `CompetitorKnowledge`; `AnalysisAgent`
-then generates claims from structured knowledge and accepted evidence.
+throwing away partially useful evidence. `KnowledgeStructuringAgent` first tries
+the configured knowledge-fact LLM extractor, then validates, normalizes, and
+deduplicates the returned candidates into `KnowledgeFact` atoms that cite
+accepted `EvidenceItem` IDs. If the LLM is not configured, fails, or returns no
+valid facts, the agent falls back to the deterministic rule extractor and still
+populates `CompetitorKnowledge`. A local atomization policy keeps facts narrow:
+pricing evidence is split into free-tier, plan-price, quote-only,
+usage-based-billing, and annual-discount atoms when those signals are present.
+`AnalysisAgent` groups facts by competitor, dimension, claim type, subject,
+predicate, and normalized fact key before generating traceable `AnalysisClaim`
+records.
 `ClaimSupportReviewer` checks claim-level citation support before writing.
 It does not launch a special collection path; future claim-support follow-up
 should enter the same structured collection protocol used for normal coverage
@@ -314,6 +322,29 @@ reach the retrievers. If the original task or competitor name is Chinese, for
 example 飞书 or 钉钉, the planned sub-queries use Chinese source terms such as
 官网、定价、文档、评价、新闻 to bias discovery toward Chinese-language sources.
 
+## Knowledge Fact LLM Extraction
+
+`KnowledgeStructuringAgent` can use an LLM to extract structured
+`KnowledgeFact` atoms from accepted evidence before analysis:
+
+```env
+RIVALENS_KNOWLEDGE_STRUCTURING_LLM=openai:gpt-4.1-mini
+RIVALENS_KNOWLEDGE_FACT_LLM_MAX_EVIDENCE=24
+RIVALENS_KNOWLEDGE_FACT_LLM_EXCERPT_CHARS=700
+```
+
+The LLM setting uses the same `<provider>:<model>` format as other Rivalens LLM
+configuration. If `RIVALENS_KNOWLEDGE_STRUCTURING_LLM` is unset, the agent also
+checks `KNOWLEDGE_STRUCTURING_LLM`, then `STRATEGIC_LLM`, then `SMART_LLM`.
+Every LLM fact candidate must cite accepted input evidence IDs; the agent
+rejects candidates without valid citations, fills dimension and schema metadata
+from the cited evidence, merges duplicates by `normalized_key`, and falls back
+to deterministic fact extraction when the LLM path is unavailable or invalid.
+If an LLM pricing fact is too broad, the local atomizer splits it using the
+cited evidence before analysis. Agent events record the source, prompt ID,
+provider, model, input count, fact count, atomization counts, fallback reason,
+and estimated cost.
+
 ## LangSmith Tracing
 
 Rivalens uses LangGraph and LangChain components, so LangSmith tracing can be
@@ -407,9 +438,10 @@ success-criterion matches, findings, score, and required action.
 coverage control: satisfied/partial/missing criteria, missing guiding questions,
 next action, and gap-driven follow-up task specs. `CollectionAgent` owns depth
 and expansion budget enforcement directly.
-`AnalysisAgent` runs after knowledge structuring and records `branch_id`,
-`evidence_review_id`, and `evidence_ids` on each generated `AnalysisClaim`.
-`ClaimSupportReviewer` marks claims as supported, weak, contradicted, or
-unverifiable. Unsupported claims are withheld from the writer context; claim
-support review does not currently trigger a collection-specific verification
-pass.
+`AnalysisAgent` runs after knowledge structuring and records
+`knowledge_fact_ids`, `evidence_ids`, claim type, and report routing on each
+generated `AnalysisClaim`. `ClaimSupportReviewer` marks claims as supported,
+weak, contradicted, or unverifiable and emits a recommended action: accept,
+revise, suppress, or evidence gap. Only supported/accepted claims enter the
+writer context; claim support review does not currently trigger a
+collection-specific verification pass.

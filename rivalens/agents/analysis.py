@@ -1,5 +1,6 @@
 """Analysis agent that turns evidence into traceable claims."""
 
+from collections import defaultdict
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
@@ -85,40 +86,234 @@ class AnalysisAgent:
     ) -> list[AnalysisClaim]:
         dimensions_by_id = self._analysis_dimension_lookup(state)
         claims: list[AnalysisClaim] = []
-        for fact in knowledge_facts:
-            evidence_ids = [evidence_id for evidence_id in fact.get("evidence_ids", []) if evidence_id]
-            if not evidence_ids:
-                continue
-            analysis_dimension_id = fact.get("analysis_dimension_id", "")
-            if not analysis_dimension_id:
-                continue
-            dimension = dimensions_by_id.get(analysis_dimension_id, {"id": analysis_dimension_id})
-            dimension_name = dimension.get("name", analysis_dimension_id.replace("_", " "))
-            statement = clean_text(fact.get("statement", ""))
-            if not statement or is_low_quality_text(statement):
-                continue
-            report_section_id = fact.get("report_section_id") or primary_report_section_id(
-                dimension,
+        for group in self._group_knowledge_facts(knowledge_facts).values():
+            claim = self._claim_from_fact_group(
+                group,
+                dimensions_by_id,
+                claim_id=f"claim_{len(claims) + 1}",
             )
-            claims.append(
-                {
-                    "id": f"claim_{len(claims) + 1}",
-                    "analysis_dimension_id": analysis_dimension_id,
-                    "knowledge_fact_ids": [fact.get("id", "")] if fact.get("id") else [],
-                    "report_section_id": report_section_id,
-                    "claim_source": "knowledge_fact",
-                    "branch_id": "",
-                    "evidence_review_id": "",
-                    "claim": f"{fact.get('competitor', 'the target competitor')} {dimension_name}: {statement[:420]}",
-                    "competitors": [fact.get("competitor", "")]
-                    if fact.get("competitor")
-                    else [],
-                    "evidence_ids": evidence_ids,
-                    "reasoning": "Derived from KnowledgeFact records produced from accepted EvidenceItem records.",
-                    "confidence": fact.get("confidence", 0.5),
-                }
-            )
+            if claim:
+                claims.append(claim)
         return claims
+
+    def _group_knowledge_facts(
+        self,
+        knowledge_facts: list[dict[str, Any]],
+    ) -> dict[tuple[str, ...], list[dict[str, Any]]]:
+        grouped: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+        for fact in knowledge_facts:
+            if not self._usable_fact(fact):
+                continue
+            fact_type = str(fact.get("fact_type", "") or "public_evidence_signal")
+            claim_type = self._claim_type_for_fact_type(fact_type)
+            key = (
+                str(fact.get("competitor", "") or "the target competitor"),
+                str(fact.get("analysis_dimension_id", "")),
+                claim_type,
+                self._normalize_key_part(
+                    str(fact.get("subject", "") or self._fact_object_preview(fact)),
+                ),
+                self._normalize_key_part(str(fact.get("predicate", "") or "indicates")),
+                str(fact.get("normalized_key", "") or ""),
+            )
+            grouped[key].append(fact)
+        return grouped
+
+    def _usable_fact(self, fact: dict[str, Any]) -> bool:
+        evidence_ids = [evidence_id for evidence_id in fact.get("evidence_ids", []) if evidence_id]
+        if not evidence_ids:
+            return False
+        if not fact.get("analysis_dimension_id"):
+            return False
+        statement = clean_text(fact.get("statement", ""))
+        return bool(statement) and not is_low_quality_text(statement)
+
+    def _claim_from_fact_group(
+        self,
+        facts: list[dict[str, Any]],
+        dimensions_by_id: dict[str, dict[str, Any]],
+        claim_id: str,
+    ) -> AnalysisClaim | None:
+        if not facts:
+            return None
+        seed = facts[0]
+        analysis_dimension_id = str(seed.get("analysis_dimension_id", ""))
+        if not analysis_dimension_id:
+            return None
+        dimension = dimensions_by_id.get(analysis_dimension_id, {"id": analysis_dimension_id})
+        dimension_name = dimension.get("name", analysis_dimension_id.replace("_", " "))
+        competitor = str(seed.get("competitor", "") or "the target competitor")
+        fact_type = str(seed.get("fact_type", "") or "public_evidence_signal")
+        claim_type = self._claim_type_for_fact_type(fact_type)
+        evidence_ids = self._dedupe(
+            evidence_id
+            for fact in facts
+            for evidence_id in fact.get("evidence_ids", [])
+            if evidence_id
+        )
+        if not evidence_ids:
+            return None
+        knowledge_fact_ids = self._dedupe(
+            fact.get("id", "")
+            for fact in facts
+            if fact.get("id")
+        )
+        report_section_id = (
+            seed.get("report_section_id")
+            or primary_report_section_id(dimension)
+        )
+        fact_objects = [
+            self._fact_object_preview(fact)
+            for fact in facts
+            if self._fact_object_preview(fact)
+        ]
+        claim_text = self._claim_text(
+            competitor=competitor,
+            dimension_name=str(dimension_name),
+            fact_type=fact_type,
+            subject=str(seed.get("subject", "")),
+            predicate=str(seed.get("predicate", "")),
+            fact_objects=fact_objects,
+        )
+        return {
+            "id": claim_id,
+            "analysis_dimension_id": analysis_dimension_id,
+            "knowledge_fact_ids": knowledge_fact_ids,
+            "report_section_id": report_section_id,
+            "claim_source": "knowledge_fact_group",
+            "claim_type": claim_type,
+            "normalized_key": self._claim_normalized_key(
+                competitor,
+                analysis_dimension_id,
+                claim_type,
+                subject=str(seed.get("subject", "")),
+                predicate=str(seed.get("predicate", "")),
+                fact_key=str(seed.get("normalized_key", "")),
+            ),
+            "branch_id": "",
+            "evidence_review_id": "",
+            "claim": claim_text,
+            "competitors": [competitor] if competitor else [],
+            "evidence_ids": evidence_ids,
+            "reasoning": (
+                "Derived by grouping structured KnowledgeFact atoms with the same "
+                "competitor, analysis dimension, claim type, subject, predicate, "
+                f"and normalized fact key; {len(facts)} fact(s) cite "
+                f"{len(evidence_ids)} accepted EvidenceItem(s)."
+            ),
+            "confidence": self._average_fact_confidence(facts),
+        }
+
+    def _claim_type_for_fact_type(self, fact_type: str) -> str:
+        return {
+            "pricing_signal": "pricing_strategy",
+            "feature_presence": "capability_signal",
+            "target_user_signal": "customer_segment_signal",
+            "trust_compliance_signal": "trust_compliance_signal",
+            "integration_signal": "ecosystem_signal",
+            "market_signal": "market_position_signal",
+            "public_evidence_signal": "public_evidence_signal",
+        }.get(fact_type, "public_evidence_signal")
+
+    def _claim_text(
+        self,
+        competitor: str,
+        dimension_name: str,
+        fact_type: str,
+        subject: str,
+        predicate: str,
+        fact_objects: list[str],
+    ) -> str:
+        label = self._fact_type_label(fact_type)
+        predicate_phrase = self._predicate_phrase(predicate)
+        unique_objects = self._dedupe(fact_objects)
+        if not unique_objects:
+            return f"{competitor} {dimension_name}: accepted public evidence contains {label}."
+        subject = clean_text(subject)
+        if len(unique_objects) == 1:
+            if subject and predicate_phrase:
+                return (
+                    f"{competitor} {dimension_name}: public evidence "
+                    f"{predicate_phrase} {subject}: {unique_objects[0]}."
+                )
+            return f"{competitor} {dimension_name}: public evidence {label} {unique_objects[0]}."
+        examples = "; ".join(unique_objects[:3])
+        return (
+            f"{competitor} {dimension_name}: public evidence contains multiple "
+            f"{label}, including {examples}."
+        )[:520]
+
+    def _fact_type_label(self, fact_type: str) -> str:
+        return {
+            "pricing_signal": "pricing signals",
+            "feature_presence": "product capability signals",
+            "target_user_signal": "target-user signals",
+            "trust_compliance_signal": "trust or compliance signals",
+            "integration_signal": "integration or ecosystem signals",
+            "market_signal": "market signals",
+            "public_evidence_signal": "relevant public evidence signals",
+        }.get(fact_type, "relevant public evidence signals")
+
+    def _predicate_phrase(self, predicate: str) -> str:
+        return {
+            "exists": "shows",
+            "publishes_price": "publishes pricing for",
+            "requires_quote": "marks pricing as quote-based for",
+            "uses_billing_model": "describes",
+            "offers_discount": "describes a discount for",
+            "publishes": "publishes",
+            "describes": "describes",
+            "signals": "signals",
+            "documents": "documents",
+            "reports": "reports",
+            "indicates": "indicates",
+        }.get(predicate, "")
+
+    def _fact_object_preview(self, fact: dict[str, Any]) -> str:
+        text = clean_text(fact.get("object") or fact.get("statement", ""))
+        if not text or is_low_quality_text(text):
+            return ""
+        return " ".join(text.split())[:180]
+
+    def _claim_normalized_key(
+        self,
+        competitor: str,
+        analysis_dimension_id: str,
+        claim_type: str,
+        subject: str = "",
+        predicate: str = "",
+        fact_key: str = "",
+    ) -> str:
+        return "|".join(
+            [
+                self._normalize_key_part(competitor or "unknown"),
+                self._normalize_key_part(analysis_dimension_id or "unknown"),
+                self._normalize_key_part(claim_type or "claim"),
+                self._normalize_key_part(subject or "subject"),
+                self._normalize_key_part(predicate or "predicate"),
+                self._normalize_key_part(fact_key or "fact"),
+            ]
+        )
+
+    def _normalize_key_part(self, value: str) -> str:
+        import re
+
+        return (
+            re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "_", str(value).lower()).strip("_")
+            or "unknown"
+        )
+
+    def _average_fact_confidence(self, facts: list[dict[str, Any]]) -> float:
+        confidences = [
+            float(fact.get("confidence", 0.5))
+            for fact in facts
+        ]
+        if not confidences:
+            return 0.5
+        return round(sum(confidences) / len(confidences), 2)
+
+    def _dedupe(self, values: Any) -> list[Any]:
+        return list(dict.fromkeys(value for value in values if value))
 
     def _analysis_dimension_lookup(
         self,

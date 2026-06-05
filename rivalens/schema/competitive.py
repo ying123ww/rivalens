@@ -33,7 +33,6 @@ ResearchRoutingAction = Literal[
     "entity_resolution",
     "source_discovery",
     "evidence_extraction",
-    "claim_verification",
     "stop",
 ]
 ResearchRoutingSubtype = Literal[
@@ -50,11 +49,9 @@ ResearchRoutingSubtype = Literal[
 ]
 StageRole = Literal[
     "evidence_collection",
-    "claim_verification",
 ]
 StageOutputKind = Literal[
     "evidence_items",
-    "claim_evidence_items",
 ]
 
 
@@ -208,6 +205,12 @@ class EvidenceReviewResult(TypedDict, total=False):
 
 BranchDriftRisk = Literal["low", "medium", "high"]
 ClaimSupportStatus = Literal["supported", "weak", "contradicted", "unverifiable"]
+ClaimSupportRecommendedAction = Literal[
+    "accept",
+    "revise",
+    "suppress",
+    "evidence_gap",
+]
 
 
 class ResearchBranch(TypedDict, total=False):
@@ -244,7 +247,7 @@ class ResearchBranch(TypedDict, total=False):
     expansion_reason: str
 
 
-SearchStage = Literal["focused", "verification"]
+SearchStage = Literal["focused"]
 CoverageNextAction = Literal[
     "ready_for_analysis",
     "collect_more",
@@ -483,6 +486,8 @@ class AnalysisClaim(TypedDict, total=False):
     knowledge_fact_ids: list[str]
     report_section_id: str
     claim_source: str
+    claim_type: str
+    normalized_key: str
     branch_id: str
     evidence_review_id: str
     claim: str
@@ -499,9 +504,12 @@ class ClaimSupportReview(TypedDict, total=False):
     analysis_dimension_id: str
     report_section_id: str
     support_status: ClaimSupportStatus
+    recommended_action: ClaimSupportRecommendedAction
     evidence_ids: list[str]
+    knowledge_fact_ids: list[str]
     unsupported_phrases: list[str]
     required_follow_up_tasks: list[dict[str, Any]]
+    suggested_revision: str
     reviewer_notes: str
     confidence: float
 
@@ -539,6 +547,12 @@ class KnowledgeFact(TypedDict, total=False):
     competitor: str
     analysis_dimension_id: str
     schema_field_id: str
+    fact_type: str
+    subject: str
+    predicate: str
+    object: str
+    qualifiers: dict[str, Any]
+    normalized_key: str
     statement: str
     value: dict[str, Any]
     evidence_ids: list[str]
@@ -728,6 +742,12 @@ class KnowledgeFactPayload(StrictPayloadModel):
     competitor: str = ""
     analysis_dimension_id: str = ""
     schema_field_id: str = ""
+    fact_type: str = ""
+    subject: str = ""
+    predicate: str = ""
+    object: str = ""
+    qualifiers: dict[str, Any] = Field(default_factory=dict)
+    normalized_key: str = ""
     statement: str
     value: dict[str, Any] = Field(default_factory=dict)
     evidence_ids: list[str] = Field(default_factory=list)
@@ -741,6 +761,8 @@ class AnalysisClaimPayload(StrictPayloadModel):
     knowledge_fact_ids: list[str] = Field(default_factory=list)
     report_section_id: str = ""
     claim_source: str = ""
+    claim_type: str = ""
+    normalized_key: str = ""
     branch_id: str | None = None
     evidence_review_id: str | None = None
     claim: str
@@ -785,9 +807,12 @@ class ClaimSupportReviewPayload(StrictPayloadModel):
     analysis_dimension_id: str = ""
     report_section_id: str = ""
     support_status: ClaimSupportStatus
+    recommended_action: ClaimSupportRecommendedAction = "revise"
     evidence_ids: list[str] = Field(default_factory=list)
+    knowledge_fact_ids: list[str] = Field(default_factory=list)
     unsupported_phrases: list[str] = Field(default_factory=list)
     required_follow_up_tasks: list[dict[str, Any]] = Field(default_factory=list)
+    suggested_revision: str = ""
     reviewer_notes: str = ""
     confidence: float = Field(default=0.5, ge=0, le=1)
 
@@ -796,6 +821,11 @@ class ClaimSupportMessagePayload(StrictPayloadModel):
     review_count: int = Field(ge=0)
     supported_count: int = Field(ge=0)
     weak_count: int = Field(ge=0)
+    contradicted_count: int = Field(default=0, ge=0)
+    unverifiable_count: int = Field(default=0, ge=0)
+    accepted_count: int = Field(default=0, ge=0)
+    revision_count: int = Field(default=0, ge=0)
+    suppressed_count: int = Field(default=0, ge=0)
     reviews: list[ClaimSupportReviewPayload] = Field(default_factory=list)
 
 
@@ -990,8 +1020,6 @@ class CompetitorAnalysisState(TypedDict, total=False):
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
     claim_support_reviews: list[ClaimSupportReview]
-    verification_task_queue: list[dict[str, Any]]
-    verification_rounds: int
     research_artifacts: list[ResearchArtifact]
     report: str
     published_artifacts: dict[str, str]

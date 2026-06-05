@@ -1269,12 +1269,13 @@ class ReportWriterAgent:
         for claim in claims:
             review = review_by_claim.get(claim.get("id", ""), {})
             status = review.get("support_status", "")
-            evidence_ids = claim.get("evidence_ids", []) or review.get("evidence_ids", [])
-            if status == "supported" or (status == "weak" and evidence_ids):
+            recommended_action = review.get("recommended_action", "")
+            if status == "supported" and recommended_action in {"", "accept"}:
                 filtered.append(
                     {
                         **claim,
                         "support_status": status,
+                        "support_recommended_action": recommended_action or "accept",
                         "support_reviewer_notes": review.get("reviewer_notes", ""),
                     }
                 )
@@ -1605,9 +1606,11 @@ class ReportWriterAgent:
             "analysis_dimension_id": review.get("analysis_dimension_id", ""),
             "report_section_id": review.get("report_section_id", ""),
             "support_status": review.get("support_status", ""),
+            "recommended_action": review.get("recommended_action", ""),
             "evidence_ids": review.get("evidence_ids", []),
+            "knowledge_fact_ids": review.get("knowledge_fact_ids", []),
             "unsupported_phrases": review.get("unsupported_phrases", []),
-            "verification_task_count": len(review.get("required_follow_up_tasks", [])),
+            "suggested_revision": review.get("suggested_revision", ""),
             "reviewer_notes": review.get("reviewer_notes", ""),
             "confidence": review.get("confidence", 0.5),
         }
