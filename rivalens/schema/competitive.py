@@ -222,6 +222,37 @@ ClaimSupportRecommendedAction = Literal[
     "evidence_gap",
 ]
 
+ResearchBranchStopReason = Literal[
+    "sufficient_coverage",
+    "gap_resolution_complete",
+    "no_viable_followup",
+    "max_depth_reached",
+    "budget_exhausted",
+    "collection_failed",
+    "no_follow_up_selected",
+]
+
+
+class ResearchBranchStopContext(TypedDict, total=False):
+    source: Literal[
+        "coverage_decision",
+        "collection_depth",
+        "collection_budget",
+        "collection_error",
+        "collection_routing",
+    ]
+    coverage_assessment_id: str
+    decision_action: ResearchRoutingAction
+    decision_subtype: ResearchRoutingSubtype
+    follow_up_count: int
+    follow_up_gap_codes: list[str]
+    branch_depth: int
+    max_branch_depth: int
+    expansion_branch_count: int
+    max_expansion_branches: int
+    message: str
+    error: str
+
 
 class ResearchBranch(TypedDict, total=False):
     id: str
@@ -265,6 +296,8 @@ class ResearchBranch(TypedDict, total=False):
     guiding_questions: list[str]
     evidence_ids: list[str]
     status: Literal["active", "expanded", "stopped"]
+    stop_reason: ResearchBranchStopReason
+    stop_context: ResearchBranchStopContext
     coverage_state_id: str
     coverage_status: str
     expansion_reason: str

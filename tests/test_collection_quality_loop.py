@@ -386,6 +386,10 @@ def test_mixed_quality_evidence_triggers_differential_retry():
     assert child_coverage["next_action"] == "ready_for_parent_merge"
     assert child_coverage["decision"]["subtype"] == "gap_resolution_complete"
     assert child_coverage["selected_follow_up_specs"] == []
+    assert child["status"] == "stopped"
+    assert child["stop_reason"] == "gap_resolution_complete"
+    assert child["stop_context"]["decision_subtype"] == "gap_resolution_complete"
+    assert child["stop_context"]["coverage_assessment_id"] == child_coverage["id"]
 
     summary = next(
         item
@@ -587,6 +591,14 @@ def test_collection_quality_loop_expands_llm_source_gap():
     assert follow_up_coverage["next_action"] == "ready_for_parent_merge"
     assert follow_up_coverage["decision"]["subtype"] == "gap_resolution_complete"
     assert follow_up_coverage["selected_follow_up_specs"] == []
+    assert child_branches[0]["status"] == "stopped"
+    assert child_branches[0]["stop_reason"] == "gap_resolution_complete"
+    assert child_branches[0]["stop_context"]["decision_subtype"] == (
+        "gap_resolution_complete"
+    )
+    assert child_branches[0]["stop_context"]["coverage_assessment_id"] == (
+        follow_up_coverage["id"]
+    )
 
     event = result["agent_events"][-1]
     assert event["output"]["expanded_branch_count"] == 1
@@ -833,9 +845,62 @@ def test_unresolved_llm_source_gap_does_not_block_branch_coverage():
     assert root_coverage["source_type_gaps"][0]["blocking"] is False
     assert root_coverage["source_coverage_gaps"] == root_coverage["source_type_gaps"]
     assert child_branches == []
+    assert pricing_root["status"] == "stopped"
+    assert pricing_root["stop_reason"] == "max_depth_reached"
+    assert pricing_root["stop_context"]["source"] == "collection_depth"
+    assert pricing_root["stop_context"]["follow_up_gap_codes"] == [
+        "needs_pricing_page_source"
+    ]
     assert pricing_summary["status"] == "ready_for_analysis"
     assert pricing_summary["open_gap_codes"] == ["needs_pricing_page_source"]
     assert pricing_summary["blocked_gap_codes"] == []
+
+
+def test_collection_quality_loop_records_budget_stop_reason():
+    collector = FakeEvidenceCollector()
+    source_gap_advisor = FakeSourceGapAdvisor()
+    agent = CollectionAgent(
+        evidence_collector=collector,
+        coverage_reviewer=CoverageReviewer(source_gap_advisor=source_gap_advisor),
+        max_branch_depth=1,
+        max_expansion_branches=0,
+        max_concurrent_collections=1,
+    )
+    state = {
+        "task": {
+            "query": "Compare Acme pricing.",
+            "competitors": ["Acme"],
+            "verbose": False,
+        },
+        "competitors": ["Acme"],
+        "analysis_dimensions": [
+            {
+                "id": "pricing_model",
+                "name": "Pricing Model",
+                "source_hints": ["pricing_page"],
+                "guiding_questions": [
+                    "What public pricing, packaging, plans, or billing units are available?"
+                ],
+                "schema_field_ids": ["pricing_model"],
+            }
+        ],
+    }
+
+    result = asyncio.run(agent.run(state))
+
+    pricing_root = next(
+        branch
+        for branch in result["research_branches"]
+        if branch["id"] == "collect_acme_pricing_model"
+    )
+    assert pricing_root["status"] == "stopped"
+    assert pricing_root["stop_reason"] == "budget_exhausted"
+    assert pricing_root["stop_context"]["source"] == "collection_budget"
+    assert pricing_root["stop_context"]["follow_up_gap_codes"] == [
+        "needs_pricing_page_source"
+    ]
+    stop_counts = result["agent_events"][-1]["output"]["branch_stop_reason_counts"]
+    assert stop_counts["budget_exhausted"] == 1
 
 
 def test_source_gap_advisor_failure_does_not_open_rule_gap():
@@ -892,3 +957,7 @@ def test_source_gap_advisor_failure_does_not_open_rule_gap():
     assert root_coverage["source_type_gaps"] == []
     assert root_coverage["source_coverage_gaps"] == []
     assert child_branches == []
+    assert pricing_root["status"] == "stopped"
+    assert pricing_root["stop_reason"] == "sufficient_coverage"
+    assert pricing_root["stop_context"]["source"] == "coverage_decision"
+    assert pricing_root["stop_context"]["decision_subtype"] == "sufficient_stop"

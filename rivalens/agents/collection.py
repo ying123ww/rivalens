@@ -157,7 +157,13 @@ class CollectionAgent:
                 collection_task = collection_tasks[result_index]
                 result = results[result_index]
                 if isinstance(result, Exception):
-                    branch["status"] = "stopped"
+                    self._stop_branch(
+                        branch,
+                        reason="collection_failed",
+                        source="collection_error",
+                        message="Collection task failed before evidence review.",
+                        error=str(result),
+                    )
                     failed_tasks.append(
                         {
                             "collection_task_id": collection_task["id"],
@@ -241,7 +247,16 @@ class CollectionAgent:
                     remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
                     if remaining_branch_slots <= 0:
                         budget_blocked_follow_up_count += len(follow_up_specs)
-                        branch["status"] = "stopped"
+                        self._stop_branch(
+                            branch,
+                            reason="budget_exhausted",
+                            source="collection_budget",
+                            coverage_assessment=coverage_assessment,
+                            focused_decision=focused_decision,
+                            follow_up_specs=follow_up_specs,
+                            message="Follow-up expansion budget was exhausted.",
+                            expansion_branch_count=expansion_branch_count,
+                        )
                         continue
                     children = self._build_child_branches(
                         branch,
@@ -258,7 +273,30 @@ class CollectionAgent:
                         and branch.get("depth", 0) >= self.max_branch_depth
                     ):
                         depth_blocked_follow_up_count += len(follow_up_specs)
-                    branch["status"] = "stopped"
+                        self._stop_branch(
+                            branch,
+                            reason="max_depth_reached",
+                            source="collection_depth",
+                            coverage_assessment=coverage_assessment,
+                            focused_decision=focused_decision,
+                            follow_up_specs=follow_up_specs,
+                            message="Follow-up expansion stopped at max branch depth.",
+                            expansion_branch_count=expansion_branch_count,
+                        )
+                    else:
+                        self._stop_branch(
+                            branch,
+                            reason=self._coverage_stop_reason(
+                                focused_decision,
+                                follow_up_specs,
+                            ),
+                            source=self._coverage_stop_source(focused_decision),
+                            coverage_assessment=coverage_assessment,
+                            focused_decision=focused_decision,
+                            follow_up_specs=follow_up_specs,
+                            message=self._coverage_stop_message(focused_decision),
+                            expansion_branch_count=expansion_branch_count,
+                        )
 
             frontier = [
                 branch
@@ -290,6 +328,7 @@ class CollectionAgent:
             for evidence_id in review.get("accepted_evidence_ids", [])
         ]
         collection_coverage = self._summarize_collection_coverage(evidence_items)
+        branch_stop_reason_counts = self._branch_stop_reason_counts(research_branches)
         evidence_payload = {
             "evidence_count": len(evidence_items),
             "accepted_evidence_count": len(accepted_evidence_ids),
@@ -374,6 +413,7 @@ class CollectionAgent:
                         "selected_follow_up_count": selected_follow_up_count,
                         "depth_blocked_follow_up_count": depth_blocked_follow_up_count,
                         "budget_blocked_follow_up_count": budget_blocked_follow_up_count,
+                        "branch_stop_reason_counts": branch_stop_reason_counts,
                         "evidence_review_count": len(evidence_reviews),
                         "coverage_assessment_count": len(coverage_assessments),
                         "accepted_evidence_count": len(accepted_evidence_ids),
@@ -887,6 +927,94 @@ class CollectionAgent:
                 }
             )
         return children
+
+    def _stop_branch(
+        self,
+        branch: ResearchBranch,
+        *,
+        reason: str,
+        source: str,
+        coverage_assessment: dict[str, Any] | None = None,
+        focused_decision: dict[str, Any] | None = None,
+        follow_up_specs: list[dict[str, Any]] | None = None,
+        message: str = "",
+        error: str = "",
+        expansion_branch_count: int = 0,
+    ) -> None:
+        focused_decision = focused_decision or {}
+        follow_up_specs = follow_up_specs or []
+        branch["status"] = "stopped"
+        branch["stop_reason"] = reason
+        context: dict[str, Any] = {
+            "source": source,
+            "coverage_assessment_id": (coverage_assessment or {}).get("id", ""),
+            "decision_action": focused_decision.get("action", ""),
+            "decision_subtype": focused_decision.get("subtype", ""),
+            "follow_up_count": len(follow_up_specs),
+            "follow_up_gap_codes": self._follow_up_gap_codes(follow_up_specs),
+            "branch_depth": int(branch.get("depth", 0)),
+            "max_branch_depth": self.max_branch_depth,
+            "expansion_branch_count": expansion_branch_count,
+            "max_expansion_branches": self.max_expansion_branches,
+            "message": message,
+        }
+        if error:
+            context["error"] = error
+        branch["stop_context"] = context
+
+    def _coverage_stop_reason(
+        self,
+        focused_decision: dict[str, Any],
+        follow_up_specs: list[dict[str, Any]],
+    ) -> str:
+        subtype = focused_decision.get("subtype", "")
+        if focused_decision.get("action") == "stop":
+            if subtype == "gap_resolution_complete":
+                return "gap_resolution_complete"
+            if subtype == "no_viable_followup":
+                return "no_viable_followup"
+            return "sufficient_coverage"
+        if not follow_up_specs:
+            return "no_follow_up_selected"
+        return "no_viable_followup"
+
+    def _coverage_stop_source(self, focused_decision: dict[str, Any]) -> str:
+        if focused_decision.get("action") == "stop":
+            return "coverage_decision"
+        return "collection_routing"
+
+    def _coverage_stop_message(self, focused_decision: dict[str, Any]) -> str:
+        subtype = focused_decision.get("subtype", "")
+        if subtype == "gap_resolution_complete":
+            return "Triggered gap was resolved; merge evidence into parent coverage."
+        if subtype == "no_viable_followup":
+            return "Coverage review produced no viable follow-up task."
+        if focused_decision.get("action") == "stop":
+            return "Coverage review found sufficient evidence for this branch."
+        return "No selected follow-up task was available for expansion."
+
+    def _follow_up_gap_codes(self, follow_up_specs: list[dict[str, Any]]) -> list[str]:
+        codes = []
+        for spec in follow_up_specs:
+            code = str(
+                spec.get("triggered_by_gap_code")
+                or spec.get("generated_from_gap", ""),
+            )
+            if code:
+                codes.append(code)
+        return list(dict.fromkeys(codes))
+
+    def _branch_stop_reason_counts(
+        self,
+        research_branches: list[ResearchBranch],
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for branch in research_branches:
+            reason = str(branch.get("stop_reason", ""))
+            if not reason:
+                continue
+            counts[reason] = counts.get(reason, 0) + 1
+        return counts
 
     def _normalize_competitors(self, competitors: list[Any]) -> list[str]:
         if not competitors:

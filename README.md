@@ -291,6 +291,9 @@ that review, `CoverageReviewer.triggered_gap_resolution` records whether the
 specific triggering gap was resolved; resolved follow-ups use
 `ready_for_parent_merge` / `gap_resolution_complete` routing so the child stops
 expanding and the cumulative root coverage state decides final readiness.
+Every stopped branch records `stop_reason` and `stop_context`, covering coverage
+stops, gap-resolution stops, max-depth stops, budget exhaustion, and collection
+failures for frontend replay.
 
 Collection field semantics are intentionally separated. `success_criteria`
 defines required branch content coverage. `guiding_questions` must be explicit
