@@ -112,6 +112,7 @@ flowchart TB
 
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
     Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
+    Collector --> SourceMetrics["SourceMetricsBuilder\nsource independence metrics"]
     Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
     EvidenceCollector --> Modes["ResearchMode\nstandard evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
@@ -256,6 +257,7 @@ CollectionAgent
   -> ResearchEngine
   -> EvidenceItem[]
   -> EvidenceQualityReviewer (source-level accepted/rejected evidence and criterion matches)
+  -> SourceMetricsBuilder (accepted evidence source independence metrics)
   -> CoverageReviewer (criterion coverage gaps, LLM-advised source gaps, and follow-up task specs)
   -> BranchCoverageStateBuilder (root branch/group coverage ledger)
 ```
@@ -293,6 +295,12 @@ targeted follow-up; `CoverageReviewer` materializes that decision as explicit
 `SourceCoverageGap` records and follow-up tasks. Only those gaps or their
 follow-up tasks carry `target_source_types`; unresolved non-blocking source gaps
 do not make a branch incomplete by themselves.
+After evidence review, `SourceMetricsBuilder` computes deterministic accepted-source
+metrics such as `accepted_evidence_count`, `unique_canonical_url_count`,
+`unique_domain_count`, `independent_source_count`, `primary_source_count`, and
+duplicate source groups. These metrics are stored on `CoverageAssessment` and
+passed to `LLMSourceGapAdvisor` so source-gap decisions do not rely on raw
+accepted evidence count alone.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.

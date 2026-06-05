@@ -9,6 +9,7 @@ from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.search_query_builder import SearchQueryBuilder
+from rivalens.agents.source_metrics import SourceMetricsBuilder
 from rivalens.agents.success_criteria import normalize_success_criteria
 from rivalens.file_context import format_rag_context
 from rivalens.report_routing import primary_report_section_id
@@ -32,6 +33,7 @@ class CollectionAgent:
         evidence_collector: ResearchEngineEvidenceCollector | None = None,
         evidence_reviewer: EvidenceQualityReviewer | None = None,
         coverage_reviewer: CoverageReviewer | None = None,
+        source_metrics_builder: SourceMetricsBuilder | None = None,
         search_query_builder: SearchQueryBuilder | None = None,
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
@@ -41,6 +43,7 @@ class CollectionAgent:
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
         self.coverage_reviewer = coverage_reviewer or CoverageReviewer()
+        self.source_metrics_builder = source_metrics_builder or SourceMetricsBuilder()
         self.coverage_state_builder = BranchCoverageStateBuilder(self.coverage_reviewer)
         self.search_query_builder = search_query_builder or SearchQueryBuilder()
         self.max_branch_depth = max_branch_depth
@@ -183,10 +186,16 @@ class CollectionAgent:
                 )
                 evidence_items.extend(sources)
                 evidence_review = self.evidence_reviewer.review(branch, sources)
+                source_metrics = self.source_metrics_builder.build(
+                    branch=branch,
+                    evidence_items=sources,
+                    evidence_review=evidence_review,
+                )
                 coverage_assessment = await self.coverage_reviewer.review(
                     branch=branch,
                     evidence_items=sources,
                     evidence_review=evidence_review,
+                    source_metrics=source_metrics,
                     research_task_ids=[research_task["id"]],
                 )
                 evidence_review["coverage_assessment_id"] = coverage_assessment["id"]

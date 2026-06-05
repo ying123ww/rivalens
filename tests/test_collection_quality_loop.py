@@ -5,6 +5,7 @@ from typing import Any
 
 from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.coverage_review import CoverageReviewer
+from rivalens.agents.source_metrics import SourceMetricsBuilder
 from rivalens.agents.source_gap_advisor import SourceGapDecision
 from rivalens.agents.success_criteria import normalize_success_criteria
 
@@ -25,6 +26,7 @@ class FakeSourceGapAdvisor:
         found_source_types: list[str],
         source_preferences: list[str],
         minimum_count: int,
+        source_metrics: dict[str, Any] | None = None,
     ) -> SourceGapDecision:
         self.calls.append(
             {
@@ -37,6 +39,7 @@ class FakeSourceGapAdvisor:
                 "found_source_types": list(found_source_types),
                 "source_preferences": list(source_preferences),
                 "minimum_count": minimum_count,
+                "source_metrics": dict(source_metrics or {}),
             }
         )
         if self.fail:
@@ -162,6 +165,71 @@ def test_success_criteria_do_not_carry_source_targets():
     ]
 
 
+def test_source_metrics_builder_counts_independent_sources():
+    branch = {
+        "id": "collect_acme_pricing_model",
+        "competitor": "Acme",
+        "dimension_id": "pricing_model",
+    }
+    evidence_items = [
+        {
+            "id": "ev_1",
+            "url": "https://www.example.com/pricing?utm_source=search",
+            "source_type": "pricing_page",
+            "is_primary_source": True,
+        },
+        {
+            "id": "ev_2",
+            "url": "https://example.com/pricing/",
+            "source_type": "pricing_page",
+            "is_primary_source": True,
+        },
+        {
+            "id": "ev_3",
+            "url": "https://news.example/acme-pricing",
+            "source_type": "news",
+            "is_primary_source": False,
+        },
+        {
+            "id": "ev_4",
+            "url": "https://news.example/acme-billing",
+            "source_type": "news",
+            "is_primary_source": False,
+        },
+        {
+            "id": "ev_rejected",
+            "url": "https://mirror.example/acme",
+            "source_type": "news",
+            "is_primary_source": False,
+        },
+    ]
+    evidence_review = {
+        "id": "ev_review_collect_acme_pricing_model",
+        "accepted_evidence_ids": ["ev_1", "ev_2", "ev_3", "ev_4"],
+        "rejected_evidence_ids": ["ev_rejected"],
+    }
+
+    metrics = SourceMetricsBuilder().build(
+        branch=branch,
+        evidence_items=evidence_items,
+        evidence_review=evidence_review,
+    )
+
+    assert metrics["accepted_evidence_count"] == 4
+    assert metrics["unique_canonical_url_count"] == 3
+    assert metrics["unique_domain_count"] == 2
+    assert metrics["independent_source_count"] == 2
+    assert metrics["primary_source_count"] == 1
+    assert metrics["source_type_counts"] == {"pricing_page": 2, "news": 2}
+    assert metrics["domain_counts"] == {"example.com": 2, "news.example": 2}
+    duplicate_group = next(
+        group
+        for group in metrics["duplicate_source_groups"]
+        if group["reason"] == "same_canonical_url"
+    )
+    assert duplicate_group["evidence_ids"] == ["ev_1", "ev_2"]
+
+
 def test_coverage_review_does_not_synthesize_dimension_guiding_questions():
     source_gap_advisor = FakeSourceGapAdvisor()
     coverage_reviewer = CoverageReviewer(source_gap_advisor=source_gap_advisor)
@@ -271,6 +339,9 @@ def test_collection_quality_loop_expands_llm_source_gap():
     assert "needs_pricing_page_source" not in evidence_finding_codes
     assert root_coverage["source_gap_review"]["status"] == "completed"
     assert root_coverage["source_gap_review"]["no_rule_fallback"] is True
+    assert root_coverage["source_metrics"]["accepted_evidence_count"] == 2
+    assert root_coverage["source_metrics"]["unique_domain_count"] == 1
+    assert root_coverage["source_metrics"]["independent_source_count"] == 1
     assert root_coverage["source_type_gaps"][0]["code"] == "needs_pricing_page_source"
     assert root_coverage["source_type_gaps"][0]["gap_type"] == "source_coverage"
     assert root_coverage["source_type_gaps"][0]["target_source_types"] == ["pricing_page"]
@@ -279,6 +350,12 @@ def test_collection_quality_loop_expands_llm_source_gap():
     assert root_coverage["quality_gap_codes"] == []
     assert root_coverage["selected_follow_up_specs"][0]["generated_from_gap"] == "needs_pricing_page_source"
     assert root_coverage["selected_follow_up_specs"][0]["target_source_types"] == ["pricing_page"]
+    pricing_advisor_call = next(
+        call
+        for call in source_gap_advisor.calls
+        if call["branch_id"] == pricing_root["id"]
+    )
+    assert pricing_advisor_call["source_metrics"]["independent_source_count"] == 1
 
     follow_up_calls = [
         call

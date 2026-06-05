@@ -375,6 +375,44 @@ class SourceCoverageGap(TypedDict, total=False):
     source_gap_advisor: str
 
 
+class SourceDuplicateGroup(TypedDict, total=False):
+    reason: Literal["same_canonical_url", "same_content_hash"]
+    canonical_url: str
+    content_sha256: str
+    domain: str
+    evidence_ids: list[str]
+    canonical_urls: list[str]
+    source_types: list[EvidenceType]
+
+
+class CanonicalSource(TypedDict, total=False):
+    canonical_url: str
+    domain: str
+    source_types: list[EvidenceType]
+    evidence_ids: list[str]
+    urls: list[str]
+    is_primary_source: bool
+    content_sha256_values: list[str]
+
+
+class SourceMetrics(TypedDict, total=False):
+    id: str
+    branch_id: str
+    evidence_review_id: str
+    accepted_evidence_ids: list[str]
+    accepted_evidence_count: int
+    unique_canonical_url_count: int
+    unique_domain_count: int
+    independent_source_count: int
+    primary_source_count: int
+    source_type_counts: dict[str, int]
+    domain_counts: dict[str, int]
+    duplicate_source_groups: list[SourceDuplicateGroup]
+    canonical_sources: list[CanonicalSource]
+    source_cache_hit_count: int
+    source_cache_stored_count: int
+
+
 class CoverageAssessment(TypedDict, total=False):
     id: str
     stage_contract: StageContract
@@ -387,6 +425,7 @@ class CoverageAssessment(TypedDict, total=False):
     source_type_gaps: list[SourceCoverageGap]
     source_coverage_gaps: list[SourceCoverageGap]
     source_gap_review: dict[str, Any]
+    source_metrics: SourceMetrics
     quality_gap_codes: list[str]
     covered_questions: list[str]
     missing_questions: list[str]

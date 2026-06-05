@@ -17,6 +17,7 @@
 - `ResearchEngineEvidenceCollector` 对 focused collection 使用 `ResearchMode.STANDARD_EVIDENCE`，并归一化为 `EvidenceItem`。
 - `ScrapedSourceCache` 在 scraper 前按 canonical URL 复用新鲜 raw page content，并按 TTL 删除过期 rows；缓存命中仍会生成当前任务自己的 `EvidenceItem`，并继续经过 evidence / coverage review。
 - `EvidenceQualityReviewer` 对每次 standard evidence result 做 source-level accept / reject。
+- `SourceMetricsBuilder` 在 evidence review 后只统计 accepted evidence 的 canonical URL、domain、content hash、source type、primary source 和 duplicate groups；它不直接决定补采。
 - `CoverageReviewer` 负责显式传入的 guiding question / success criteria 覆盖，并把 LLM source-gap advisor 的裁决物化成 gap-driven follow-up tasks；它不再按 dimension id 兜底生成 guiding questions 或 coverage terms。
 - `CoverageReviewer` 的 follow-up task 继续使用结构化 `decision_action`、`decision_subtype`、`generated_from_gap`、`target_source_types` 和 `search_stage` 字段。
 - `BranchCoverageStateBuilder` 将 root branch 及其 follow-up children 汇总成 `branch_coverage_states`，记录当前 open gap codes、resolved/blocked gap records，并把最终 `coverage_status` 回写到 root branch。
@@ -31,6 +32,7 @@ PlanningAgent
    -> ResearchBrief / ResearchTask queue
    -> focused evidence collection
    -> EvidenceQualityReviewer
+   -> SourceMetricsBuilder
    -> CoverageReviewer
    -> gap-driven focused child branches when budget allows
    -> BranchCoverageStateBuilder
@@ -66,6 +68,7 @@ Collection input fields have separate meanings:
 - An LLM source-gap advisor decides whether the accepted evidence source mix needs targeted follow-up. `CoverageReviewer` records that decision as explicit `SourceCoverageGap` entries. Only those gaps and their follow-up tasks carry `target_source_types`.
 - Missing preferred source types do not automatically trigger follow-up collection. Source gaps are opened only by the structured LLM advisor decision; advisor failures do not fall back to the old preferred-source rules.
 - Unresolved non-blocking source gaps do not block a branch when the content criteria are satisfied.
+- `CoverageAssessment.source_metrics` records deterministic accepted-source metrics. `CoverageReviewer` and `LLMSourceGapAdvisor` consume these metrics so `accepted_evidence_count` cannot falsely stand in for independent source count.
 - `expected_claim_types` is carried through branch, brief, task, and collection-task payloads as analysis typing context. Collection does not carry an implicit `risk_level`; claim risk is assigned later on `AnalysisClaim.claim_risk_level` and consumed by `ClaimSupportReviewer`.
 - `EvidenceItem.canonical_url`, `source_domain`, `scraped_content_sha256`, and `source_cache` record crawler identity/cache metadata for trace replay and future source metrics; they do not change evidence acceptance semantics.
 

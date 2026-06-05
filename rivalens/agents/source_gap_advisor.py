@@ -40,6 +40,7 @@ class SourceGapAdvisor(Protocol):
         found_source_types: list[str],
         source_preferences: list[str],
         minimum_count: int,
+        source_metrics: dict[str, Any] | None = None,
     ) -> SourceGapDecision | dict[str, Any]:
         """Return a structured source coverage decision."""
 
@@ -82,6 +83,7 @@ class LLMSourceGapAdvisor:
         found_source_types: list[str],
         source_preferences: list[str],
         minimum_count: int,
+        source_metrics: dict[str, Any] | None = None,
     ) -> SourceGapDecision:
         provider = self.provider
         model = self.model
@@ -101,6 +103,7 @@ class LLMSourceGapAdvisor:
             found_source_types=found_source_types,
             source_preferences=source_preferences,
             minimum_count=minimum_count,
+            source_metrics=source_metrics or {},
         )
         response = await create_chat_completion(
             model=model,
@@ -129,6 +132,7 @@ class LLMSourceGapAdvisor:
                 "source_preferences": source_preferences,
                 "found_source_types": found_source_types,
                 "minimum_count": minimum_count,
+                "source_metrics": self._source_metrics_summary(source_metrics or {}),
             },
             "llm_input_evidence_count": len(compact_evidence),
             "llm_input_evidence_ids": [
@@ -154,6 +158,8 @@ class LLMSourceGapAdvisor:
                     "id": evidence_id,
                     "title": evidence.get("title", ""),
                     "url": evidence.get("url", ""),
+                    "canonical_url": evidence.get("canonical_url", ""),
+                    "source_domain": evidence.get("source_domain", ""),
                     "source_type": evidence.get("source_type", ""),
                     "excerpt": excerpt[: self.max_excerpt_chars],
                     "confidence": evidence.get("confidence", 0.5),
@@ -169,6 +175,7 @@ class LLMSourceGapAdvisor:
         found_source_types: list[str],
         source_preferences: list[str],
         minimum_count: int,
+        source_metrics: dict[str, Any],
     ) -> str:
         allowed_source_types = ", ".join(EvidenceType.__args__)
         branch_context = {
@@ -180,10 +187,19 @@ class LLMSourceGapAdvisor:
             "success_criteria": list(branch.get("success_criteria", []))[:8],
             "source_preferences": source_preferences,
             "found_source_types": found_source_types,
-            "accepted_count": len(accepted_evidence),
+            "accepted_count": source_metrics.get(
+                "accepted_evidence_count",
+                len(accepted_evidence),
+            ),
             "minimum_count": minimum_count,
         }
+        compact_source_metrics = self._compact_source_metrics(source_metrics)
         branch_json = json.dumps(branch_context, ensure_ascii=False, indent=2)
+        source_metrics_json = json.dumps(
+            compact_source_metrics,
+            ensure_ascii=False,
+            indent=2,
+        )
         evidence_json = json.dumps(accepted_evidence, ensure_ascii=False, indent=2)
         return f"""Decide whether this competitor-analysis branch needs an additional source coverage gap.
 
@@ -213,14 +229,45 @@ Decision rules:
 - Use blocking=true only when the current source mix is too weak to support downstream analysis without targeted collection.
 - If the accepted source mix is good enough, return open_gap=false even if another source type might be nice to have.
 - If open_gap=true, choose concise target_source_types from the allowed list and write a query_focus a collector can act on.
+- Use source_metrics for source independence. Do not treat accepted_count alone as enough when canonical URLs, domains, or content hashes show duplicates.
 - Do not invent evidence. Base the decision only on the branch context and accepted evidence below.
 
 Branch context:
 {branch_json}
 
+Source metrics:
+{source_metrics_json}
+
 Accepted evidence:
 {evidence_json}
 """
+
+    def _compact_source_metrics(self, source_metrics: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "accepted_evidence_count": source_metrics.get("accepted_evidence_count", 0),
+            "unique_canonical_url_count": source_metrics.get(
+                "unique_canonical_url_count",
+                0,
+            ),
+            "unique_domain_count": source_metrics.get("unique_domain_count", 0),
+            "independent_source_count": source_metrics.get(
+                "independent_source_count",
+                0,
+            ),
+            "primary_source_count": source_metrics.get("primary_source_count", 0),
+            "source_type_counts": dict(source_metrics.get("source_type_counts", {})),
+            "domain_counts": dict(source_metrics.get("domain_counts", {})),
+            "duplicate_source_groups": list(
+                source_metrics.get("duplicate_source_groups", []),
+            )[:6],
+            "canonical_sources": list(source_metrics.get("canonical_sources", []))[:8],
+        }
+
+    def _source_metrics_summary(self, source_metrics: dict[str, Any]) -> dict[str, Any]:
+        compact = self._compact_source_metrics(source_metrics)
+        compact.pop("duplicate_source_groups", None)
+        compact.pop("canonical_sources", None)
+        return compact
 
     def _valid_source_types(self, source_types: list[str]) -> list[str]:
         allowed = set(EvidenceType.__args__)

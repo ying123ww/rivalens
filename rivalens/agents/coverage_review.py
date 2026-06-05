@@ -13,7 +13,7 @@ from rivalens.agents.success_criteria import (
     evidence_matches_success_criterion,
     normalize_success_criteria,
 )
-from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch
+from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch, SourceMetrics
 from rivalens.schema.competitive import EvidenceType
 
 
@@ -28,6 +28,7 @@ class CoverageReviewer:
         branch: ResearchBranch,
         evidence_items: list[dict[str, Any]],
         evidence_review: EvidenceReviewResult,
+        source_metrics: SourceMetrics | None = None,
         research_task_ids: list[str] | None = None,
     ) -> CoverageAssessment:
         accepted_ids = set(evidence_review.get("accepted_evidence_ids", []))
@@ -42,6 +43,7 @@ class CoverageReviewer:
             branch,
             accepted_evidence,
             found_source_types,
+            source_metrics or {},
         )
         source_type_gaps = source_gap_assessment["gaps"]
         quality_gap_codes = self.quality_gap_codes(evidence_review)
@@ -101,6 +103,7 @@ class CoverageReviewer:
             "source_type_gaps": source_type_gaps,
             "source_coverage_gaps": source_type_gaps,
             "source_gap_review": source_gap_assessment["review"],
+            "source_metrics": source_metrics or {},
             "quality_gap_codes": quality_gap_codes,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
@@ -160,6 +163,7 @@ class CoverageReviewer:
         branch: ResearchBranch,
         accepted_evidence: list[dict[str, Any]],
         found_source_types: list[str],
+        source_metrics: SourceMetrics,
     ) -> dict[str, Any]:
         accepted_count = len(accepted_evidence)
         minimum_count = self._minimum_source_count(branch)
@@ -173,6 +177,7 @@ class CoverageReviewer:
             "found_source_types": found_source_types,
             "accepted_count": accepted_count,
             "minimum_count": minimum_count,
+            "source_metrics_summary": self._source_metrics_summary(source_metrics),
             "no_rule_fallback": True,
         }
         if not accepted_evidence:
@@ -185,6 +190,7 @@ class CoverageReviewer:
                 found_source_types=found_source_types,
                 source_preferences=source_preferences,
                 minimum_count=minimum_count,
+                source_metrics=source_metrics,
             )
             decision = (
                 raw_decision
@@ -236,6 +242,22 @@ class CoverageReviewer:
             confidence=decision.confidence,
         )
         return {"gaps": [gap], "review": review}
+
+    def _source_metrics_summary(self, source_metrics: SourceMetrics) -> dict[str, Any]:
+        return {
+            "accepted_evidence_count": source_metrics.get("accepted_evidence_count", 0),
+            "unique_canonical_url_count": source_metrics.get(
+                "unique_canonical_url_count",
+                0,
+            ),
+            "unique_domain_count": source_metrics.get("unique_domain_count", 0),
+            "independent_source_count": source_metrics.get(
+                "independent_source_count",
+                0,
+            ),
+            "primary_source_count": source_metrics.get("primary_source_count", 0),
+            "duplicate_group_count": len(source_metrics.get("duplicate_source_groups", [])),
+        }
 
     def _source_gap(
         self,
