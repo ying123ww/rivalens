@@ -366,6 +366,9 @@ class SourceCoverageGap(TypedDict, total=False):
     criterion_description: str
     success_criteria: list[SuccessCriterion]
     reason: str
+    expected_improvement: str
+    confidence: float
+    source_gap_advisor: str
 
 
 class CoverageAssessment(TypedDict, total=False):
@@ -379,6 +382,7 @@ class CoverageAssessment(TypedDict, total=False):
     found_source_types: list[str]
     source_type_gaps: list[SourceCoverageGap]
     source_coverage_gaps: list[SourceCoverageGap]
+    source_gap_review: dict[str, Any]
     quality_gap_codes: list[str]
     covered_questions: list[str]
     missing_questions: list[str]

@@ -74,10 +74,11 @@ class BranchCoverageStateBuilder:
                 root,
                 accepted_evidence,
             )
-            current_source_type_gaps = self.coverage_reviewer.source_type_gaps(
+            current_source_type_gaps = self._open_recorded_source_type_gaps(
                 root,
+                branch_ids,
                 accepted_evidence,
-                found_source_types,
+                assessments_by_branch,
             )
             open_source_type_gap_codes = {
                 str(gap.get("code", ""))
@@ -242,7 +243,7 @@ class BranchCoverageStateBuilder:
         seen_gap_ids: set[str] = set()
         for branch_id in branch_ids:
             for assessment in assessments_by_branch.get(branch_id, []):
-                for gap in assessment.get("source_type_gaps", []):
+                for gap in self._assessment_source_gaps(assessment):
                     code = str(gap.get("code", ""))
                     if not code:
                         continue
@@ -302,6 +303,38 @@ class BranchCoverageStateBuilder:
                         },
                     )
         return gaps
+
+    def _open_recorded_source_type_gaps(
+        self,
+        root: ResearchBranch,
+        branch_ids: list[str],
+        accepted_evidence: list[EvidenceItem],
+        assessments_by_branch: dict[str, list[CoverageAssessment]],
+    ) -> list[dict[str, Any]]:
+        gaps = []
+        for branch_id in branch_ids:
+            for assessment in assessments_by_branch.get(branch_id, []):
+                for gap in self._assessment_source_gaps(assessment):
+                    code = str(gap.get("code", ""))
+                    if not code:
+                        continue
+                    if self._resolved_evidence_ids_for_gap(
+                        root,
+                        gap,
+                        accepted_evidence,
+                    ):
+                        continue
+                    gaps.append(gap)
+        return gaps
+
+    def _assessment_source_gaps(
+        self,
+        assessment: CoverageAssessment,
+    ) -> list[dict[str, Any]]:
+        return list(
+            assessment.get("source_coverage_gaps")
+            or assessment.get("source_type_gaps", [])
+        )
 
     def _cumulative_criterion_gaps(
         self,

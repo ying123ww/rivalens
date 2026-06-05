@@ -183,7 +183,7 @@ class CollectionAgent:
                 )
                 evidence_items.extend(sources)
                 evidence_review = self.evidence_reviewer.review(branch, sources)
-                coverage_assessment = self.coverage_reviewer.review(
+                coverage_assessment = await self.coverage_reviewer.review(
                     branch=branch,
                     evidence_items=sources,
                     evidence_review=evidence_review,

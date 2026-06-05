@@ -4,110 +4,26 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from langsmith import traceable
-
-from rivalens.agents.evidence_review import (
-    _branch_trace_summary,
-    _criteria_trace_summary,
-    _evidence_trace_summary,
+from rivalens.agents.source_gap_advisor import (
+    LLMSourceGapAdvisor,
+    SourceGapAdvisor,
+    SourceGapDecision,
 )
 from rivalens.agents.success_criteria import (
     evidence_matches_success_criterion,
     normalize_success_criteria,
 )
 from rivalens.schema import CoverageAssessment, EvidenceReviewResult, ResearchBranch
-
-
-def _follow_up_trace_summary(specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "objective": spec.get("objective", ""),
-            "query": spec.get("query", ""),
-            "generated_from_gap": spec.get("generated_from_gap", ""),
-            "decision_action": spec.get("decision_action", ""),
-            "decision_subtype": spec.get("decision_subtype", ""),
-            "target_source_types": list(spec.get("target_source_types", []))[:5],
-            "success_criteria": _criteria_trace_summary(
-                spec.get("success_criteria", []),
-            ),
-        }
-        for spec in specs[:10]
-        if isinstance(spec, dict)
-    ]
-
-
-def _coverage_review_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
-    branch = inputs.get("branch") or {}
-    evidence_items = inputs.get("evidence_items") or []
-    evidence_review = inputs.get("evidence_review") or {}
-    return {
-        "branch": _branch_trace_summary(branch),
-        "research_task_ids": list(inputs.get("research_task_ids") or []),
-        "evidence_count": len(evidence_items),
-        "evidence": _evidence_trace_summary(evidence_items),
-        "evidence_review": {
-            "id": evidence_review.get("id", ""),
-            "accepted": bool(evidence_review.get("accepted")),
-            "required_action": evidence_review.get("required_action", ""),
-            "score": evidence_review.get("score"),
-            "accepted_evidence_ids": list(
-                evidence_review.get("accepted_evidence_ids", []),
-            )[:20],
-            "rejected_evidence_ids": list(
-                evidence_review.get("rejected_evidence_ids", []),
-            )[:20],
-            "criterion_matches": list(
-                evidence_review.get("criterion_matches", []),
-            )[:20],
-        },
-    }
-
-
-def _coverage_review_trace_outputs(output: Any) -> dict[str, Any]:
-    if not isinstance(output, dict):
-        return {"output_type": type(output).__name__}
-    return {
-        "coverage_id": output.get("id", ""),
-        "branch_id": output.get("branch_id", ""),
-        "next_action": output.get("next_action", ""),
-        "confidence": output.get("confidence"),
-        "decision": output.get("decision", {}),
-        "accepted_evidence_ids": list(output.get("accepted_evidence_ids", []))[:20],
-        "rejected_evidence_ids": list(output.get("rejected_evidence_ids", []))[:20],
-        "found_source_types": list(output.get("found_source_types", []))[:10],
-        "source_type_gaps": list(output.get("source_type_gaps", []))[:10],
-        "source_coverage_gaps": list(output.get("source_coverage_gaps", []))[:10],
-        "quality_gap_codes": list(output.get("quality_gap_codes", []))[:10],
-        "covered_questions": list(output.get("covered_questions", []))[:10],
-        "missing_questions": list(output.get("missing_questions", []))[:10],
-        "satisfied_criteria": _criteria_trace_summary(
-            output.get("satisfied_criteria", []),
-        ),
-        "partial_criteria": _criteria_trace_summary(
-            output.get("partial_criteria", []),
-        ),
-        "missing_criteria": _criteria_trace_summary(
-            output.get("missing_criteria", []),
-        ),
-        "criterion_matches": list(output.get("criterion_matches", []))[:20],
-        "selected_follow_up_specs": _follow_up_trace_summary(
-            output.get("selected_follow_up_specs", []),
-        ),
-        "arbitration": output.get("arbitration", {}),
-    }
+from rivalens.schema.competitive import EvidenceType
 
 
 class CoverageReviewer:
     """Assess whether a branch has enough evidence coverage for analysis."""
 
-    @traceable(
-        name="rivalens_coverage_review",
-        run_type="chain",
-        tags=["rivalens", "collection", "coverage-review"],
-        process_inputs=_coverage_review_trace_inputs,
-        process_outputs=_coverage_review_trace_outputs,
-    )
-    def review(
+    def __init__(self, source_gap_advisor: SourceGapAdvisor | None = None) -> None:
+        self.source_gap_advisor = source_gap_advisor or LLMSourceGapAdvisor()
+
+    async def review(
         self,
         branch: ResearchBranch,
         evidence_items: list[dict[str, Any]],
@@ -123,11 +39,12 @@ class CoverageReviewer:
         ]
         found_source_types = self.found_source_types(branch, accepted_evidence)
         dimension_policy = self._dimension_policy(branch)
-        source_type_gaps = self.source_type_gaps(
+        source_gap_assessment = await self.assess_source_type_gaps(
             branch,
             accepted_evidence,
             found_source_types,
         )
+        source_type_gaps = source_gap_assessment["gaps"]
         quality_gap_codes = self.quality_gap_codes(evidence_review)
         guiding_questions = (
             branch.get("guiding_questions", [])
@@ -188,6 +105,7 @@ class CoverageReviewer:
             "found_source_types": found_source_types,
             "source_type_gaps": source_type_gaps,
             "source_coverage_gaps": source_type_gaps,
+            "source_gap_review": source_gap_assessment["review"],
             "quality_gap_codes": quality_gap_codes,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
@@ -242,60 +160,87 @@ class CoverageReviewer:
             )
         )
 
-    def source_type_gaps(
+    async def assess_source_type_gaps(
         self,
         branch: ResearchBranch,
         accepted_evidence: list[dict[str, Any]],
         found_source_types: list[str],
-    ) -> list[dict[str, Any]]:
-        gaps: list[dict[str, Any]] = []
-        found = set(found_source_types)
+    ) -> dict[str, Any]:
         accepted_count = len(accepted_evidence)
         minimum_count = self._minimum_source_count(branch)
-        if 0 < accepted_count < minimum_count:
-            gaps.append(
-                self._source_gap(
-                    "insufficient_source_count",
-                    "Collect additional independent public sources for this branch.",
-                    self.fallback_target_source_types(branch),
-                    accepted_count,
-                    minimum_count,
-                )
-            )
+        source_preferences = self._source_preferences(branch)
+        review = {
+            "mode": "llm_source_gap_advisor",
+            "status": "skipped_no_accepted_evidence",
+            "provider": getattr(self.source_gap_advisor, "provider", None),
+            "model": getattr(self.source_gap_advisor, "model", None),
+            "source_preferences": source_preferences,
+            "found_source_types": found_source_types,
+            "accepted_count": accepted_count,
+            "minimum_count": minimum_count,
+            "no_rule_fallback": True,
+        }
+        if not accepted_evidence:
+            return {"gaps": [], "review": review}
 
-        gaps.extend(
-            self._preferred_source_type_gaps(
-                branch,
-                found,
-                accepted_count,
-                minimum_count,
+        try:
+            raw_decision = await self.source_gap_advisor.decide(
+                branch=branch,
+                accepted_evidence=accepted_evidence,
+                found_source_types=found_source_types,
+                source_preferences=source_preferences,
+                minimum_count=minimum_count,
             )
+            decision = (
+                raw_decision
+                if isinstance(raw_decision, SourceGapDecision)
+                else SourceGapDecision.model_validate(raw_decision)
+            )
+        except ValueError as exc:
+            review["status"] = (
+                "not_configured"
+                if "not configured" in str(exc).lower()
+                else "failed"
+            )
+            review["error"] = str(exc)
+            return {"gaps": [], "review": review}
+        except Exception as exc:
+            review["status"] = "failed"
+            review["error"] = str(exc)
+            return {"gaps": [], "review": review}
+
+        decision.target_source_types = self._valid_source_types(
+            decision.target_source_types,
         )
+        decision.gap_code = self._slug(decision.gap_code)[:80]
+        review.update(
+            {
+                "status": "completed",
+                "decision": decision.model_dump(exclude={"metadata"}),
+                "metadata": decision.metadata,
+            }
+        )
+        if not decision.open_gap:
+            return {"gaps": [], "review": review}
 
-        return gaps
-
-    def _preferred_source_type_gaps(
-        self,
-        branch: ResearchBranch,
-        found_source_types: set[str],
-        accepted_count: int,
-        minimum_count: int,
-    ) -> list[dict[str, Any]]:
-        preferred_source_types = self._preferred_source_types(branch)
-        if not preferred_source_types or not accepted_count:
-            return []
-        if self._preferred_sources_matched(found_source_types, set(preferred_source_types)):
-            return []
-        return [
-            self._source_gap(
-                "missing_preferred_source_type",
-                "Find preferred source-type evidence for this branch.",
-                preferred_source_types,
-                accepted_count,
-                minimum_count,
-                blocking=False,
-            )
-        ]
+        gap_code = decision.gap_code or "llm_source_coverage_gap"
+        query_focus = (
+            decision.query_focus
+            or decision.reason
+            or "Collect targeted public sources to improve source coverage."
+        )
+        gap = self._source_gap(
+            gap_code,
+            query_focus,
+            decision.target_source_types,
+            accepted_count,
+            minimum_count,
+            blocking=bool(decision.blocking),
+            reason=decision.reason,
+            expected_improvement=decision.expected_improvement,
+            confidence=decision.confidence,
+        )
+        return {"gaps": [gap], "review": review}
 
     def _source_gap(
         self,
@@ -306,6 +251,9 @@ class CoverageReviewer:
         minimum_count: int,
         blocking: bool = True,
         criterion: dict[str, Any] | None = None,
+        reason: str | None = None,
+        expected_improvement: str = "",
+        confidence: float | None = None,
     ) -> dict[str, Any]:
         gap = {
             "gap_type": "source_coverage",
@@ -315,26 +263,41 @@ class CoverageReviewer:
             "accepted_count": accepted_count,
             "minimum_count": minimum_count,
             "blocking": blocking,
-            "reason": query_focus,
+            "reason": reason or query_focus,
+            "source_gap_advisor": "llm",
         }
+        if expected_improvement:
+            gap["expected_improvement"] = expected_improvement
+        if confidence is not None:
+            gap["confidence"] = round(float(confidence), 3)
         if criterion:
             gap["criterion_id"] = criterion.get("id", "")
             gap["criterion_description"] = criterion.get("description", "")
             gap["success_criteria"] = [criterion]
         return gap
 
-    def _preferred_source_types(self, branch: ResearchBranch) -> list[str]:
+    def _source_preferences(self, branch: ResearchBranch) -> list[str]:
         preferred = list(branch.get("target_source_types", []))
         if not preferred:
             preferred.extend(branch.get("source_hints", []))
         return list(dict.fromkeys(source_type for source_type in preferred if source_type))
 
-    def _preferred_sources_matched(
-        self,
-        found_source_types: set[str],
-        preferred_source_types: set[str],
-    ) -> bool:
-        return bool(found_source_types.intersection(preferred_source_types))
+    def _valid_source_types(self, source_types: list[str]) -> list[str]:
+        allowed = set(EvidenceType.__args__)
+        return list(
+            dict.fromkeys(
+                source_type
+                for source_type in source_types
+                if source_type in allowed
+            )
+        )
+
+    def _slug(self, value: str) -> str:
+        slug = "".join(
+            character.lower() if character.isalnum() else "_"
+            for character in value
+        )
+        return slug.strip("_")
 
     def _minimum_source_count(self, branch: ResearchBranch) -> int:
         if self._normalize_dimension(branch.get("dimension_id", "")) == "competitor_profile":

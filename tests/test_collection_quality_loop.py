@@ -4,7 +4,57 @@ import asyncio
 from typing import Any
 
 from rivalens.agents.collection import CollectionAgent
+from rivalens.agents.coverage_review import CoverageReviewer
+from rivalens.agents.source_gap_advisor import SourceGapDecision
 from rivalens.agents.success_criteria import normalize_success_criteria
+
+
+class FakeSourceGapAdvisor:
+    provider = "fake"
+    model = "fake-source-gap"
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, Any]] = []
+
+    async def decide(
+        self,
+        *,
+        branch: dict[str, Any],
+        accepted_evidence: list[dict[str, Any]],
+        found_source_types: list[str],
+        source_preferences: list[str],
+        minimum_count: int,
+    ) -> SourceGapDecision:
+        self.calls.append(
+            {
+                "branch_id": branch.get("id", ""),
+                "accepted_evidence_ids": [
+                    evidence.get("id", "")
+                    for evidence in accepted_evidence
+                    if evidence.get("id")
+                ],
+                "found_source_types": list(found_source_types),
+                "source_preferences": list(source_preferences),
+                "minimum_count": minimum_count,
+            }
+        )
+        if self.fail:
+            raise RuntimeError("fake source gap advisor failure")
+        if "pricing_page" not in source_preferences:
+            return SourceGapDecision(open_gap=False, reason="No pricing source preference.")
+        if "pricing_page" in found_source_types:
+            return SourceGapDecision(open_gap=False, reason="Pricing page evidence is present.")
+        return SourceGapDecision(
+            open_gap=True,
+            gap_code="needs_pricing_page_source",
+            query_focus="Find an official pricing page with public plans, packaging, or billing.",
+            target_source_types=["pricing_page"],
+            blocking=False,
+            reason="Accepted evidence covers pricing from news sources but lacks a primary pricing source.",
+            expected_improvement="Adds a traceable public pricing source for downstream analysis claims.",
+            confidence=0.84,
+        )
 
 
 class FakeEvidenceCollector:
@@ -36,7 +86,7 @@ class FakeEvidenceCollector:
                     "confidence": 0.9,
                 }
             ]
-        elif generated_from_gap == "missing_preferred_source_type":
+        elif generated_from_gap == "needs_pricing_page_source":
             evidence_items = [
                 {
                     "title": "Acme Pricing",
@@ -112,10 +162,12 @@ def test_success_criteria_do_not_carry_source_targets():
     ]
 
 
-def test_collection_quality_loop_expands_preferred_source_gap():
+def test_collection_quality_loop_expands_llm_source_gap():
     collector = FakeEvidenceCollector()
+    source_gap_advisor = FakeSourceGapAdvisor()
     agent = CollectionAgent(
         evidence_collector=collector,
+        coverage_reviewer=CoverageReviewer(source_gap_advisor=source_gap_advisor),
         max_branch_depth=1,
         max_expansion_branches=4,
         max_concurrent_collections=1,
@@ -156,7 +208,7 @@ def test_collection_quality_loop_expands_preferred_source_gap():
     assert pricing_root["coverage_status"] == "ready_for_analysis"
     assert pricing_root["coverage_state_id"] == f"coverage_state_{pricing_root['id']}"
     assert len(child_branches) == 1
-    assert child_branches[0]["generated_from_gap"] == "missing_preferred_source_type"
+    assert child_branches[0]["generated_from_gap"] == "needs_pricing_page_source"
     assert child_branches[0]["source_hints"] == ["pricing_page"]
     assert child_branches[0]["target_source_types"] == ["pricing_page"]
 
@@ -173,20 +225,22 @@ def test_collection_quality_loop_expands_preferred_source_gap():
     evidence_finding_codes = {
         finding["code"] for finding in root_evidence_review["findings"]
     }
-    assert "missing_preferred_source_type" not in evidence_finding_codes
-    assert root_coverage["source_type_gaps"][0]["code"] == "missing_preferred_source_type"
+    assert "needs_pricing_page_source" not in evidence_finding_codes
+    assert root_coverage["source_gap_review"]["status"] == "completed"
+    assert root_coverage["source_gap_review"]["no_rule_fallback"] is True
+    assert root_coverage["source_type_gaps"][0]["code"] == "needs_pricing_page_source"
     assert root_coverage["source_type_gaps"][0]["gap_type"] == "source_coverage"
     assert root_coverage["source_type_gaps"][0]["target_source_types"] == ["pricing_page"]
     assert root_coverage["source_type_gaps"][0]["blocking"] is False
     assert root_coverage["source_coverage_gaps"] == root_coverage["source_type_gaps"]
     assert root_coverage["quality_gap_codes"] == []
-    assert root_coverage["selected_follow_up_specs"][0]["generated_from_gap"] == "missing_preferred_source_type"
+    assert root_coverage["selected_follow_up_specs"][0]["generated_from_gap"] == "needs_pricing_page_source"
     assert root_coverage["selected_follow_up_specs"][0]["target_source_types"] == ["pricing_page"]
 
     follow_up_calls = [
         call
         for call in collector.calls
-        if call.get("generated_from_gap") == "missing_preferred_source_type"
+        if call.get("generated_from_gap") == "needs_pricing_page_source"
     ]
     assert len(follow_up_calls) == 1
     assert follow_up_calls[0]["target_source_types"] == ["pricing_page"]
@@ -212,12 +266,12 @@ def test_collection_quality_loop_expands_preferred_source_gap():
     resolved_gap = next(
         gap
         for gap in summary["coverage_gaps"]
-        if gap["code"] == "missing_preferred_source_type"
+        if gap["code"] == "needs_pricing_page_source"
     )
     assert summary["status"] == "ready_for_analysis"
     assert summary["id"] == pricing_root["coverage_state_id"]
     assert summary["open_gap_codes"] == []
-    assert summary["resolved_gap_codes"] == ["missing_preferred_source_type"]
+    assert summary["resolved_gap_codes"] == ["needs_pricing_page_source"]
     assert resolved_gap["gap_type"] == "source_type"
     assert resolved_gap["blocking"] is False
     assert resolved_gap["status"] == "resolved"
@@ -226,10 +280,12 @@ def test_collection_quality_loop_expands_preferred_source_gap():
     assert summary["success_criteria"][0]["status"] == "satisfied"
 
 
-def test_unresolved_source_hints_do_not_block_branch_coverage():
+def test_unresolved_llm_source_gap_does_not_block_branch_coverage():
     collector = FakeEvidenceCollector()
+    source_gap_advisor = FakeSourceGapAdvisor()
     agent = CollectionAgent(
         evidence_collector=collector,
+        coverage_reviewer=CoverageReviewer(source_gap_advisor=source_gap_advisor),
         max_branch_depth=0,
         max_expansion_branches=4,
         max_concurrent_collections=1,
@@ -277,12 +333,69 @@ def test_unresolved_source_hints_do_not_block_branch_coverage():
         if item["root_branch_id"] == pricing_root["id"]
     )
 
-    assert root_coverage["source_type_gaps"][0]["code"] == "missing_preferred_source_type"
+    assert root_coverage["source_gap_review"]["status"] == "completed"
+    assert root_coverage["source_type_gaps"][0]["code"] == "needs_pricing_page_source"
     assert root_coverage["source_type_gaps"][0]["gap_type"] == "source_coverage"
     assert root_coverage["source_type_gaps"][0]["target_source_types"] == ["pricing_page"]
     assert root_coverage["source_type_gaps"][0]["blocking"] is False
     assert root_coverage["source_coverage_gaps"] == root_coverage["source_type_gaps"]
     assert child_branches == []
     assert pricing_summary["status"] == "ready_for_analysis"
-    assert pricing_summary["open_gap_codes"] == ["missing_preferred_source_type"]
+    assert pricing_summary["open_gap_codes"] == ["needs_pricing_page_source"]
     assert pricing_summary["blocked_gap_codes"] == []
+
+
+def test_source_gap_advisor_failure_does_not_open_rule_gap():
+    collector = FakeEvidenceCollector()
+    source_gap_advisor = FakeSourceGapAdvisor(fail=True)
+    agent = CollectionAgent(
+        evidence_collector=collector,
+        coverage_reviewer=CoverageReviewer(source_gap_advisor=source_gap_advisor),
+        max_branch_depth=1,
+        max_expansion_branches=4,
+        max_concurrent_collections=1,
+    )
+    state = {
+        "task": {
+            "query": "Compare Acme pricing.",
+            "competitors": ["Acme"],
+            "verbose": False,
+        },
+        "competitors": ["Acme"],
+        "analysis_dimensions": [
+            {
+                "id": "pricing_model",
+                "name": "Pricing Model",
+                "source_hints": ["pricing_page"],
+                "guiding_questions": [
+                    "What public pricing, packaging, plans, or billing units are available?"
+                ],
+                "schema_field_ids": ["pricing_model"],
+            }
+        ],
+    }
+
+    result = asyncio.run(agent.run(state))
+
+    pricing_root = next(
+        branch
+        for branch in result["research_branches"]
+        if branch["id"] == "collect_acme_pricing_model"
+    )
+    child_branches = [
+        branch
+        for branch in result["research_branches"]
+        if branch.get("parent_id") == pricing_root["id"]
+    ]
+    root_coverage = next(
+        assessment
+        for assessment in result["coverage_assessments"]
+        if assessment["branch_id"] == pricing_root["id"]
+    )
+
+    assert source_gap_advisor.calls
+    assert root_coverage["source_gap_review"]["status"] == "failed"
+    assert root_coverage["source_gap_review"]["no_rule_fallback"] is True
+    assert root_coverage["source_type_gaps"] == []
+    assert root_coverage["source_coverage_gaps"] == []
+    assert child_branches == []

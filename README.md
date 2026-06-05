@@ -188,9 +188,9 @@ analysis. Collection branches carry one clean seed query while preserving
 competitor, dimension, source hints, success criteria, and task context as
 structured fields; `ResearchEngine` expands that seed into natural-language
 sub-queries using the structured collection context. `CoverageReviewer` records which criteria are satisfied, partial, or
-missing, detects missing expected source types, and narrows follow-up tasks to
-the missing criteria or source-type gaps instead of throwing away partially
-useful evidence. `BranchCoverageStateBuilder` then aggregates each root branch
+missing, consumes LLM-advised source-gap decisions, and narrows follow-up tasks
+to the missing criteria or source coverage gaps instead of throwing away
+partially useful evidence. `BranchCoverageStateBuilder` then aggregates each root branch
 and its follow-up children into `branch_coverage_states`, recording current open
 gap codes, resolved/blocked gap records, and the final coverage status on the
 root branch. `KnowledgeStructuringAgent` first tries
@@ -255,7 +255,7 @@ CollectionAgent
   -> ResearchEngine
   -> EvidenceItem[]
   -> EvidenceQualityReviewer (source-level accepted/rejected evidence and criterion matches)
-  -> CoverageReviewer (criterion coverage gaps and follow-up task specs)
+  -> CoverageReviewer (criterion coverage gaps, LLM-advised source gaps, and follow-up task specs)
   -> BranchCoverageStateBuilder (root branch/group coverage ledger)
 ```
 
@@ -284,10 +284,12 @@ discovery stage.
 
 Collection field semantics are intentionally separated. `success_criteria`
 defines required branch content coverage. `source_hints` are ranked preferred
-source types for initial query building. `CoverageReviewer` turns missing
-preferred sources into explicit source coverage gaps, and only those gaps or
-their follow-up tasks carry `target_source_types`; unresolved non-blocking
-source gaps do not make a branch incomplete by themselves.
+source types for initial query building and source-gap review context, not hard
+requirements. An LLM source-gap advisor decides whether the accepted evidence
+source mix needs targeted follow-up; `CoverageReviewer` materializes that
+decision as explicit `SourceCoverageGap` records and follow-up tasks. Only those
+gaps or their follow-up tasks carry `target_source_types`; unresolved
+non-blocking source gaps do not make a branch incomplete by themselves.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.
