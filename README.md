@@ -278,18 +278,20 @@ gap lifecycle.
 stage boundary. Consumers should distinguish stages with `search_stage` and the
 assessment `stage_contract`: focused collection writes accepted source-backed
 items to `evidence_items` and coverage observations to `coverage_assessments`.
-Missing source types are handled by
-`CoverageReviewer` follow-up tasks instead of a separate pre-evidence
-discovery stage.
+Source coverage follow-ups are handled by LLM-advised `CoverageReviewer` tasks
+instead of a separate pre-evidence discovery stage.
 
 Collection field semantics are intentionally separated. `success_criteria`
-defines required branch content coverage. `source_hints` are ranked preferred
-source types for initial query building and source-gap review context, not hard
-requirements. An LLM source-gap advisor decides whether the accepted evidence
-source mix needs targeted follow-up; `CoverageReviewer` materializes that
-decision as explicit `SourceCoverageGap` records and follow-up tasks. Only those
-gaps or their follow-up tasks carry `target_source_types`; unresolved
-non-blocking source gaps do not make a branch incomplete by themselves.
+defines required branch content coverage. `guiding_questions` must be explicit
+on the branch when question-level coverage is required; `CoverageReviewer` does
+not keep a dimension-id fallback policy for guiding questions or coverage
+terms. `source_hints` are ranked preferred source types for initial query
+building and source-gap review context, not hard requirements. An LLM
+source-gap advisor decides whether the accepted evidence source mix needs
+targeted follow-up; `CoverageReviewer` materializes that decision as explicit
+`SourceCoverageGap` records and follow-up tasks. Only those gaps or their
+follow-up tasks carry `target_source_types`; unresolved non-blocking source gaps
+do not make a branch incomplete by themselves.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.

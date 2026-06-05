@@ -16,7 +16,7 @@
 - `CollectionAgent` 将 competitor x confirmed dimension 展开成 root branches，所有 root branches 使用 `search_stage=focused`。
 - `ResearchEngineEvidenceCollector` 对 focused collection 使用 `ResearchMode.STANDARD_EVIDENCE`，并归一化为 `EvidenceItem`。
 - `EvidenceQualityReviewer` 对每次 standard evidence result 做 source-level accept / reject。
-- `CoverageReviewer` 负责 guiding question / success criteria 覆盖，并把 LLM source-gap advisor 的裁决物化成 gap-driven follow-up tasks。
+- `CoverageReviewer` 负责显式传入的 guiding question / success criteria 覆盖，并把 LLM source-gap advisor 的裁决物化成 gap-driven follow-up tasks；它不再按 dimension id 兜底生成 guiding questions 或 coverage terms。
 - `CoverageReviewer` 的 follow-up task 继续使用结构化 `decision_action`、`decision_subtype`、`generated_from_gap`、`target_source_types` 和 `search_stage` 字段。
 - `BranchCoverageStateBuilder` 将 root branch 及其 follow-up children 汇总成 `branch_coverage_states`，记录当前 open gap codes、resolved/blocked gap records，并把最终 `coverage_status` 回写到 root branch。
 - `ClaimSupportReviewer` 只做 claim-level citation support review，不再通过 collection 专用 verification 通道回到 `source_collection`。
@@ -59,6 +59,7 @@ There is no `landscape_assessments` state collection. Candidate sources only mat
 Collection input fields have separate meanings:
 
 - `success_criteria` are required content coverage criteria for deciding whether a branch can move to analysis.
+- `guiding_questions` must be explicit on the branch when question-level coverage is required. `CoverageReviewer` does not keep a dimension-id fallback policy for guiding questions or coverage terms.
 - Branch `source_hints` are preferred source targets for initial query building, not hard requirements by themselves.
 - An LLM source-gap advisor decides whether the accepted evidence source mix needs targeted follow-up. `CoverageReviewer` records that decision as explicit `SourceCoverageGap` entries. Only those gaps and their follow-up tasks carry `target_source_types`.
 - Missing preferred source types do not automatically trigger follow-up collection. Source gaps are opened only by the structured LLM advisor decision; advisor failures do not fall back to the old preferred-source rules.

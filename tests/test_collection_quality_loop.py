@@ -162,6 +162,49 @@ def test_success_criteria_do_not_carry_source_targets():
     ]
 
 
+def test_coverage_review_does_not_synthesize_dimension_guiding_questions():
+    source_gap_advisor = FakeSourceGapAdvisor()
+    coverage_reviewer = CoverageReviewer(source_gap_advisor=source_gap_advisor)
+    branch = {
+        "id": "collect_acme_pricing_model",
+        "competitor": "Acme",
+        "dimension_id": "pricing_model",
+        "dimension_name": "Pricing Model",
+        "guiding_questions": [],
+        "success_criteria": [],
+        "source_hints": [],
+    }
+    evidence_items = [
+        {
+            "id": "ev_1",
+            "title": "Acme market note",
+            "url": "https://news.example/acme",
+            "source_type": "news",
+            "excerpt": "Acme announced a product update in public market coverage.",
+        }
+    ]
+    evidence_review = {
+        "accepted_evidence_ids": ["ev_1"],
+        "rejected_evidence_ids": [],
+        "findings": [],
+        "required_action": "accept",
+    }
+
+    result = asyncio.run(
+        coverage_reviewer.review(
+            branch=branch,
+            evidence_items=evidence_items,
+            evidence_review=evidence_review,
+        )
+    )
+
+    assert source_gap_advisor.calls
+    assert result["covered_questions"] == []
+    assert result["missing_questions"] == []
+    assert result["missing_criteria"] == []
+    assert result["next_action"] == "ready_for_analysis"
+
+
 def test_collection_quality_loop_expands_llm_source_gap():
     collector = FakeEvidenceCollector()
     source_gap_advisor = FakeSourceGapAdvisor()
