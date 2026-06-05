@@ -286,6 +286,11 @@ assessment `stage_contract`: focused collection writes accepted source-backed
 items to `evidence_items` and coverage observations to `coverage_assessments`.
 Source coverage follow-ups are handled by LLM-advised `CoverageReviewer` tasks
 instead of a separate pre-evidence discovery stage.
+Follow-up branches still collect and review evidence like any other branch. After
+that review, `CoverageReviewer.triggered_gap_resolution` records whether the
+specific triggering gap was resolved; resolved follow-ups use
+`ready_for_parent_merge` / `gap_resolution_complete` routing so the child stops
+expanding and the cumulative root coverage state decides final readiness.
 
 Collection field semantics are intentionally separated. `success_criteria`
 defines required branch content coverage. `guiding_questions` must be explicit
@@ -312,9 +317,11 @@ creates a query-refinement follow-up. That follow-up carries
 `excluded_canonical_urls`, so the next standard research pass filters previously
 unusable URLs before scraping. Follow-up branches carry structured
 `triggered_by_*` fields, including the triggering evidence review and coverage
-assessment IDs. `BranchCoverageStateBuilder` then demonstrates before/after
-improvement across quality stability, source coverage, and success criteria,
-including which follow-up evidence IDs resolved the gap.
+assessment IDs. A follow-up that resolves its triggering gap records
+`triggered_gap_resolution` and stops with `ready_for_parent_merge`.
+`BranchCoverageStateBuilder` then demonstrates before/after improvement across
+quality stability, source coverage, and success criteria, including which
+follow-up evidence IDs resolved the gap.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.

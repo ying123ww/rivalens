@@ -89,6 +89,7 @@ from .competitive import (
     StageRole,
     SuccessCriterion,
     SOURCE_TYPE_PRIORITY,
+    TriggeredGapResolution,
     UserPersona,
     UserPersonaPayload,
 )
@@ -182,6 +183,7 @@ __all__ = [
     "StageRole",
     "SuccessCriterion",
     "SOURCE_TYPE_PRIORITY",
+    "TriggeredGapResolution",
     "UserPersona",
     "UserPersonaPayload",
 ]

@@ -382,6 +382,10 @@ def test_mixed_quality_evidence_triggers_differential_retry():
     assert follow_up_call["excluded_canonical_urls"] == child["excluded_canonical_urls"]
     assert child_coverage["quality_stability"]["status"] == "stable"
     assert child_coverage["quality_stability"]["rejected_count"] == 0
+    assert child_coverage["triggered_gap_resolution"]["status"] == "resolved"
+    assert child_coverage["next_action"] == "ready_for_parent_merge"
+    assert child_coverage["decision"]["subtype"] == "gap_resolution_complete"
+    assert child_coverage["selected_follow_up_specs"] == []
 
     summary = next(
         item
@@ -517,6 +521,7 @@ def test_collection_quality_loop_expands_llm_source_gap():
     assert pricing_root["coverage_state_id"] == f"coverage_state_{pricing_root['id']}"
     assert len(child_branches) == 1
     assert child_branches[0]["generated_from_gap"] == "needs_pricing_page_source"
+    assert child_branches[0]["guiding_questions"] == []
     assert child_branches[0]["source_hints"] == ["pricing_page"]
     assert child_branches[0]["target_source_types"] == ["pricing_page"]
 
@@ -568,8 +573,20 @@ def test_collection_quality_loop_expands_llm_source_gap():
         for review in result["evidence_reviews"]
         if review["branch_id"] == child_branches[0]["id"]
     )
+    follow_up_coverage = next(
+        assessment
+        for assessment in result["coverage_assessments"]
+        if assessment["branch_id"] == child_branches[0]["id"]
+    )
     assert follow_up_review["required_action"] == "accept"
     assert len(follow_up_review["accepted_evidence_ids"]) == 2
+    assert follow_up_coverage["triggered_gap_resolution"]["status"] == "resolved"
+    assert follow_up_coverage["triggered_gap_resolution"]["resolved_by_evidence_ids"] == (
+        follow_up_review["accepted_evidence_ids"]
+    )
+    assert follow_up_coverage["next_action"] == "ready_for_parent_merge"
+    assert follow_up_coverage["decision"]["subtype"] == "gap_resolution_complete"
+    assert follow_up_coverage["selected_follow_up_specs"] == []
 
     event = result["agent_events"][-1]
     assert event["output"]["expanded_branch_count"] == 1

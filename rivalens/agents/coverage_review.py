@@ -21,6 +21,7 @@ from rivalens.schema import (
     QualityStabilityGap,
     ResearchBranch,
     SourceMetrics,
+    TriggeredGapResolution,
 )
 from rivalens.schema.competitive import EvidenceType
 
@@ -76,6 +77,14 @@ class CoverageReviewer:
             accepted_evidence,
             branch,
         )
+        triggered_gap_resolution = self._triggered_gap_resolution(
+            branch,
+            accepted_evidence,
+            found_source_types,
+            quality_stability,
+            quality_stability_gaps,
+            criterion_coverage,
+        )
         next_action = self._next_action(
             accepted_count=len(accepted_evidence),
             missing_questions=missing_questions,
@@ -83,6 +92,7 @@ class CoverageReviewer:
             source_type_gaps=source_type_gaps,
             quality_stability_gaps=quality_stability_gaps,
             evidence_review=evidence_review,
+            triggered_gap_resolution=triggered_gap_resolution,
         )
         raw_follow_up_specs = (
             self._follow_up_task_specs(
@@ -130,6 +140,7 @@ class CoverageReviewer:
             "source_metrics": source_metrics or {},
             "quality_stability": quality_stability,
             "quality_stability_gaps": quality_stability_gaps,
+            "triggered_gap_resolution": triggered_gap_resolution,
             "quality_gap_codes": quality_gap_codes,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
@@ -470,6 +481,131 @@ class CoverageReviewer:
                 excluded.append(canonical_url)
         return excluded
 
+    def _triggered_gap_resolution(
+        self,
+        branch: ResearchBranch,
+        accepted_evidence: list[dict[str, Any]],
+        found_source_types: list[str],
+        quality_stability: EvidenceQualityStability,
+        quality_stability_gaps: list[QualityStabilityGap],
+        criterion_coverage: dict[str, list[dict[str, Any]]],
+    ) -> TriggeredGapResolution:
+        gap_type = str(branch.get("triggered_by_gap_type", ""))
+        gap_code = str(
+            branch.get("triggered_by_gap_code")
+            or branch.get("generated_from_gap", ""),
+        )
+        if not branch.get("parent_id") or not gap_type or not gap_code:
+            return {}
+
+        if gap_type == "source_coverage":
+            resolved_ids = self._source_resolution_evidence_ids(
+                branch,
+                accepted_evidence,
+            )
+            return self._triggered_resolution_payload(
+                gap_type=gap_type,
+                gap_code=gap_code,
+                resolved_ids=resolved_ids,
+                unresolved_reason="No accepted evidence matched the target source type.",
+                reason="Accepted evidence matched the triggering source coverage target.",
+            )
+
+        if gap_type == "quality_stability":
+            repeated_codes = {
+                str(gap.get("code", ""))
+                for gap in quality_stability_gaps
+                if gap.get("code")
+            }
+            resolved = (
+                quality_stability.get("status") != "unstable"
+                and gap_code not in repeated_codes
+                and bool(accepted_evidence)
+            )
+            resolved_ids = [
+                evidence.get("id", "")
+                for evidence in accepted_evidence
+                if evidence.get("id")
+            ] if resolved else []
+            return self._triggered_resolution_payload(
+                gap_type=gap_type,
+                gap_code=gap_code,
+                resolved_ids=resolved_ids,
+                unresolved_reason="Follow-up evidence is still unstable or has no accepted evidence.",
+                reason="Follow-up evidence quality stabilized for the triggering gap.",
+            )
+
+        if gap_type == "success_criterion":
+            criterion_id = str(branch.get("triggered_by_criterion_id", ""))
+            resolved_ids = self._criterion_resolution_evidence_ids(
+                criterion_id,
+                criterion_coverage,
+            )
+            return self._triggered_resolution_payload(
+                gap_type=gap_type,
+                gap_code=gap_code,
+                resolved_ids=resolved_ids,
+                unresolved_reason="The triggering success criterion is still unsatisfied.",
+                reason="Accepted evidence satisfied the triggering success criterion.",
+            )
+
+        return {}
+
+    def _source_resolution_evidence_ids(
+        self,
+        branch: ResearchBranch,
+        accepted_evidence: list[dict[str, Any]],
+    ) -> list[str]:
+        target_source_types = set(branch.get("target_source_types", []))
+        if not target_source_types:
+            return []
+        resolved_ids = []
+        for evidence in accepted_evidence:
+            source_type = evidence.get("source_type", "")
+            if source_type in target_source_types or (
+                "official_site" in target_source_types
+                and self.looks_official(evidence.get("url", ""), branch.get("competitor", ""))
+            ):
+                evidence_id = evidence.get("id", "")
+                if evidence_id:
+                    resolved_ids.append(evidence_id)
+        return list(dict.fromkeys(resolved_ids))
+
+    def _criterion_resolution_evidence_ids(
+        self,
+        criterion_id: str,
+        criterion_coverage: dict[str, list[dict[str, Any]]],
+    ) -> list[str]:
+        if not criterion_id:
+            return []
+        for match in criterion_coverage.get("criterion_matches", []):
+            if match.get("criterion_id") != criterion_id:
+                continue
+            if match.get("status") != "satisfied":
+                return []
+            return list(match.get("evidence_ids", []))
+        return []
+
+    def _triggered_resolution_payload(
+        self,
+        *,
+        gap_type: str,
+        gap_code: str,
+        resolved_ids: list[str],
+        unresolved_reason: str,
+        reason: str,
+    ) -> TriggeredGapResolution:
+        resolved = bool(resolved_ids)
+        return {
+            "scope": "gap_resolution",
+            "gap_type": gap_type,
+            "gap_code": gap_code,
+            "status": "resolved" if resolved else "unresolved",
+            "resolved_by_evidence_ids": resolved_ids,
+            "unresolved_reason": "" if resolved else unresolved_reason,
+            "reason": reason if resolved else "",
+        }
+
     def _quality_stability_follow_up_spec(
         self,
         branch: ResearchBranch,
@@ -599,6 +735,11 @@ class CoverageReviewer:
             "query": "\n".join(query_lines),
             "target_source_types": target_source_types,
             "success_criteria": list(gap.get("success_criteria", [])),
+            "guiding_questions": [
+                criterion.get("description", "")
+                for criterion in gap.get("success_criteria", [])
+                if criterion.get("kind") == "guiding_question"
+            ],
             "generated_from_gap": gap.get("code", ""),
             "triggering_finding_codes": [gap.get("code", "")],
             "baseline_accepted_count": int(gap.get("accepted_count", 0)),
@@ -642,7 +783,10 @@ class CoverageReviewer:
         source_type_gaps: list[dict[str, Any]],
         quality_stability_gaps: list[QualityStabilityGap],
         evidence_review: EvidenceReviewResult,
+        triggered_gap_resolution: TriggeredGapResolution,
     ) -> str:
+        if triggered_gap_resolution.get("status") == "resolved":
+            return "ready_for_parent_merge"
         if accepted_count == 0:
             if evidence_review.get("required_action") == "retry":
                 return "refine_query"
@@ -926,6 +1070,14 @@ class CoverageReviewer:
         )
 
     def _stop_candidate(self, next_action: str, confidence: float) -> dict[str, Any]:
+        if next_action == "ready_for_parent_merge":
+            return self._candidate(
+                "stop",
+                "gap_resolution_complete",
+                max(0.78, confidence),
+                ["Triggered follow-up gap is resolved and ready to merge into parent coverage."],
+                [],
+            )
         if next_action != "ready_for_analysis":
             return self._candidate("stop", "sufficient_stop", 0.0, [], [])
         return self._candidate(
@@ -957,8 +1109,9 @@ class CoverageReviewer:
             ("entity_resolution", "competitor_disambiguation"): 0,
             ("scope_refinement", "query_refinement"): 1,
             ("source_discovery", "coverage_gap_search"): 2,
-            ("stop", "sufficient_stop"): 3,
-            ("stop", "no_viable_followup"): 4,
+            ("stop", "gap_resolution_complete"): 3,
+            ("stop", "sufficient_stop"): 4,
+            ("stop", "no_viable_followup"): 5,
         }
         return priority.get((candidate.get("action"), candidate.get("subtype")), 99)
 

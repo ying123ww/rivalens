@@ -44,6 +44,7 @@ ResearchRoutingSubtype = Literal[
     "targeted_url_extract",
     "coverage_gap_search",
     "evidence_check",
+    "gap_resolution_complete",
     "budget_stop",
     "sufficient_stop",
     "no_viable_followup",
@@ -272,6 +273,7 @@ class ResearchBranch(TypedDict, total=False):
 SearchStage = Literal["focused"]
 CoverageNextAction = Literal[
     "ready_for_analysis",
+    "ready_for_parent_merge",
     "collect_more",
     "refine_query",
     "split_dimension",
@@ -480,6 +482,16 @@ class EvidenceQualityStability(TypedDict, total=False):
     excluded_canonical_urls: list[str]
 
 
+class TriggeredGapResolution(TypedDict, total=False):
+    scope: Literal["gap_resolution"]
+    gap_type: str
+    gap_code: str
+    status: Literal["not_applicable", "resolved", "unresolved"]
+    resolved_by_evidence_ids: list[str]
+    unresolved_reason: str
+    reason: str
+
+
 class CoverageAssessment(TypedDict, total=False):
     id: str
     stage_contract: StageContract
@@ -495,6 +507,7 @@ class CoverageAssessment(TypedDict, total=False):
     source_metrics: SourceMetrics
     quality_stability: EvidenceQualityStability
     quality_stability_gaps: list[QualityStabilityGap]
+    triggered_gap_resolution: TriggeredGapResolution
     quality_gap_codes: list[str]
     covered_questions: list[str]
     missing_questions: list[str]
