@@ -105,10 +105,14 @@ class EvidenceItem(TypedDict, total=False):
     dimension_name: str
     title: str
     url: str
+    canonical_url: str
+    source_domain: str
     source_type: EvidenceType
     published_at: str | None
     retrieved_at: str
     excerpt: str
+    scraped_content_sha256: str
+    source_cache: dict[str, Any]
     source_priority: int
     is_primary_source: bool
     confidence: float

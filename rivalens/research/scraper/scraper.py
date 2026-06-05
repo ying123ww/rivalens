@@ -221,6 +221,7 @@ class Scraper:
                     "raw_content": content,
                     "image_urls": image_urls,
                     "title": title,
+                    "scraper_name": scraper_name,
                 }
 
             except Exception as e:

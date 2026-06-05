@@ -181,27 +181,43 @@ class ResearchEngineEvidenceCollector:
             )
             source_type = source.get("source_type") or self._infer_source_type(url, title)
             source_priority = SOURCE_TYPE_PRIORITY.get(source_type, SOURCE_TYPE_PRIORITY["other"])
-
-            evidence_items.append(
-                {
-                    "competitor": collection_task.get("competitor", ""),
-                    "branch_id": collection_task.get("branch_id", collection_task.get("id", "")),
-                    "parent_branch_id": collection_task.get("parent_branch_id"),
-                    "collection_task_id": collection_task.get("id", ""),
-                    "research_task_id": collection_task.get("research_task_id", ""),
-                    "dimension_id": collection_task.get("dimension_id", ""),
-                    "dimension_name": collection_task.get("dimension_name", ""),
-                    "title": title,
-                    "url": url,
-                    "source_type": source_type,
-                    "published_at": source.get("published_at"),
-                    "retrieved_at": retrieved_at,
-                    "excerpt": relevant_chunk,
-                    "source_priority": source_priority,
-                    "is_primary_source": source_priority <= 2,
-                    "confidence": 0.7 if url else 0.4,
-                }
+            source_cache = source.get("source_cache") or {}
+            canonical_url = source.get("canonical_url") or source_cache.get("canonical_url") or ""
+            source_domain = source.get("source_domain") or source_cache.get("domain") or ""
+            scraped_content_sha256 = (
+                source.get("scraped_content_sha256")
+                or source_cache.get("content_sha256")
+                or ""
             )
+
+            evidence_item: EvidenceItem = {
+                "competitor": collection_task.get("competitor", ""),
+                "branch_id": collection_task.get("branch_id", collection_task.get("id", "")),
+                "parent_branch_id": collection_task.get("parent_branch_id"),
+                "collection_task_id": collection_task.get("id", ""),
+                "research_task_id": collection_task.get("research_task_id", ""),
+                "dimension_id": collection_task.get("dimension_id", ""),
+                "dimension_name": collection_task.get("dimension_name", ""),
+                "title": title,
+                "url": url,
+                "source_type": source_type,
+                "published_at": source.get("published_at"),
+                "retrieved_at": retrieved_at,
+                "excerpt": relevant_chunk,
+                "source_priority": source_priority,
+                "is_primary_source": source_priority <= 2,
+                "confidence": 0.7 if url else 0.4,
+            }
+            if canonical_url:
+                evidence_item["canonical_url"] = canonical_url
+            if source_domain:
+                evidence_item["source_domain"] = source_domain
+            if scraped_content_sha256:
+                evidence_item["scraped_content_sha256"] = scraped_content_sha256
+            if source_cache:
+                evidence_item["source_cache"] = source_cache
+
+            evidence_items.append(evidence_item)
 
         return evidence_items
 

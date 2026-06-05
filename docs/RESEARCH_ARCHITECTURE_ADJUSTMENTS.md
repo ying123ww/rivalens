@@ -15,6 +15,7 @@
 - `PlanningAgent` 从 L0/L1/L2 行业方向生成并确认 analysis dimensions，写入 `CompetitorAnalysisState.analysis_dimensions`，并映射回固定 10 个报告小节。
 - `CollectionAgent` 将 competitor x confirmed dimension 展开成 root branches，所有 root branches 使用 `search_stage=focused`。
 - `ResearchEngineEvidenceCollector` 对 focused collection 使用 `ResearchMode.STANDARD_EVIDENCE`，并归一化为 `EvidenceItem`。
+- `ScrapedSourceCache` 在 scraper 前按 canonical URL 复用新鲜 raw page content，并按 TTL 删除过期 rows；缓存命中仍会生成当前任务自己的 `EvidenceItem`，并继续经过 evidence / coverage review。
 - `EvidenceQualityReviewer` 对每次 standard evidence result 做 source-level accept / reject。
 - `CoverageReviewer` 负责显式传入的 guiding question / success criteria 覆盖，并把 LLM source-gap advisor 的裁决物化成 gap-driven follow-up tasks；它不再按 dimension id 兜底生成 guiding questions 或 coverage terms。
 - `CoverageReviewer` 的 follow-up task 继续使用结构化 `decision_action`、`decision_subtype`、`generated_from_gap`、`target_source_types` 和 `search_stage` 字段。
@@ -55,6 +56,7 @@ Collection state should keep these traceable objects:
 - `agent_events`
 
 There is no `landscape_assessments` state collection. Candidate sources only matter once they are collected as source-backed `EvidenceItem` records.
+Raw scraped pages may be reused by `ScrapedSourceCache`, but accepted/rejected evidence is never reused directly from the cache.
 
 Collection input fields have separate meanings:
 
@@ -65,6 +67,7 @@ Collection input fields have separate meanings:
 - Missing preferred source types do not automatically trigger follow-up collection. Source gaps are opened only by the structured LLM advisor decision; advisor failures do not fall back to the old preferred-source rules.
 - Unresolved non-blocking source gaps do not block a branch when the content criteria are satisfied.
 - `expected_claim_types` is carried through branch, brief, task, and collection-task payloads as analysis typing context. Collection does not carry an implicit `risk_level`; claim risk is assigned later on `AnalysisClaim.claim_risk_level` and consumed by `ClaimSupportReviewer`.
+- `EvidenceItem.canonical_url`, `source_domain`, `scraped_content_sha256`, and `source_cache` record crawler identity/cache metadata for trace replay and future source metrics; they do not change evidence acceptance semantics.
 
 ## Routing Policy
 

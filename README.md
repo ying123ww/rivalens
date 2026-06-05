@@ -116,6 +116,7 @@ flowchart TB
     EvidenceCollector --> Modes["ResearchMode\nstandard evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
+    Engine --> SourceCache["ScrapedSourceCache\ncanonical URL raw page cache"]
 
     Planner --> State["CompetitorAnalysisState"]
     Collector --> State
@@ -312,6 +313,20 @@ EvidenceItem -> EvidenceReviewResult -> AnalysisClaim
 EvidenceItem -> CompetitorKnowledge -> Report
 ```
 
+Crawler reuse is handled before evidence review by
+`rivalens.research.source_cache.ScrapedSourceCache`. Search results are
+canonicalized by URL, with fragments and common tracking parameters removed, and
+fresh cache hits return the same raw scraped-page shape as a live scrape. The
+cache is deliberately not an evidence acceptance cache: cached pages are still
+converted into new `EvidenceItem` records for the current collection task and
+must pass `EvidenceQualityReviewer` and `CoverageReviewer` normally. Evidence
+items carry `canonical_url`, `source_domain`, `scraped_content_sha256`, and
+`source_cache.status` metadata so cache hit/miss behavior remains traceable.
+Expired rows are deleted automatically according to the configured TTL.
+Configure it with `RIVALENS_SCRAPED_SOURCE_CACHE_ENABLED`,
+`RIVALENS_SCRAPED_SOURCE_CACHE_PATH`, and
+`RIVALENS_SCRAPED_SOURCE_CACHE_TTL_SECONDS`.
+
 ## Search Retrievers
 
 Rivalens can run multiple search retrievers for the same collection task by
@@ -412,6 +427,9 @@ spans carry `rivalens_branch_id`, `rivalens_research_task_id`,
 `rivalens_actual_query` metadata so a branch can be followed from collection
 task, to each retriever query, to scraped URLs, evidence acceptance/rejection,
 success-criteria coverage, and follow-up collection decisions.
+Scraped pages also carry source-cache metadata (`hit` or `stored`) in the
+resulting `EvidenceItem` payload, making crawler reuse visible without changing
+the collection quality gates.
 
 ## Rivalens Collection Limits
 

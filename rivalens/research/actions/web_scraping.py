@@ -2,6 +2,7 @@ from typing import Any
 from colorama import Fore, Style
 
 from rivalens.research.utils.workers import WorkerPool
+from rivalens.research.source_cache import ScrapedSourceCache
 from ..scraper import Scraper
 from ..config.config import Config
 from ..utils.logger import get_formatted_logger
@@ -27,6 +28,7 @@ async def scrape_urls(
     """
     scraped_data = []
     images = []
+    cache = _build_scraped_source_cache()
     user_agent = (
         cfg.user_agent
         if cfg
@@ -34,21 +36,105 @@ async def scrape_urls(
     )
 
     try:
-        scraper = Scraper(
-            urls,
-            user_agent,
-            cfg.scraper,
-            worker_pool=worker_pool,
-            trace_context=trace_context,
-        )
-        scraped_data = await scraper.run()
+        cached_data, urls_to_scrape = _split_cached_sources(urls, cache)
+        if urls_to_scrape:
+            scraper = Scraper(
+                urls_to_scrape,
+                user_agent,
+                cfg.scraper,
+                worker_pool=worker_pool,
+                trace_context=trace_context,
+            )
+            scraped_data = await scraper.run()
+        else:
+            scraped_data = []
+        _store_scraped_sources(scraped_data, cache)
+        scraped_data = [*cached_data, *scraped_data]
         for item in scraped_data:
             if 'image_urls' in item:
                 images.extend(item['image_urls'])
+        if cache:
+            cache_hits = sum(
+                1
+                for item in scraped_data
+                if (item.get("source_cache") or {}).get("status") == "hit"
+            )
+            if cache_hits:
+                logger.info(
+                    "Scraped source cache served %s page(s); fetched %s fresh page(s).",
+                    cache_hits,
+                    len(scraped_data) - cache_hits,
+                )
     except Exception as e:
         print(f"{Fore.RED}Error in scrape_urls: {e}{Style.RESET_ALL}")
 
     return scraped_data, images
+
+
+def _build_scraped_source_cache() -> ScrapedSourceCache | None:
+    try:
+        return ScrapedSourceCache.from_env()
+    except Exception as exc:
+        logger.warning("Scraped source cache unavailable: %s", exc)
+        return None
+
+
+def _split_cached_sources(
+    urls: list[str],
+    cache: ScrapedSourceCache | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if cache is None:
+        return [], list(dict.fromkeys(urls))
+
+    cached_data: list[dict[str, Any]] = []
+    urls_to_scrape: list[str] = []
+    pending_canonical_urls: set[str] = set()
+
+    for url in urls:
+        try:
+            lookup = cache.lookup(url)
+        except Exception as exc:
+            logger.warning("Scraped source cache lookup failed for %s: %s", url, exc)
+            if url not in pending_canonical_urls:
+                pending_canonical_urls.add(url)
+                urls_to_scrape.append(url)
+            continue
+        if lookup.source is not None:
+            cached_data.append(lookup.source)
+            continue
+
+        canonical_url = lookup.identity.canonical_url or url
+        if canonical_url in pending_canonical_urls:
+            continue
+        pending_canonical_urls.add(canonical_url)
+        urls_to_scrape.append(url)
+
+    return cached_data, urls_to_scrape
+
+
+def _store_scraped_sources(
+    scraped_data: list[dict[str, Any]],
+    cache: ScrapedSourceCache | None,
+) -> None:
+    if cache is None:
+        return
+
+    for item in scraped_data:
+        try:
+            metadata = cache.upsert(item)
+        except Exception as exc:
+            logger.warning(
+                "Scraped source cache write failed for %s: %s",
+                item.get("url"),
+                exc,
+            )
+            continue
+        if not metadata:
+            continue
+        item["source_cache"] = metadata
+        item["canonical_url"] = metadata["canonical_url"]
+        item["source_domain"] = metadata["domain"]
+        item["scraped_content_sha256"] = metadata["content_sha256"]
 
 
 async def filter_urls(urls: list[str], config: Config) -> list[str]:
