@@ -95,7 +95,7 @@ flowchart TB
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
     Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> CompetitorKnowledge"]
     Workflow --> Analyst["AnalysisAgent\nCompetitorKnowledge -> AnalysisClaim"]
-    Workflow --> ClaimSupport["ClaimSupportReviewer\nclaim citation support / verification queue"]
+    Workflow --> ClaimSupport["ClaimSupportReviewer\nclaim citation support gate"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
 
@@ -113,8 +113,6 @@ flowchart TB
     Collector --> EvidenceCollector["ResearchEngineEvidenceCollector\nEvidenceItem adapter"]
     Collector --> EvidenceReview["EvidenceQualityReviewer\naccepted/rejected evidence"]
     Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
-    ClaimSupport --> VerificationQueue["verification_task_queue\nclaim-driven follow-up"]
-    VerificationQueue --> Collector
     EvidenceCollector --> Modes["ResearchMode\nstandard evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
     Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
@@ -149,8 +147,7 @@ flowchart LR
     B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
     C --> D["dimension_analysis\nAnalysisAgent"]
     D --> G["claim_support_review\nClaimSupportReviewer"]
-    G -->|supported_enough| E["report_writer\nReportWriterAgent"]
-    G -->|needs_verification| B
+    G --> E["report_writer\nReportWriterAgent"]
     E --> F["publisher\nPublisherAgent"]
 ```
 
@@ -195,9 +192,10 @@ missing, then narrows follow-up tasks to the missing criteria instead of
 throwing away partially useful evidence. `KnowledgeStructuringAgent`
 structures the accepted evidence into `CompetitorKnowledge`; `AnalysisAgent`
 then generates claims from structured knowledge and accepted evidence.
-`ClaimSupportReviewer` checks claim-level citation support before writing and
-can create one bounded `verification_task_queue` pass back through
-`source_collection` for weak or unverifiable claims.
+`ClaimSupportReviewer` checks claim-level citation support before writing.
+It does not launch a special collection path; future claim-support follow-up
+should enter the same structured collection protocol used for normal coverage
+gaps.
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
@@ -240,7 +238,7 @@ ResearchEngine wiring out of agent business logic:
 CollectionAgent
   -> ResearchBranch frontier
   -> ResearchBrief / ResearchTask queue with success criteria
-  -> focused / verification search_stage control
+  -> focused search_stage control
   -> ResearchEngineEvidenceCollector (explicit ResearchMode)
   -> ResearchEngine
   -> EvidenceItem[]
@@ -249,10 +247,11 @@ CollectionAgent
 ```
 
 The collection path starts every confirmed competitor x dimension branch as
-focused evidence collection. Claim-support follow-up uses verification. Deep
-research recursion is not used as a black box inside `ResearchEngine`; instead,
-Rivalens keeps branch lineage, research briefs, research tasks, evidence
-reviews, criterion coverage assessments, depth, and budget in
+focused evidence collection. Claim-support review does not use a separate
+verification collection channel. Deep research recursion is not used as a black
+box inside `ResearchEngine`; instead, Rivalens keeps branch lineage, research
+briefs, research tasks, evidence reviews, criterion coverage assessments,
+depth, and budget in
 `CompetitorAnalysisState.research_branches`,
 `CompetitorAnalysisState.research_briefs`,
 `CompetitorAnalysisState.research_tasks`,
@@ -261,9 +260,9 @@ reviews, criterion coverage assessments, depth, and budget in
 
 `ResearchRoutingAction` is intentionally a shared routing vocabulary, not the
 stage boundary. Consumers should distinguish stages with `search_stage` and the
-assessment `stage_contract`: focused and verification write accepted
-source-backed items to `evidence_items` and coverage observations to
-`coverage_assessments`. Missing source types are handled by
+assessment `stage_contract`: focused collection writes accepted source-backed
+items to `evidence_items` and coverage observations to `coverage_assessments`.
+Missing source types are handled by
 `CoverageReviewer` follow-up tasks instead of a separate pre-evidence
 discovery stage.
 
@@ -373,7 +372,6 @@ RIVALENS_MAX_BRANCH_DEPTH=0
 RIVALENS_MAX_EXPANSION_BRANCHES=0
 RIVALENS_MAX_CONCURRENT_COLLECTIONS=3
 RIVALENS_MAX_SUBQUERY_CONCURRENCY=2
-RIVALENS_ENABLE_CLAIM_VERIFICATION=false
 ```
 
 - `RIVALENS_MAX_ROOT_BRANCHES` caps the initial analysis-dimension collection
@@ -386,8 +384,6 @@ RIVALENS_ENABLE_CLAIM_VERIFICATION=false
   once. Lower this when embedding or LLM providers return quota/rate errors.
 - `RIVALENS_MAX_SUBQUERY_CONCURRENCY` caps per-branch sub-query processing,
   including scraped-content compression and embedding calls.
-- `RIVALENS_ENABLE_CLAIM_VERIFICATION=false` keeps weak/unverifiable claim
-  review from launching a claim-driven verification collection pass.
 
 These limits are separate from `MAX_SEARCH_RESULTS_PER_QUERY` and
 `MAX_ITERATIONS`, which control how many search results and sub-queries each
@@ -414,6 +410,6 @@ and expansion budget enforcement directly.
 `AnalysisAgent` runs after knowledge structuring and records `branch_id`,
 `evidence_review_id`, and `evidence_ids` on each generated `AnalysisClaim`.
 `ClaimSupportReviewer` marks claims as supported, weak, contradicted, or
-unverifiable; weak or unverifiable claims only trigger the claim-driven
-verification collection pass when `RIVALENS_ENABLE_CLAIM_VERIFICATION=true`,
-while unsupported claims are withheld from the writer context.
+unverifiable. Unsupported claims are withheld from the writer context; claim
+support review does not currently trigger a collection-specific verification
+pass.

@@ -35,7 +35,6 @@ class CollectionAgent:
         max_branch_depth: int = 1,
         max_expansion_branches: int = 10,
         max_root_branch_hard_limit: int | None = None,
-        max_verification_concurrency: int | None = None,
         max_concurrent_collections: int | None = None,
     ):
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
@@ -48,12 +47,6 @@ class CollectionAgent:
             max_root_branch_hard_limit,
             "RIVALENS_MAX_ROOT_BRANCHES",
             20,
-            minimum=1,
-        )
-        self.max_verification_concurrency = _int_env(
-            max_verification_concurrency,
-            "RIVALENS_MAX_VERIFICATION_CONCURRENCY",
-            3,
             minimum=1,
         )
         self.max_concurrent_collections = _int_env(
@@ -97,24 +90,15 @@ class CollectionAgent:
         evidence_reviews = list(state.get("evidence_reviews", []))
         contexts: list[dict[str, Any]] = []
         failed_tasks: list[dict[str, Any]] = []
-        verification_queue = list(state.get("verification_task_queue", []))
-        verification_pass = bool(verification_queue)
-        if verification_pass:
-            root_branches = self._build_verification_branches(
-                verification_queue,
-                state,
-            )
-            root_branch_limit_exceeded = False
-        else:
-            root_branches = self._build_root_branches(
-                query,
-                competitors,
-                industry_direction_plan,
-                analysis_dimensions,
-            )
-            root_branches, root_branch_limit_exceeded = (
-                self._limit_root_branches_per_competitor(root_branches)
-            )
+        root_branches = self._build_root_branches(
+            query,
+            competitors,
+            industry_direction_plan,
+            analysis_dimensions,
+        )
+        root_branches, root_branch_limit_exceeded = (
+            self._limit_root_branches_per_competitor(root_branches)
+        )
         frontier = root_branches
         research_branches.extend(root_branches)
         new_briefs = self._build_research_briefs(root_branches)
@@ -144,12 +128,7 @@ class CollectionAgent:
                 if file_rag_context:
                     collection_task["file_rag_context"] = file_rag_context
 
-            collection_limit = (
-                self.max_verification_concurrency
-                if verification_pass
-                else self.max_concurrent_collections
-            )
-            collection_semaphore = asyncio.Semaphore(collection_limit)
+            collection_semaphore = asyncio.Semaphore(self.max_concurrent_collections)
             results = await asyncio.gather(
                 *[
                     self._run_collection_task_with_limit(
@@ -311,9 +290,6 @@ class CollectionAgent:
             "research_tasks": research_tasks,
             "coverage_assessments": coverage_assessments,
             "research_artifacts": research_artifacts,
-            "verification_task_queue": [],
-            "verification_rounds": int(state.get("verification_rounds", 0) or 0)
-            + (1 if verification_pass else 0),
             "messages": state.get("messages", []) + [message, analysis_message],
             "agent_events": state.get("agent_events", [])
             + [
@@ -327,9 +303,7 @@ class CollectionAgent:
                         "selected_industry": (
                             industry_direction_plan.get("industry") or {}
                         ).get("industry_id"),
-                        "collection_phase": "verification" if verification_pass else "initial_or_gap_collection",
-                        "verification_task_count": len(verification_queue),
-                        "max_verification_concurrency": self.max_verification_concurrency,
+                        "collection_phase": "initial_or_gap_collection",
                         "root_branch_count": len(root_branches),
                         "max_branch_depth": self.max_branch_depth,
                         "root_branch_limit_exceeded": root_branch_limit_exceeded,
@@ -540,98 +514,6 @@ class CollectionAgent:
             "schema_field_ids": [],
             "report_section_id": "",
         }
-
-    def _build_verification_branches(
-        self,
-        verification_tasks: list[dict[str, Any]],
-        state: CompetitorAnalysisState,
-    ) -> list[ResearchBranch]:
-        dimensions_by_id = self._dimension_lookup(state)
-        branches: list[ResearchBranch] = []
-        for index, task_spec in enumerate(verification_tasks, start=1):
-            query = task_spec.get("query", "")
-            if not query:
-                continue
-            dimension_id = (
-                task_spec.get("analysis_dimension_id")
-                or task_spec.get("dimension_id")
-                or "source_evidence"
-            )
-            dimension = dimensions_by_id.get(dimension_id, {})
-            branch_id = f"verify_{self._slug(task_spec.get('generated_from_gap', str(index)))}_{index}"
-            branches.append(
-                {
-                    "id": branch_id,
-                    "research_brief_id": f"brief_{branch_id}",
-                    "parent_id": task_spec.get("parent_branch_id"),
-                    "depth": 0,
-                    "path": [dimension_id, task_spec.get("generated_from_gap", "verification")],
-                    "competitor": task_spec.get("competitor", ""),
-                    "analysis_dimension_id": dimension_id,
-                    "schema_field_ids": list(
-                        task_spec.get("schema_field_ids")
-                        or dimension.get("schema_field_ids", [])
-                    ),
-                    "report_section_id": task_spec.get(
-                        "report_section_id",
-                        dimension.get("report_section_id", ""),
-                    ),
-                    "dimension_id": dimension_id,
-                    "dimension_name": dimension.get("name", dimension_id.replace("_", " ")),
-                    "dimension_type": "claim_verification",
-                    "parent_dimension_id": task_spec.get("parent_dimension_id", ""),
-                    "topic": task_spec.get("objective", "Claim verification"),
-                    "query": query,
-                    "research_goal": task_spec.get(
-                        "objective",
-                        "Verify the target claim with direct public evidence.",
-                    ),
-                    "search_queries": task_spec.get("search_queries", [query]),
-                    "success_criteria": self._verification_success_criteria(task_spec),
-                    "target_urls": task_spec.get("target_urls", []),
-                    "search_stage": "verification",
-                    "generated_from_gap": task_spec.get("generated_from_gap", "claim_support"),
-                    "decision_action": task_spec.get("decision_action", "claim_verification"),
-                    "decision_subtype": task_spec.get("decision_subtype", "evidence_check"),
-                    "source_hints": dimension.get("source_hints", []),
-                    "minimum_coverage": ["Direct public evidence for or against the target claim."],
-                    "guiding_questions": [task_spec.get("objective", "Verify the target claim.")],
-                    "evidence_ids": [],
-                    "status": "active",
-                    "expansion_reason": task_spec.get(
-                        "reason",
-                        "Claim support review requested verification collection.",
-                    ),
-                }
-            )
-        return branches
-
-    def _dimension_lookup(
-        self,
-        state: CompetitorAnalysisState,
-    ) -> dict[str, dict[str, Any]]:
-        lookup: dict[str, dict[str, Any]] = {}
-        for dimension in state.get("analysis_dimensions", []):
-            dimension_id = dimension.get("id", "")
-            if not dimension_id:
-                continue
-            lookup[dimension_id] = {
-                **dimension,
-                "name": dimension.get("name", dimension_id.replace("_", " ")),
-                "report_section_id": primary_report_section_id(dimension),
-            }
-        for branch in state.get("research_branches", []):
-            dimension_id = branch.get("analysis_dimension_id") or branch.get("dimension_id", "")
-            if not dimension_id:
-                continue
-            lookup[dimension_id] = {
-                "id": dimension_id,
-                "name": branch.get("dimension_name", dimension_id.replace("_", " ")),
-                "source_hints": branch.get("source_hints", []),
-                "schema_field_ids": branch.get("schema_field_ids", []),
-                "report_section_id": branch.get("report_section_id", ""),
-            }
-        return lookup
 
     def _build_research_briefs(
         self,
@@ -981,12 +863,6 @@ class CollectionAgent:
                 }
             )
         return normalize_success_criteria(criteria)
-
-    def _verification_success_criteria(
-        self,
-        task_spec: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        return normalize_success_criteria(task_spec.get("success_criteria", []))
 
     def _success_criteria_line(self, success_criteria: list[dict[str, Any]]) -> str:
         if not success_criteria:

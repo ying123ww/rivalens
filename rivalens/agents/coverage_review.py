@@ -192,13 +192,12 @@ class CoverageReviewer:
 
     def _stage_contract(self, branch: ResearchBranch) -> dict[str, Any]:
         search_stage = branch.get("search_stage", "focused")
-        is_verification = search_stage == "verification"
         return {
             "search_stage": search_stage,
-            "stage_role": "claim_verification" if is_verification else "evidence_collection",
+            "stage_role": "evidence_collection",
             "research_mode": "standard_evidence",
             "reviewer": "CoverageReviewer",
-            "output_kind": "claim_evidence_items" if is_verification else "evidence_items",
+            "output_kind": "evidence_items",
             "produces_evidence": True,
             "state_sink": "coverage_assessments",
             "evidence_sink": "evidence_items",
