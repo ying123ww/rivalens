@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):
         logger.exception("Database migration failed")
         raise
 
-    # One-shot: migrate legacy JSON report data into the SQL store.
+    # 按需一次性导入旧 JSON 报告；默认关闭，避免已删除报告在重启后被回填。
     try:
         imported = await report_store.migrate_from_json()
         if imported:

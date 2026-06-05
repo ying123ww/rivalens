@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 JSON_DATA = JSON().with_variant(JSONB, "postgresql")
 
 REPORT_STORE_PATH_ENV = "REPORT_STORE_PATH"
+LEGACY_REPORT_MIGRATION_ENABLED_ENV = "RIVALENS_MIGRATE_LEGACY_REPORTS"
+LEGACY_REPORT_MIGRATION_MARKER_PATH_ENV = "REPORT_STORE_MIGRATION_MARKER_PATH"
 LEGACY_REPORT_STORE_PATH = os.path.join("data", "reports.json")
 
 reports = Table(
@@ -150,9 +152,33 @@ class ReportStore:
 
     # ── migration ─────────────────────────────────────────────────
 
-    async def migrate_from_json(self, path: str | None = None) -> int:
+    async def migrate_from_json(
+        self,
+        path: str | None = None,
+        *,
+        enabled: bool | None = None,
+        force: bool = False,
+    ) -> int:
         """Import reports from the legacy JSON file.  Returns count of imported rows."""
         path = path or os.getenv(REPORT_STORE_PATH_ENV, LEGACY_REPORT_STORE_PATH)
+        if enabled is None:
+            enabled = _env_flag(LEGACY_REPORT_MIGRATION_ENABLED_ENV, default=False)
+        if not enabled and not force:
+            logger.info(
+                "Skipping legacy report migration; set %s=true to import %s",
+                LEGACY_REPORT_MIGRATION_ENABLED_ENV,
+                path,
+            )
+            return 0
+
+        marker_path = _legacy_migration_marker_path(path)
+        if not force and os.path.exists(marker_path):
+            logger.info(
+                "Skipping legacy report migration because marker exists: %s",
+                marker_path,
+            )
+            return 0
+
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -186,6 +212,7 @@ class ReportStore:
                 imported += 1
             except Exception:
                 logger.exception("Failed to migrate report %s", report_id)
+        _write_legacy_migration_marker(marker_path, source_path=path, imported=imported)
         logger.info("Migrated %d reports from %s", imported, path)
         return imported
 
@@ -291,3 +318,38 @@ def _sqlalchemy_database_url(database_url: str) -> str:
     if database_url.startswith("postgresql://"):
         return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
     return database_url
+
+
+def _legacy_migration_marker_path(path: str) -> str:
+    return os.getenv(
+        LEGACY_REPORT_MIGRATION_MARKER_PATH_ENV,
+        f"{path}.migrated",
+    )
+
+
+def _write_legacy_migration_marker(
+    marker_path: str,
+    *,
+    source_path: str,
+    imported: int,
+) -> None:
+    marker_dir = os.path.dirname(marker_path)
+    if marker_dir:
+        os.makedirs(marker_dir, exist_ok=True)
+    payload = {
+        "source_path": source_path,
+        "imported": imported,
+        "migrated_at": _utcnow().isoformat(),
+    }
+    try:
+        with open(marker_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+    except OSError:
+        logger.warning("Failed to write legacy report migration marker %s", marker_path)
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}

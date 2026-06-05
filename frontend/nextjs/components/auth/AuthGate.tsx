@@ -20,12 +20,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <div className="fixed right-4 top-1.5 sm:top-3.5 z-[120] flex items-center gap-3 rounded-lg border border-gray-700 bg-gray-900/80 backdrop-blur-md px-3 py-2 shadow-lg shadow-black/20">
-        <div className="hidden text-right sm:block">
-          <p className="text-xs font-semibold text-gray-100">
+      <div className="fixed left-14 top-1.5 z-[120] flex max-w-[calc(100vw-4.5rem)] items-center gap-3 rounded-lg border border-gray-700 bg-gray-900/80 px-3 py-2 shadow-lg shadow-black/20 backdrop-blur-md sm:left-20 sm:top-3.5 sm:max-w-none">
+        <div className="hidden min-w-0 text-left sm:block">
+          <p className="truncate text-xs font-semibold text-gray-100">
             {user.display_name}
           </p>
-          <p className="text-[11px] text-gray-400">{user.email}</p>
+          <p className="truncate text-[11px] text-gray-400">{user.email}</p>
         </div>
         <button
           type="button"

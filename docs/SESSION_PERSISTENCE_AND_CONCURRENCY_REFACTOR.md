@@ -41,7 +41,7 @@ alembic downgrade -1                                  # 回滚一个版本
 | 文件 | 变更 |
 |---|---|
 | `backend/server/report_store.py` | **重写**，JSON 文件存储 → `reports` 表 + JSONB 灵活字段 |
-| `backend/server/app.py` | `ReportStore()` 不再传路径参数；启动时 `migrate_from_json()` 自动导入历史数据 |
+| `backend/server/app.py` | `ReportStore()` 不再传路径参数；旧 JSON 报告需设置 `RIVALENS_MIGRATE_LEGACY_REPORTS=true` 后按 marker 一次性导入 |
 | `alembic/versions/3d6c1c76773f_add_reports_table.py` | `reports` 表迁移 |
 
 **`reports` 表结构**：
@@ -248,6 +248,10 @@ RIVALENS_AUTO_CREATE_TABLES=true            # 启动时自动建表
 
 # 数据库
 DATABASE_URL=postgresql://rivalens:123456@localhost:5433/rivalens
+
+# 旧报告 JSON 迁移
+RIVALENS_MIGRATE_LEGACY_REPORTS=false        # 仅需要导入 data/reports.json 时临时打开
+REPORT_STORE_MIGRATION_MARKER_PATH=          # 可选：自定义一次性迁移 marker 路径
 ```
 
 ---

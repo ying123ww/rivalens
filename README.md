@@ -85,6 +85,11 @@ during the handshake and passes the user ID into `analysis_runs`. Runs with a
 `user_id` are visible only to their owner or an admin; system or legacy runs
 without an owner remain visible to authenticated users.
 
+Legacy `backend/data/reports.json` is no longer imported on every backend
+startup. To do a one-time import into the SQL `reports` table, start the backend
+with `RIVALENS_MIGRATE_LEGACY_REPORTS=true`; a `.migrated` marker prevents the
+same JSON file from restoring reports that were later deleted from the database.
+
 ## Architecture
 
 ```mermaid
