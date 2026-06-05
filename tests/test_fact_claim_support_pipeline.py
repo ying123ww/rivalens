@@ -64,6 +64,15 @@ class FakeBroadPricingExtractor:
         )
 
 
+class CapturingFactExtractor(FakeFactExtractor):
+    def __init__(self):
+        self.evidence_items = []
+
+    async def extract(self, evidence_items):
+        self.evidence_items = evidence_items
+        return await super().extract(evidence_items)
+
+
 def _combined_pricing_evidence():
     return [
         {
@@ -108,6 +117,68 @@ def test_knowledge_structuring_uses_llm_extractor_when_configured():
     assert facts[0]["subject"] == "Acme pricing page"
     assert facts[0]["evidence_ids"] == ["ev_1"]
     assert facts[0]["normalized_key"]
+
+
+def test_knowledge_structuring_enriches_top_evidence_snippets():
+    extractor = CapturingFactExtractor()
+    agent = KnowledgeStructuringAgent(fact_extractor=extractor)
+    state = {
+        "task": {"query": "Compare Acme pricing.", "competitors": ["Acme"]},
+        "competitors": ["Acme"],
+        "research_branches": [
+            {
+                "id": "collect_acme_pricing_model",
+                "competitor": "Acme",
+                "dimension_id": "pricing_model",
+                "dimension_name": "Pricing Model",
+                "success_criteria": [
+                    {
+                        "id": "pricing_content",
+                        "description": "Identify public pricing plans and billing.",
+                    }
+                ],
+            }
+        ],
+        "evidence_reviews": [
+            {
+                "id": "ev_review_pricing",
+                "branch_id": "collect_acme_pricing_model",
+                "accepted_evidence_ids": ["ev_1"],
+                "rejected_evidence_ids": [],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_1",
+                "competitor": "Acme",
+                "branch_id": "collect_acme_pricing_model",
+                "analysis_dimension_id": "pricing_model",
+                "dimension_name": "Pricing Model",
+                "source_type": "pricing_page",
+                "title": "Acme Pricing",
+                "excerpt": (
+                    "Acme launched a new enterprise product. "
+                    "Acme offers Free, Pro, and Enterprise plans with monthly billing. "
+                    "The company also announced new integrations."
+                ),
+                "url": "https://acme.example/pricing",
+                "success_criterion_ids": ["pricing_content"],
+                "confidence": 0.9,
+            }
+        ],
+    }
+
+    result = asyncio.run(agent.run(state))
+    evidence = result["evidence_items"][0]
+    snippets = evidence["evidence_snippets"]
+
+    assert snippets
+    assert snippets[0]["success_criterion_id"] == "pricing_content"
+    assert snippets[0]["rank"] == 1
+    assert "plans with monthly billing" in snippets[0]["text"]
+    assert set(snippets[0]["matched_terms"]).intersection({"plans", "billing"})
+    assert extractor.evidence_items[0]["evidence_snippets"] == snippets
+    assert result["agent_events"][-1]["output"]["evidence_snippet_count"] >= 1
 
 
 def test_knowledge_structuring_splits_pricing_evidence_into_atom_facts():

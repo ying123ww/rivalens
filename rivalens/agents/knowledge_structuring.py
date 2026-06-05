@@ -9,6 +9,7 @@ from typing import Any
 import json_repair
 from pydantic import BaseModel, Field
 
+from rivalens.agents.evidence_snippets import EvidenceSnippetBuilder
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge, KnowledgeFact
 from rivalens.research.utils.llm import create_chat_completion
@@ -166,7 +167,32 @@ class KnowledgeFactLLMExtractor:
                     "title": evidence.get("title", ""),
                     "url": evidence.get("url", ""),
                     "excerpt": excerpt[: self.max_excerpt_chars],
+                    "evidence_snippets": self._compact_snippets(
+                        evidence.get("evidence_snippets", []),
+                    ),
                     "confidence": evidence.get("confidence", 0.5),
+                }
+            )
+        return compact
+
+    def _compact_snippets(
+        self,
+        snippets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        compact = []
+        for snippet in snippets[:6]:
+            text = clean_text(snippet.get("text", ""))
+            if not text:
+                continue
+            compact.append(
+                {
+                    "id": snippet.get("id", ""),
+                    "text": text[:360],
+                    "success_criterion_id": snippet.get("success_criterion_id", ""),
+                    "rank": snippet.get("rank", 0),
+                    "reason": snippet.get("reason", ""),
+                    "matched_terms": list(snippet.get("matched_terms", []))[:8],
+                    "confidence": snippet.get("confidence", 0.0),
                 }
             )
         return compact
@@ -248,8 +274,10 @@ class KnowledgeStructuringAgent:
     def __init__(
         self,
         fact_extractor: KnowledgeFactLLMExtractor | None = None,
+        snippet_builder: EvidenceSnippetBuilder | None = None,
     ) -> None:
         self.fact_extractor = fact_extractor or KnowledgeFactLLMExtractor()
+        self.snippet_builder = snippet_builder or EvidenceSnippetBuilder()
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
@@ -261,6 +289,10 @@ class KnowledgeStructuringAgent:
         )
         industry_direction_plan = state.get("industry_direction_plan", {})
         evidence_items = self._accepted_evidence_items(state)
+        snippet_stats = self.snippet_builder.enrich(
+            evidence_items,
+            state.get("research_branches", []),
+        )
 
         knowledge_facts, fact_extraction = await self._build_knowledge_facts_with_llm(
             evidence_items,
@@ -288,6 +320,7 @@ class KnowledgeStructuringAgent:
         )
 
         return {
+            "evidence_items": state.get("evidence_items", []),
             "competitors": competitors,
             "knowledge_facts": knowledge_facts,
             "competitor_knowledge": knowledge,
@@ -308,6 +341,14 @@ class KnowledgeStructuringAgent:
                     "output": {
                         "knowledge_count": len(knowledge),
                         "knowledge_fact_count": len(knowledge_facts),
+                        "evidence_snippet_enriched_count": snippet_stats.get(
+                            "evidence_snippet_enriched_count",
+                            0,
+                        ),
+                        "evidence_snippet_count": snippet_stats.get(
+                            "evidence_snippet_count",
+                            0,
+                        ),
                         "knowledge_fact_source": fact_extraction.get("source", ""),
                         "llm_configured": bool(fact_extraction.get("llm_configured")),
                         "llm_prompt": fact_extraction.get("llm_prompt", ""),

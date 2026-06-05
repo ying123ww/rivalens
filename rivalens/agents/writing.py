@@ -1577,8 +1577,31 @@ class ReportWriterAgent:
             "published_at": evidence.get("published_at"),
             "retrieved_at": evidence.get("retrieved_at", ""),
             "excerpt": excerpt[:excerpt_chars],
+            "evidence_snippets": self._compact_evidence_snippets(
+                evidence.get("evidence_snippets", []),
+            ),
             "confidence": evidence.get("confidence", 0.5),
         }
+
+    def _compact_evidence_snippets(
+        self,
+        snippets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        compact = []
+        for snippet in snippets[:4]:
+            text = " ".join(str(snippet.get("text", "")).split())
+            if not text:
+                continue
+            compact.append(
+                {
+                    "id": snippet.get("id", ""),
+                    "text": text[:360],
+                    "success_criterion_id": snippet.get("success_criterion_id", ""),
+                    "rank": snippet.get("rank", 0),
+                    "confidence": snippet.get("confidence", 0.0),
+                }
+            )
+        return compact
 
     def _compact_evidence_review(
         self,

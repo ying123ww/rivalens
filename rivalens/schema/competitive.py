@@ -92,6 +92,17 @@ class Competitor(TypedDict, total=False):
     confidence: float
 
 
+class EvidenceSnippet(TypedDict, total=False):
+    id: str
+    text: str
+    success_criterion_id: str
+    rank: int
+    reason: str
+    matched_terms: list[str]
+    source_field: Literal["title", "excerpt", "summary"]
+    confidence: float
+
+
 class EvidenceItem(TypedDict, total=False):
     id: str
     competitor: str
@@ -118,6 +129,7 @@ class EvidenceItem(TypedDict, total=False):
     is_primary_source: bool
     confidence: float
     success_criterion_ids: list[str]
+    evidence_snippets: list[EvidenceSnippet]
 
 
 class SuccessCriterion(TypedDict, total=False):

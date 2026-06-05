@@ -23,6 +23,7 @@
 - follow-up child 仍然先采证据再复审；复审后 `CoverageAssessment.triggered_gap_resolution` 会记录触发 gap 是否被当前 accepted evidence 解决。若已解决，child 使用 `ready_for_parent_merge` / `gap_resolution_complete` 停止自身扩展，最终 readiness 继续由 root `BranchCoverageStateBuilder` 累计判断。
 - 每个 stopped branch 都写回 `stop_reason` 和 `stop_context`，区分 sufficient coverage、gap resolution complete、no viable follow-up、max depth、budget exhausted 和 collection failed，便于前端 replay 和答辩解释。
 - `BranchCoverageStateBuilder` 将 root branch 及其 follow-up children 汇总成 `branch_coverage_states`，记录当前 open gap codes、resolved/blocked gap records、follow-up improvement assessments，并把最终 `coverage_status` 回写到 root branch。
+- `KnowledgeStructuringAgent` 对 accepted evidence 生成 top-k `evidence_snippets`，把大段 `excerpt` 细化为 success-criterion 级支持句，供 knowledge fact extraction、ClaimSupportReviewer 和 writer trace 使用。
 - `ClaimSupportReviewer` 只做 claim-level citation support review，不再通过 collection 专用 verification 通道回到 `source_collection`。
 
 ## Collection Loop

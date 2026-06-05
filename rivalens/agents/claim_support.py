@@ -313,9 +313,11 @@ class ClaimSupportReviewer:
                 ]
             )
         for evidence in evidence_items:
+            snippet_text = self._evidence_snippet_text(evidence)
             parts.extend(
                 [
                     evidence.get("title", ""),
+                    snippet_text,
                     evidence.get("excerpt", ""),
                     evidence.get("url", ""),
                 ]
@@ -421,13 +423,24 @@ class ClaimSupportReviewer:
                 break
         if not source_text:
             for evidence in evidence_items:
-                source_text = str(evidence.get("excerpt") or evidence.get("title") or "").strip()
+                source_text = (
+                    self._evidence_snippet_text(evidence)
+                    or str(evidence.get("excerpt") or evidence.get("title") or "")
+                ).strip()
                 if source_text:
                     break
         source_text = " ".join(source_text.split())[:220]
         if not source_text:
             return ""
         return f"{competitor} {dimension}: public evidence indicates {source_text}."
+
+    def _evidence_snippet_text(self, evidence: dict[str, Any]) -> str:
+        snippets = evidence.get("evidence_snippets", []) or []
+        return " ".join(
+            str(snippet.get("text", "") or "").strip()
+            for snippet in snippets[:4]
+            if str(snippet.get("text", "") or "").strip()
+        )
 
     def _claim_risk_level(self, claim: dict[str, Any]) -> str:
         risk_level = str(claim.get("claim_risk_level") or "").lower()

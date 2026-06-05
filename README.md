@@ -325,6 +325,11 @@ assessment IDs. A follow-up that resolves its triggering gap records
 `BranchCoverageStateBuilder` then demonstrates before/after improvement across
 quality stability, source coverage, and success criteria, including which
 follow-up evidence IDs resolved the gap.
+`KnowledgeStructuringAgent` enriches accepted evidence with top-k
+`evidence_snippets` before fact extraction. Snippets are sentence-level support
+for matched success criteria and are passed into knowledge-fact extraction,
+claim support review, and writer evidence compaction while preserving the
+broader `excerpt` fallback.
 `expected_claim_types` is preserved as branch/task context for later analysis
 typing, but collection does not use an implicit risk field to tighten evidence
 thresholds.

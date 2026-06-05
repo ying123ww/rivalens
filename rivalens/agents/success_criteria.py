@@ -132,6 +132,17 @@ def matched_success_criterion_ids(
     ]
 
 
+def success_criterion_terms(
+    criterion: dict[str, Any],
+    branch: dict[str, Any],
+) -> set[str]:
+    return _criterion_terms(criterion, branch)
+
+
+def text_terms(text: str) -> set[str]:
+    return _terms(text)
+
+
 def _criterion_terms(
     criterion: dict[str, Any],
     branch: dict[str, Any],
