@@ -282,6 +282,15 @@ Missing source types are handled by
 `CoverageReviewer` follow-up tasks instead of a separate pre-evidence
 discovery stage.
 
+Collection field semantics are intentionally separated. `success_criteria`
+defines required branch content coverage. `source_hints` and
+`target_source_types` are ranked preferred source types for query building and
+follow-up targeting; missing preferred source types can trigger non-blocking
+follow-up collection, but they do not make a branch incomplete by themselves.
+`risk_level` and `expected_claim_types` are preserved as branch/task context for
+future policy resolution and explanation, but they do not directly trigger
+collection gaps.
+
 Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion
 budget applies only to child branches created from `CoverageReviewer`

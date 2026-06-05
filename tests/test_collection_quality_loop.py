@@ -35,7 +35,7 @@ class FakeEvidenceCollector:
                     "confidence": 0.9,
                 }
             ]
-        elif generated_from_gap == "missing_pricing_page":
+        elif generated_from_gap == "missing_preferred_source_type":
             evidence_items = [
                 {
                     "title": "Acme Pricing",
@@ -91,7 +91,7 @@ class FakeEvidenceCollector:
         }
 
 
-def test_collection_quality_loop_expands_source_type_gap():
+def test_collection_quality_loop_expands_preferred_source_gap():
     collector = FakeEvidenceCollector()
     agent = CollectionAgent(
         evidence_collector=collector,
@@ -135,7 +135,7 @@ def test_collection_quality_loop_expands_source_type_gap():
     assert pricing_root["coverage_status"] == "ready_for_analysis"
     assert pricing_root["coverage_state_id"] == f"coverage_state_{pricing_root['id']}"
     assert len(child_branches) == 1
-    assert child_branches[0]["generated_from_gap"] == "missing_pricing_page"
+    assert child_branches[0]["generated_from_gap"] == "missing_preferred_source_type"
 
     root_coverage = next(
         assessment
@@ -150,15 +150,16 @@ def test_collection_quality_loop_expands_source_type_gap():
     evidence_finding_codes = {
         finding["code"] for finding in root_evidence_review["findings"]
     }
-    assert "missing_pricing_page" not in evidence_finding_codes
-    assert root_coverage["source_type_gaps"][0]["code"] == "missing_pricing_page"
+    assert "missing_preferred_source_type" not in evidence_finding_codes
+    assert root_coverage["source_type_gaps"][0]["code"] == "missing_preferred_source_type"
+    assert root_coverage["source_type_gaps"][0]["blocking"] is False
     assert root_coverage["quality_gap_codes"] == []
-    assert root_coverage["selected_follow_up_specs"][0]["generated_from_gap"] == "missing_pricing_page"
+    assert root_coverage["selected_follow_up_specs"][0]["generated_from_gap"] == "missing_preferred_source_type"
 
     follow_up_calls = [
         call
         for call in collector.calls
-        if call.get("generated_from_gap") == "missing_pricing_page"
+        if call.get("generated_from_gap") == "missing_preferred_source_type"
     ]
     assert len(follow_up_calls) == 1
 
@@ -182,14 +183,74 @@ def test_collection_quality_loop_expands_source_type_gap():
     resolved_gap = next(
         gap
         for gap in summary["coverage_gaps"]
-        if gap["code"] == "missing_pricing_page"
+        if gap["code"] == "missing_preferred_source_type"
     )
     assert summary["status"] == "ready_for_analysis"
     assert summary["id"] == pricing_root["coverage_state_id"]
     assert summary["open_gap_codes"] == []
-    assert summary["resolved_gap_codes"] == ["missing_pricing_page"]
+    assert summary["resolved_gap_codes"] == ["missing_preferred_source_type"]
     assert resolved_gap["gap_type"] == "source_type"
+    assert resolved_gap["blocking"] is False
     assert resolved_gap["status"] == "resolved"
     assert resolved_gap["resolved_by_branch_ids"] == [child_branches[0]["id"]]
     assert resolved_gap["resolved_by_evidence_ids"] == follow_up_review["accepted_evidence_ids"]
     assert summary["success_criteria"][0]["status"] == "satisfied"
+
+
+def test_unresolved_source_hints_do_not_block_branch_coverage():
+    collector = FakeEvidenceCollector()
+    agent = CollectionAgent(
+        evidence_collector=collector,
+        max_branch_depth=0,
+        max_expansion_branches=4,
+        max_concurrent_collections=1,
+    )
+    state = {
+        "task": {
+            "query": "Compare Acme pricing.",
+            "competitors": ["Acme"],
+            "verbose": False,
+        },
+        "competitors": ["Acme"],
+        "analysis_dimensions": [
+            {
+                "id": "pricing_model",
+                "name": "Pricing Model",
+                "source_hints": ["pricing_page"],
+                "guiding_questions": [
+                    "What public pricing, packaging, plans, or billing units are available?"
+                ],
+                "schema_field_ids": ["pricing_model"],
+            }
+        ],
+    }
+
+    result = asyncio.run(agent.run(state))
+
+    pricing_root = next(
+        branch
+        for branch in result["research_branches"]
+        if branch["id"] == "collect_acme_pricing_model"
+    )
+    child_branches = [
+        branch
+        for branch in result["research_branches"]
+        if branch.get("parent_id") == pricing_root["id"]
+    ]
+    root_coverage = next(
+        assessment
+        for assessment in result["coverage_assessments"]
+        if assessment["branch_id"] == pricing_root["id"]
+    )
+    pricing_summary = next(
+        item
+        for item in result["branch_coverage_states"]
+        if item["root_branch_id"] == pricing_root["id"]
+    )
+
+    assert root_coverage["source_type_gaps"][0]["code"] == "missing_preferred_source_type"
+    assert root_coverage["source_type_gaps"][0]["blocking"] is False
+    assert child_branches == []
+    assert pricing_summary["status"] == "ready_for_analysis"
+    assert pricing_summary["open_gap_codes"] == ["missing_preferred_source_type"]
+    assert pricing_summary["blocked_gap_codes"] == []

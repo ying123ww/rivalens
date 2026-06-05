@@ -56,6 +56,13 @@ Collection state should keep these traceable objects:
 
 There is no `landscape_assessments` state collection. Candidate sources only matter once they are collected as source-backed `EvidenceItem` records.
 
+Collection input fields have separate meanings:
+
+- `success_criteria` are required coverage criteria for deciding whether a branch can move to analysis.
+- `success_criteria.target_source_types` and branch `source_hints` are preferred source targets for query building and follow-up collection, not hard requirements by themselves.
+- Missing preferred source types can trigger non-blocking follow-up collection, but unresolved preferred-source gaps do not block a branch when the content criteria are satisfied.
+- `risk_level` and `expected_claim_types` are carried through branch, brief, task, and collection-task payloads as policy/explanation context. They do not directly open coverage gaps until an explicit source policy resolver consumes them.
+
 ## Routing Policy
 
 `ResearchRoutingAction` remains a shared routing vocabulary:

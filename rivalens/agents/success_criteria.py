@@ -99,13 +99,8 @@ def normalize_success_criteria(
                 **criterion,
                 "id": criterion_id,
                 "description": description,
-                "required_source_types": _string_list(
-                    criterion.get("required_source_types", []),
-                ),
                 "target_source_types": _string_list(
-                    criterion.get("target_source_types")
-                    or criterion.get("required_source_types")
-                    or [],
+                    criterion.get("target_source_types") or [],
                 ),
             }
         )
@@ -117,11 +112,6 @@ def evidence_matches_success_criterion(
     criterion: dict[str, Any],
     branch: dict[str, Any],
 ) -> bool:
-    required_source_types = set(_string_list(criterion.get("required_source_types", [])))
-    source_type = str(evidence.get("source_type") or "")
-    if required_source_types and source_type in required_source_types:
-        return True
-
     meaningful_terms = _criterion_terms(criterion, branch)
     if not meaningful_terms:
         return False

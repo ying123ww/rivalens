@@ -261,69 +261,39 @@ class CoverageReviewer:
                 )
             )
 
-        if self._expects_official_source(branch) and "official_site" not in found:
-            gaps.append(
-                self._source_gap(
-                    "missing_official_source",
-                    "Find the competitor's official or canonical public source.",
-                    ["official_site"],
-                    accepted_count,
-                    minimum_count,
-                )
+        gaps.extend(
+            self._preferred_source_type_gaps(
+                branch,
+                found,
+                accepted_count,
+                minimum_count,
             )
-
-        dimension_id = self._normalize_dimension(branch.get("dimension_id", ""))
-        if (
-            dimension_id
-            in {"pricing_model", "pricing_business_model", "business_model_pricing"}
-            and "pricing_page" not in found
-        ):
-            gaps.append(
-                self._source_gap(
-                    "missing_pricing_page",
-                    "Find official pricing, packaging, plans, billing, or enterprise pricing evidence.",
-                    ["pricing_page", "official_site"],
-                    accepted_count,
-                    minimum_count,
-                )
-            )
-
-        if (
-            dimension_id
-            in {
-                "security_compliance",
-                "admin_governance",
-                "integration_ecosystem",
-                "compliance_risk",
-                "technology_integrations",
-            }
-            and not {"docs", "trust_center"}.intersection(found)
-        ):
-            gaps.append(
-                self._source_gap(
-                    "missing_docs_or_security_source",
-                    "Find docs, API, integration, trust, or security evidence.",
-                    ["docs", "trust_center"],
-                    accepted_count,
-                    minimum_count,
-                )
-            )
-
-        if (
-            dimension_id in {"user_personas", "target_users", "customer_proof"}
-            and not {"review", "case_study"}.intersection(found)
-        ):
-            gaps.append(
-                self._source_gap(
-                    "missing_customer_or_review_source",
-                    "Find customer reviews, case studies, testimonials, or user feedback.",
-                    ["review", "case_study", "news"],
-                    accepted_count,
-                    minimum_count,
-                )
-            )
+        )
 
         return gaps
+
+    def _preferred_source_type_gaps(
+        self,
+        branch: ResearchBranch,
+        found_source_types: set[str],
+        accepted_count: int,
+        minimum_count: int,
+    ) -> list[dict[str, Any]]:
+        preferred_source_types = self._preferred_source_types(branch)
+        if not preferred_source_types or not accepted_count:
+            return []
+        if self._preferred_sources_matched(found_source_types, set(preferred_source_types)):
+            return []
+        return [
+            self._source_gap(
+                "missing_preferred_source_type",
+                "Find preferred source-type evidence for this branch.",
+                preferred_source_types,
+                accepted_count,
+                minimum_count,
+                blocking=False,
+            )
+        ]
 
     def _source_gap(
         self,
@@ -332,27 +302,42 @@ class CoverageReviewer:
         target_source_types: list[str],
         accepted_count: int,
         minimum_count: int,
+        blocking: bool = True,
+        criterion: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        gap = {
             "code": code,
             "query_focus": query_focus,
             "target_source_types": target_source_types,
             "accepted_count": accepted_count,
             "minimum_count": minimum_count,
+            "blocking": blocking,
         }
+        if criterion:
+            gap["criterion_id"] = criterion.get("id", "")
+            gap["criterion_description"] = criterion.get("description", "")
+            gap["success_criteria"] = [criterion]
+        return gap
+
+    def _preferred_source_types(self, branch: ResearchBranch) -> list[str]:
+        preferred: list[str] = []
+        for criterion in normalize_success_criteria(branch.get("success_criteria", [])):
+            preferred.extend(criterion.get("target_source_types", []))
+        if not preferred:
+            preferred.extend(branch.get("source_hints", []))
+        return list(dict.fromkeys(source_type for source_type in preferred if source_type))
+
+    def _preferred_sources_matched(
+        self,
+        found_source_types: set[str],
+        preferred_source_types: set[str],
+    ) -> bool:
+        return bool(found_source_types.intersection(preferred_source_types))
 
     def _minimum_source_count(self, branch: ResearchBranch) -> int:
         if self._normalize_dimension(branch.get("dimension_id", "")) == "competitor_profile":
             return 1
         return 2
-
-    def _expects_official_source(self, branch: ResearchBranch) -> bool:
-        dimension_id = self._normalize_dimension(branch.get("dimension_id", ""))
-        source_hints = {
-            self._normalize_dimension(source_type)
-            for source_type in branch.get("source_hints", [])
-        }
-        return dimension_id == "competitor_profile" or "official_site" in source_hints
 
     def fallback_target_source_types(self, branch: ResearchBranch) -> list[str]:
         source_hints = [
@@ -375,6 +360,7 @@ class CoverageReviewer:
             "objective": f"Resolve source coverage gap: {gap.get('code', '')}",
             "query": "\n".join(query_lines),
             "target_source_types": target_source_types,
+            "success_criteria": list(gap.get("success_criteria", [])),
             "generated_from_gap": gap.get("code", ""),
             "triggering_finding_codes": [gap.get("code", "")],
             "baseline_accepted_count": int(gap.get("accepted_count", 0)),
@@ -386,6 +372,8 @@ class CoverageReviewer:
             "dimension_name": branch.get("dimension_name", ""),
             "dimension_type": branch.get("dimension_type", ""),
             "parent_dimension_id": branch.get("parent_dimension_id", ""),
+            "risk_level": branch.get("risk_level", "medium"),
+            "expected_claim_types": list(branch.get("expected_claim_types", [])),
         }
 
     def _question_coverage(
@@ -751,10 +739,7 @@ class CoverageReviewer:
         )
 
     def _criterion_query(self, branch: ResearchBranch, criterion: dict[str, Any]) -> str:
-        target_source_types = criterion.get("target_source_types") or criterion.get(
-            "required_source_types",
-            [],
-        )
+        target_source_types = criterion.get("target_source_types", [])
         lines = [
             self._base_query(branch, str(criterion.get("description", ""))),
             f"Missing success criterion: {criterion.get('description', '')}",
@@ -796,19 +781,9 @@ class CoverageReviewer:
                 for evidence in matched_evidence
                 if evidence.get("id")
             ]
-            required_source_types = set(criterion.get("required_source_types", []))
-            required_source_matched = (
-                not required_source_types
-                or any(
-                    evidence.get("source_type") in required_source_types
-                    for evidence in matched_evidence
-                )
-            )
             status = "missing"
-            if evidence_ids and required_source_matched:
+            if evidence_ids:
                 status = "satisfied"
-            elif evidence_ids:
-                status = "partial"
 
             criterion_result = {
                 **criterion,

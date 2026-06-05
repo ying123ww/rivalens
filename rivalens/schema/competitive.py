@@ -117,7 +117,6 @@ class EvidenceItem(TypedDict, total=False):
 class SuccessCriterion(TypedDict, total=False):
     id: str
     description: str
-    required_source_types: list[EvidenceType]
     target_source_types: list[EvidenceType]
     evidence_ids: list[str]
     status: Literal["satisfied", "partial", "missing"]
@@ -135,6 +134,8 @@ class EvidenceCollectionTask(TypedDict, total=False):
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     source_hints: list[str]
+    risk_level: str
+    expected_claim_types: list[str]
     topic: str
     expansion_reason: str
     competitor: str
@@ -168,10 +169,6 @@ EvidenceReviewFindingCode = Literal[
     "no_evidence",
     "missing_source_url",
     "insufficient_source_count",
-    "missing_official_source",
-    "missing_pricing_page",
-    "missing_docs_or_security_source",
-    "missing_customer_or_review_source",
     "competitor_mismatch",
     "dimension_mismatch",
     "low_quality_text",
@@ -241,6 +238,8 @@ class ResearchBranch(TypedDict, total=False):
     decision_subtype: ResearchRoutingSubtype
     source_hints: list[str]
     minimum_coverage: list[str]
+    risk_level: str
+    expected_claim_types: list[str]
     guiding_questions: list[str]
     evidence_ids: list[str]
     status: Literal["active", "expanded", "stopped"]
@@ -271,6 +270,8 @@ class ResearchBrief(TypedDict, total=False):
     guiding_questions: list[str]
     source_hints: list[str]
     minimum_coverage: list[str]
+    risk_level: str
+    expected_claim_types: list[str]
     effort_level: Literal["low", "medium", "high"]
     source_policy: str
     stop_condition: str
@@ -297,6 +298,8 @@ class ResearchTask(TypedDict, total=False):
     task_context: str
     target_urls: list[str]
     source_hints: list[str]
+    risk_level: str
+    expected_claim_types: list[str]
     generated_from_gap: str
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
@@ -319,6 +322,8 @@ class FollowUpTaskSpec(TypedDict, total=False):
     parent_dimension_id: str
     target_urls: list[str]
     target_source_types: list[str]
+    risk_level: str
+    expected_claim_types: list[str]
     generated_from_gap: str
     triggering_finding_codes: list[str]
     baseline_accepted_count: int
@@ -394,6 +399,7 @@ class BranchCoverageGap(TypedDict, total=False):
     opened_by_coverage_assessment_id: str
     target_source_types: list[str]
     baseline_accepted_count: int
+    blocking: bool
     resolved_by_branch_ids: list[str]
     resolved_by_evidence_ids: list[str]
     reason: str

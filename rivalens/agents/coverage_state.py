@@ -84,6 +84,11 @@ class BranchCoverageStateBuilder:
                 for gap in current_source_type_gaps
                 if gap.get("code")
             }
+            open_blocking_source_type_gap_codes = {
+                str(gap.get("code", ""))
+                for gap in current_source_type_gaps
+                if gap.get("code") and gap.get("blocking", True)
+            }
             success_criteria = self._cumulative_success_criteria(
                 root,
                 accepted_evidence,
@@ -116,9 +121,12 @@ class BranchCoverageStateBuilder:
                 for criterion in unresolved_criteria
             }
             open_gap_codes = open_source_type_gap_codes | open_criterion_gap_codes
+            blocking_gap_codes = (
+                open_blocking_source_type_gap_codes | open_criterion_gap_codes
+            )
             status = (
                 "ready_for_analysis"
-                if not open_gap_codes and not unresolved_criteria
+                if not blocking_gap_codes and not unresolved_criteria
                 else "blocked"
             )
             states.append(
@@ -210,19 +218,9 @@ class BranchCoverageStateBuilder:
                 for evidence in matched_evidence
                 if evidence.get("id")
             ]
-            required_source_types = set(criterion.get("required_source_types", []))
-            required_source_matched = (
-                not required_source_types
-                or any(
-                    evidence.get("source_type") in required_source_types
-                    for evidence in matched_evidence
-                )
-            )
             status = "missing"
-            if evidence_ids and required_source_matched:
+            if evidence_ids:
                 status = "satisfied"
-            elif evidence_ids:
-                status = "partial"
             results.append(
                 {
                     **criterion,
@@ -248,7 +246,15 @@ class BranchCoverageStateBuilder:
                     code = str(gap.get("code", ""))
                     if not code:
                         continue
-                    gap_id = f"gap_{assessment.get('id', branch_id)}_{code}"
+                    criterion_id = str(gap.get("criterion_id", ""))
+                    gap_id_parts = [
+                        "gap",
+                        str(assessment.get("id", branch_id)),
+                        code,
+                    ]
+                    if criterion_id:
+                        gap_id_parts.append(criterion_id)
+                    gap_id = "_".join(gap_id_parts)
                     if gap_id in seen_gap_ids:
                         continue
                     seen_gap_ids.add(gap_id)
@@ -265,14 +271,21 @@ class BranchCoverageStateBuilder:
                             and evidence.get("branch_id")
                         ),
                     )
-                    status = "blocked" if code in open_gap_codes else "resolved"
+                    blocking = bool(gap.get("blocking", True))
+                    status = "resolved"
+                    if code in open_gap_codes:
+                        status = "blocked" if blocking else "open"
                     gaps.append(
                         {
                             "id": gap_id,
                             "gap_type": "source_type",
                             "code": code,
-                            "criterion_id": "",
-                            "description": "",
+                            "criterion_id": criterion_id,
+                            "description": str(
+                                gap.get("criterion_description")
+                                or gap.get("query_focus", ""),
+                            ),
+                            "blocking": blocking,
                             "status": status,
                             "root_branch_id": root.get("id", ""),
                             "opened_by_branch_id": branch_id,
@@ -393,18 +406,12 @@ class BranchCoverageStateBuilder:
         source_type = evidence.get("source_type", "")
         if code == "insufficient_source_count":
             return True
-        if code == "missing_pricing_page":
-            return source_type == "pricing_page"
-        if code == "missing_docs_or_security_source":
-            return source_type in {"docs", "trust_center"}
-        if code == "missing_customer_or_review_source":
-            return source_type in {"review", "case_study", "news"}
-        if code == "missing_official_source":
-            return source_type == "official_site" or self.coverage_reviewer.looks_official(
-                evidence.get("url", ""),
-                root.get("competitor", ""),
-            )
         target_source_types = set(gap.get("target_source_types", []))
+        if "official_site" in target_source_types and self.coverage_reviewer.looks_official(
+            evidence.get("url", ""),
+            root.get("competitor", ""),
+        ):
+            return True
         return bool(target_source_types and source_type in target_source_types)
 
     def _accepted_evidence_ids(
