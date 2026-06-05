@@ -54,3 +54,4 @@ CURSOR_RULES.md
 /.history
 AdvancedResearch/
 backend/data/
+backend/data/reports.json
