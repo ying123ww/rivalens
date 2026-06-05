@@ -283,13 +283,14 @@ Missing source types are handled by
 discovery stage.
 
 Collection field semantics are intentionally separated. `success_criteria`
-defines required branch content coverage. `source_hints` and
-`target_source_types` are ranked preferred source types for query building and
-follow-up targeting; missing preferred source types can trigger non-blocking
-follow-up collection, but they do not make a branch incomplete by themselves.
-`risk_level` and `expected_claim_types` are preserved as branch/task context for
-future policy resolution and explanation, but they do not directly trigger
-collection gaps.
+defines required branch content coverage. `source_hints` are ranked preferred
+source types for initial query building. `CoverageReviewer` turns missing
+preferred sources into explicit source coverage gaps, and only those gaps or
+their follow-up tasks carry `target_source_types`; unresolved non-blocking
+source gaps do not make a branch incomplete by themselves.
+`expected_claim_types` is preserved as branch/task context for later analysis
+typing, but collection does not use an implicit risk field to tighten evidence
+thresholds.
 
 Root branches are required analysis coverage: every competitor x confirmed
 analysis dimension is collected before any depth expansion is considered. The expansion
@@ -458,9 +459,10 @@ guiding questions, next action, and gap-driven follow-up task specs.
 `BranchCoverageStateBuilder` records whether the root branch/group became ready
 for analysis or remained blocked.
 `AnalysisAgent` runs after knowledge structuring and records
-`knowledge_fact_ids`, `evidence_ids`, claim type, and report routing on each
-generated `AnalysisClaim`. `ClaimSupportReviewer` marks claims as supported,
-weak, contradicted, or unverifiable and emits a recommended action: accept,
-revise, suppress, or evidence gap. Only supported/accepted claims enter the
-writer context; claim support review does not currently trigger a
-collection-specific verification pass.
+`knowledge_fact_ids`, `evidence_ids`, claim type, `claim_risk_level`, and report
+routing on each generated `AnalysisClaim`. `ClaimSupportReviewer` marks claims
+as supported, weak, contradicted, or unverifiable and emits a recommended action:
+accept, revise, suppress, or evidence gap. Higher-risk claims are reviewed more
+conservatively at the claim gate, not during collection. Only
+supported/accepted claims enter the writer context; claim support review does
+not currently trigger a collection-specific verification pass.

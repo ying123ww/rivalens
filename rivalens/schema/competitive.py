@@ -28,6 +28,7 @@ EvidenceType = Literal[
     "public_registry",
     "other",
 ]
+ClaimRiskLevel = Literal["low", "medium", "high"]
 ResearchRoutingAction = Literal[
     "scope_refinement",
     "entity_resolution",
@@ -117,7 +118,6 @@ class EvidenceItem(TypedDict, total=False):
 class SuccessCriterion(TypedDict, total=False):
     id: str
     description: str
-    target_source_types: list[EvidenceType]
     evidence_ids: list[str]
     status: Literal["satisfied", "partial", "missing"]
 
@@ -134,7 +134,7 @@ class EvidenceCollectionTask(TypedDict, total=False):
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     source_hints: list[str]
-    risk_level: str
+    target_source_types: list[str]
     expected_claim_types: list[str]
     topic: str
     expansion_reason: str
@@ -237,8 +237,8 @@ class ResearchBranch(TypedDict, total=False):
     decision_action: ResearchRoutingAction
     decision_subtype: ResearchRoutingSubtype
     source_hints: list[str]
+    target_source_types: list[str]
     minimum_coverage: list[str]
-    risk_level: str
     expected_claim_types: list[str]
     guiding_questions: list[str]
     evidence_ids: list[str]
@@ -270,7 +270,6 @@ class ResearchBrief(TypedDict, total=False):
     guiding_questions: list[str]
     source_hints: list[str]
     minimum_coverage: list[str]
-    risk_level: str
     expected_claim_types: list[str]
     effort_level: Literal["low", "medium", "high"]
     source_policy: str
@@ -298,7 +297,7 @@ class ResearchTask(TypedDict, total=False):
     task_context: str
     target_urls: list[str]
     source_hints: list[str]
-    risk_level: str
+    target_source_types: list[str]
     expected_claim_types: list[str]
     generated_from_gap: str
     decision_action: ResearchRoutingAction
@@ -322,7 +321,6 @@ class FollowUpTaskSpec(TypedDict, total=False):
     parent_dimension_id: str
     target_urls: list[str]
     target_source_types: list[str]
-    risk_level: str
     expected_claim_types: list[str]
     generated_from_gap: str
     triggering_finding_codes: list[str]
@@ -356,6 +354,20 @@ class StageContract(TypedDict, total=False):
     evidence_sink: str
 
 
+class SourceCoverageGap(TypedDict, total=False):
+    gap_type: Literal["source_coverage"]
+    code: str
+    query_focus: str
+    target_source_types: list[str]
+    accepted_count: int
+    minimum_count: int
+    blocking: bool
+    criterion_id: str
+    criterion_description: str
+    success_criteria: list[SuccessCriterion]
+    reason: str
+
+
 class CoverageAssessment(TypedDict, total=False):
     id: str
     stage_contract: StageContract
@@ -365,7 +377,8 @@ class CoverageAssessment(TypedDict, total=False):
     accepted_evidence_ids: list[str]
     rejected_evidence_ids: list[str]
     found_source_types: list[str]
-    source_type_gaps: list[dict[str, Any]]
+    source_type_gaps: list[SourceCoverageGap]
+    source_coverage_gaps: list[SourceCoverageGap]
     quality_gap_codes: list[str]
     covered_questions: list[str]
     missing_questions: list[str]
@@ -538,6 +551,7 @@ class AnalysisClaim(TypedDict, total=False):
     report_section_id: str
     claim_source: str
     claim_type: str
+    claim_risk_level: ClaimRiskLevel
     normalized_key: str
     branch_id: str
     evidence_review_id: str
@@ -556,6 +570,7 @@ class ClaimSupportReview(TypedDict, total=False):
     report_section_id: str
     support_status: ClaimSupportStatus
     recommended_action: ClaimSupportRecommendedAction
+    claim_risk_level: ClaimRiskLevel
     evidence_ids: list[str]
     knowledge_fact_ids: list[str]
     unsupported_phrases: list[str]
@@ -582,7 +597,6 @@ class AnalysisDimension(TypedDict, total=False):
     guiding_questions: list[str]
     search_intent: str
     minimum_coverage: list[str]
-    risk_level: str
     expected_claim_types: list[str]
     origin: str
     required: bool
@@ -777,7 +791,6 @@ class AnalysisDimensionPayload(StrictPayloadModel):
     guiding_questions: list[str] = Field(default_factory=list)
     search_intent: str = ""
     minimum_coverage: list[str] = Field(default_factory=list)
-    risk_level: str = "medium"
     expected_claim_types: list[str] = Field(default_factory=list)
     origin: str = ""
     required: bool = True
@@ -813,6 +826,7 @@ class AnalysisClaimPayload(StrictPayloadModel):
     report_section_id: str = ""
     claim_source: str = ""
     claim_type: str = ""
+    claim_risk_level: ClaimRiskLevel = "medium"
     normalized_key: str = ""
     branch_id: str | None = None
     evidence_review_id: str | None = None
@@ -859,6 +873,7 @@ class ClaimSupportReviewPayload(StrictPayloadModel):
     report_section_id: str = ""
     support_status: ClaimSupportStatus
     recommended_action: ClaimSupportRecommendedAction = "revise"
+    claim_risk_level: ClaimRiskLevel = "medium"
     evidence_ids: list[str] = Field(default_factory=list)
     knowledge_fact_ids: list[str] = Field(default_factory=list)
     unsupported_phrases: list[str] = Field(default_factory=list)

@@ -509,7 +509,6 @@ class CollectionAgent:
                         "generated_from_gap": "",
                         "source_hints": dimension.get("source_hints", []),
                         "minimum_coverage": dimension.get("minimum_coverage", []),
-                        "risk_level": dimension.get("risk_level", "medium"),
                         "expected_claim_types": list(
                             dimension.get("expected_claim_types", []),
                         ),
@@ -573,11 +572,9 @@ class CollectionAgent:
                         "Identify the competitor's official website or canonical "
                         "public source."
                     ),
-                    "target_source_types": ["official_site", "public_registry"],
                     "kind": "guiding_question",
                 }
             ],
-            "risk_level": "low",
             "expected_claim_types": ["competitor_profile"],
             "schema_field_ids": [],
             "report_section_id": "",
@@ -613,7 +610,6 @@ class CollectionAgent:
                     "guiding_questions": branch.get("guiding_questions", []),
                     "source_hints": branch.get("source_hints", []),
                     "minimum_coverage": branch.get("minimum_coverage", []),
-                    "risk_level": branch.get("risk_level", "medium"),
                     "expected_claim_types": list(
                         branch.get("expected_claim_types", []),
                     ),
@@ -664,7 +660,7 @@ class CollectionAgent:
             "research_goal": branch.get("research_goal", brief.get("objective", "")),
             "target_urls": branch.get("target_urls", []),
             "source_hints": branch.get("source_hints", []),
-            "risk_level": branch.get("risk_level", "medium"),
+            "target_source_types": branch.get("target_source_types", []),
             "expected_claim_types": list(branch.get("expected_claim_types", [])),
             "generated_from_gap": generated_from_gap,
             "decision_action": branch.get("decision_action", ""),
@@ -694,7 +690,10 @@ class CollectionAgent:
             "decision_action": research_task.get("decision_action", branch.get("decision_action", "")),
             "decision_subtype": research_task.get("decision_subtype", branch.get("decision_subtype", "")),
             "source_hints": research_task.get("source_hints", branch.get("source_hints", [])),
-            "risk_level": research_task.get("risk_level", branch.get("risk_level", "medium")),
+            "target_source_types": research_task.get(
+                "target_source_types",
+                branch.get("target_source_types", []),
+            ),
             "expected_claim_types": list(
                 research_task.get(
                     "expected_claim_types",
@@ -796,15 +795,11 @@ class CollectionAgent:
                     ),
                     "decision_action": follow_up_spec.get("decision_action", ""),
                     "decision_subtype": follow_up_spec.get("decision_subtype", ""),
-                    "source_hints": follow_up_spec.get(
-                        "target_source_types",
-                        parent.get("source_hints", []),
+                    "source_hints": parent.get("source_hints", []),
+                    "target_source_types": list(
+                        follow_up_spec.get("target_source_types", []),
                     ),
                     "minimum_coverage": parent.get("minimum_coverage", []),
-                    "risk_level": follow_up_spec.get(
-                        "risk_level",
-                        parent.get("risk_level", "medium"),
-                    ),
                     "expected_claim_types": list(
                         follow_up_spec.get(
                             "expected_claim_types",
@@ -866,7 +861,6 @@ class CollectionAgent:
                     dimension.get("minimum_coverage")
                     or ["At least two source-backed public evidence items."]
                 ),
-                "risk_level": dimension.get("risk_level", "medium"),
                 "expected_claim_types": list(
                     dimension.get("expected_claim_types")
                     or ["industry_specific_signal"],
@@ -948,7 +942,6 @@ class CollectionAgent:
                 {
                     "id": f"guiding_question_{index}",
                     "description": str(question),
-                    "target_source_types": dimension.get("source_hints", []),
                     "kind": "guiding_question",
                 }
             )

@@ -182,6 +182,12 @@ class AnalysisAgent:
             "report_section_id": report_section_id,
             "claim_source": "knowledge_fact_group",
             "claim_type": claim_type,
+            "claim_risk_level": self._claim_risk_level(
+                claim_type=claim_type,
+                analysis_dimension_id=analysis_dimension_id,
+                claim_text=claim_text,
+                fact_type=fact_type,
+            ),
             "normalized_key": self._claim_normalized_key(
                 competitor,
                 analysis_dimension_id,
@@ -214,6 +220,81 @@ class AnalysisAgent:
             "market_signal": "market_position_signal",
             "public_evidence_signal": "public_evidence_signal",
         }.get(fact_type, "public_evidence_signal")
+
+    def _claim_risk_level(
+        self,
+        *,
+        claim_type: str,
+        analysis_dimension_id: str,
+        claim_text: str,
+        fact_type: str = "",
+    ) -> str:
+        text = " ".join(
+            [claim_type, analysis_dimension_id, fact_type, claim_text],
+        ).lower()
+        high_risk_terms = {
+            "pricing",
+            "price",
+            "billing",
+            "enterprise",
+            "financial",
+            "filing",
+            "compliance",
+            "security",
+            "privacy",
+            "trust",
+            "regulator",
+            "regulatory",
+            "incident",
+            "complaint",
+            "contradict",
+            "outperform",
+            "superior",
+            "leading",
+            "leader",
+            "dominant",
+            "strongest",
+            "cheaper",
+            "expensive",
+            "定价",
+            "价格",
+            "收费",
+            "合规",
+            "安全",
+            "隐私",
+            "监管",
+            "投诉",
+            "事故",
+            "领先",
+            "最强",
+            "显著优势",
+        }
+        if any(term in text for term in high_risk_terms):
+            return "high"
+        medium_risk_terms = {
+            "comparison",
+            "market",
+            "growth",
+            "customer",
+            "segment",
+            "persona",
+            "review",
+            "sentiment",
+            "capability",
+            "feature",
+            "integration",
+            "ecosystem",
+            "用户",
+            "客户",
+            "市场",
+            "增长",
+            "功能",
+            "能力",
+            "集成",
+        }
+        if any(term in text for term in medium_risk_terms):
+            return "medium"
+        return "low"
 
     def _claim_text(
         self,
@@ -413,6 +494,12 @@ class AnalysisAgent:
                         "knowledge_fact_ids": [],
                         "report_section_id": representative.get("report_section_id", ""),
                         "claim_source": "accepted_evidence",
+                        "claim_type": "public_evidence_signal",
+                        "claim_risk_level": self._claim_risk_level(
+                            claim_type="public_evidence_signal",
+                            analysis_dimension_id=representative["analysis_dimension_id"],
+                            claim_text=representative["claim"],
+                        ),
                         "branch_id": review.get("branch_id", ""),
                         "evidence_review_id": review.get("id", ""),
                         "claim": representative["claim"],
@@ -562,6 +649,12 @@ class AnalysisAgent:
                     "knowledge_fact_ids": [],
                     "report_section_id": primary_report_section_id({"id": dimension}),
                     "claim_source": "competitor_knowledge",
+                    "claim_type": "capability_signal",
+                    "claim_risk_level": self._claim_risk_level(
+                        claim_type="capability_signal",
+                        analysis_dimension_id=dimension,
+                        claim_text=f"{competitor} shows a product capability signal: {description[:420]}",
+                    ),
                     "claim": f"{competitor} shows a product capability signal: {description[:420]}",
                     "competitors": [competitor] if competitor else [],
                     "evidence_ids": feature.get("evidence_ids", []),
@@ -592,6 +685,12 @@ class AnalysisAgent:
                 "knowledge_fact_ids": [],
                 "report_section_id": primary_report_section_id({"id": "pricing_model"}),
                 "claim_source": "competitor_knowledge",
+                "claim_type": "pricing_strategy",
+                "claim_risk_level": self._claim_risk_level(
+                    claim_type="pricing_strategy",
+                    analysis_dimension_id="pricing_model",
+                    claim_text=f"{competitor} has public pricing-model signals around: {plan_names}.",
+                ),
                 "claim": f"{competitor} has public pricing-model signals around: {plan_names}.",
                 "competitors": [competitor] if competitor else [],
                 "evidence_ids": evidence_ids,
@@ -615,6 +714,12 @@ class AnalysisAgent:
                     "knowledge_fact_ids": [],
                     "report_section_id": primary_report_section_id({"id": "user_personas"}),
                     "claim_source": "competitor_knowledge",
+                    "claim_type": "customer_segment_signal",
+                    "claim_risk_level": self._claim_risk_level(
+                        claim_type="customer_segment_signal",
+                        analysis_dimension_id="user_personas",
+                        claim_text=f"{competitor} appears to serve {persona.get('segment', 'a user segment')} needs: {needs}.",
+                    ),
                     "claim": f"{competitor} appears to serve {persona.get('segment', 'a user segment')} needs: {needs}.",
                     "competitors": [competitor] if competitor else [],
                     "evidence_ids": persona.get("evidence_ids", []),

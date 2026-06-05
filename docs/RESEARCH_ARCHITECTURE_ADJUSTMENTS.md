@@ -58,10 +58,11 @@ There is no `landscape_assessments` state collection. Candidate sources only mat
 
 Collection input fields have separate meanings:
 
-- `success_criteria` are required coverage criteria for deciding whether a branch can move to analysis.
-- `success_criteria.target_source_types` and branch `source_hints` are preferred source targets for query building and follow-up collection, not hard requirements by themselves.
+- `success_criteria` are required content coverage criteria for deciding whether a branch can move to analysis.
+- Branch `source_hints` are preferred source targets for initial query building, not hard requirements by themselves.
+- `CoverageReviewer` converts missing preferred sources into explicit source coverage gaps. Only those gaps and their follow-up tasks carry `target_source_types`.
 - Missing preferred source types can trigger non-blocking follow-up collection, but unresolved preferred-source gaps do not block a branch when the content criteria are satisfied.
-- `risk_level` and `expected_claim_types` are carried through branch, brief, task, and collection-task payloads as policy/explanation context. They do not directly open coverage gaps until an explicit source policy resolver consumes them.
+- `expected_claim_types` is carried through branch, brief, task, and collection-task payloads as analysis typing context. Collection does not carry an implicit `risk_level`; claim risk is assigned later on `AnalysisClaim.claim_risk_level` and consumed by `ClaimSupportReviewer`.
 
 ## Routing Policy
 

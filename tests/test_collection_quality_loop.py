@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from rivalens.agents.collection import CollectionAgent
+from rivalens.agents.success_criteria import normalize_success_criteria
 
 
 class FakeEvidenceCollector:
@@ -91,6 +92,26 @@ class FakeEvidenceCollector:
         }
 
 
+def test_success_criteria_do_not_carry_source_targets():
+    normalized = normalize_success_criteria(
+        [
+            {
+                "id": "pricing_content",
+                "description": "Identify public pricing and packaging.",
+                "target_source_types": ["pricing_page"],
+                "required_source_types": ["pricing_page"],
+            }
+        ]
+    )
+
+    assert normalized == [
+        {
+            "id": "pricing_content",
+            "description": "Identify public pricing and packaging.",
+        }
+    ]
+
+
 def test_collection_quality_loop_expands_preferred_source_gap():
     collector = FakeEvidenceCollector()
     agent = CollectionAgent(
@@ -136,6 +157,8 @@ def test_collection_quality_loop_expands_preferred_source_gap():
     assert pricing_root["coverage_state_id"] == f"coverage_state_{pricing_root['id']}"
     assert len(child_branches) == 1
     assert child_branches[0]["generated_from_gap"] == "missing_preferred_source_type"
+    assert child_branches[0]["source_hints"] == ["pricing_page"]
+    assert child_branches[0]["target_source_types"] == ["pricing_page"]
 
     root_coverage = next(
         assessment
@@ -152,9 +175,13 @@ def test_collection_quality_loop_expands_preferred_source_gap():
     }
     assert "missing_preferred_source_type" not in evidence_finding_codes
     assert root_coverage["source_type_gaps"][0]["code"] == "missing_preferred_source_type"
+    assert root_coverage["source_type_gaps"][0]["gap_type"] == "source_coverage"
+    assert root_coverage["source_type_gaps"][0]["target_source_types"] == ["pricing_page"]
     assert root_coverage["source_type_gaps"][0]["blocking"] is False
+    assert root_coverage["source_coverage_gaps"] == root_coverage["source_type_gaps"]
     assert root_coverage["quality_gap_codes"] == []
     assert root_coverage["selected_follow_up_specs"][0]["generated_from_gap"] == "missing_preferred_source_type"
+    assert root_coverage["selected_follow_up_specs"][0]["target_source_types"] == ["pricing_page"]
 
     follow_up_calls = [
         call
@@ -162,6 +189,8 @@ def test_collection_quality_loop_expands_preferred_source_gap():
         if call.get("generated_from_gap") == "missing_preferred_source_type"
     ]
     assert len(follow_up_calls) == 1
+    assert follow_up_calls[0]["target_source_types"] == ["pricing_page"]
+    assert follow_up_calls[0]["source_hints"] == ["pricing_page"]
 
     follow_up_review = next(
         review
@@ -249,7 +278,10 @@ def test_unresolved_source_hints_do_not_block_branch_coverage():
     )
 
     assert root_coverage["source_type_gaps"][0]["code"] == "missing_preferred_source_type"
+    assert root_coverage["source_type_gaps"][0]["gap_type"] == "source_coverage"
+    assert root_coverage["source_type_gaps"][0]["target_source_types"] == ["pricing_page"]
     assert root_coverage["source_type_gaps"][0]["blocking"] is False
+    assert root_coverage["source_coverage_gaps"] == root_coverage["source_type_gaps"]
     assert child_branches == []
     assert pricing_summary["status"] == "ready_for_analysis"
     assert pricing_summary["open_gap_codes"] == ["missing_preferred_source_type"]

@@ -365,9 +365,6 @@ class BranchCoverageStateBuilder:
                             "root_branch_id": root.get("id", ""),
                             "opened_by_branch_id": branch_id,
                             "opened_by_coverage_assessment_id": assessment.get("id", ""),
-                            "target_source_types": list(
-                                criterion.get("target_source_types", []),
-                            ),
                             "baseline_accepted_count": len(
                                 assessment.get("accepted_evidence_ids", []),
                             ),

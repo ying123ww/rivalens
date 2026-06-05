@@ -76,6 +76,7 @@ def _coverage_review_trace_outputs(output: Any) -> dict[str, Any]:
         "rejected_evidence_ids": list(output.get("rejected_evidence_ids", []))[:20],
         "found_source_types": list(output.get("found_source_types", []))[:10],
         "source_type_gaps": list(output.get("source_type_gaps", []))[:10],
+        "source_coverage_gaps": list(output.get("source_coverage_gaps", []))[:10],
         "quality_gap_codes": list(output.get("quality_gap_codes", []))[:10],
         "covered_questions": list(output.get("covered_questions", []))[:10],
         "missing_questions": list(output.get("missing_questions", []))[:10],
@@ -186,6 +187,7 @@ class CoverageReviewer:
             "rejected_evidence_ids": rejected_ids,
             "found_source_types": found_source_types,
             "source_type_gaps": source_type_gaps,
+            "source_coverage_gaps": source_type_gaps,
             "quality_gap_codes": quality_gap_codes,
             "covered_questions": covered_questions,
             "missing_questions": missing_questions,
@@ -306,12 +308,14 @@ class CoverageReviewer:
         criterion: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         gap = {
+            "gap_type": "source_coverage",
             "code": code,
             "query_focus": query_focus,
             "target_source_types": target_source_types,
             "accepted_count": accepted_count,
             "minimum_count": minimum_count,
             "blocking": blocking,
+            "reason": query_focus,
         }
         if criterion:
             gap["criterion_id"] = criterion.get("id", "")
@@ -320,9 +324,7 @@ class CoverageReviewer:
         return gap
 
     def _preferred_source_types(self, branch: ResearchBranch) -> list[str]:
-        preferred: list[str] = []
-        for criterion in normalize_success_criteria(branch.get("success_criteria", [])):
-            preferred.extend(criterion.get("target_source_types", []))
+        preferred = list(branch.get("target_source_types", []))
         if not preferred:
             preferred.extend(branch.get("source_hints", []))
         return list(dict.fromkeys(source_type for source_type in preferred if source_type))
@@ -372,7 +374,6 @@ class CoverageReviewer:
             "dimension_name": branch.get("dimension_name", ""),
             "dimension_type": branch.get("dimension_type", ""),
             "parent_dimension_id": branch.get("parent_dimension_id", ""),
-            "risk_level": branch.get("risk_level", "medium"),
             "expected_claim_types": list(branch.get("expected_claim_types", [])),
         }
 
@@ -463,6 +464,7 @@ class CoverageReviewer:
                     "dimension_type": branch.get("dimension_type", ""),
                     "parent_dimension_id": branch.get("parent_dimension_id", ""),
                     "target_source_types": self.fallback_target_source_types(branch),
+                    "expected_claim_types": list(branch.get("expected_claim_types", [])),
                 }
             )
 
@@ -483,7 +485,6 @@ class CoverageReviewer:
                     "objective": f"Answer missing success criterion: {description}",
                     "query": self._criterion_query(branch, criterion),
                     "success_criteria": [criterion],
-                    "target_source_types": criterion.get("target_source_types", []),
                     "generated_from_gap": gap,
                     "triggering_finding_codes": [gap],
                     "baseline_accepted_count": len(evidence_review.get("accepted_evidence_ids", [])),
@@ -739,14 +740,11 @@ class CoverageReviewer:
         )
 
     def _criterion_query(self, branch: ResearchBranch, criterion: dict[str, Any]) -> str:
-        target_source_types = criterion.get("target_source_types", [])
         lines = [
             self._base_query(branch, str(criterion.get("description", ""))),
             f"Missing success criterion: {criterion.get('description', '')}",
             "Return evidence that directly satisfies this criterion.",
         ]
-        if target_source_types:
-            lines.append("Target source types: " + ", ".join(target_source_types))
         return "\n".join(lines)
 
     def _base_query(self, branch: ResearchBranch, focus: str) -> str:

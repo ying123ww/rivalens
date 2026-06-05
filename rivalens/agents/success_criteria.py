@@ -94,14 +94,14 @@ def normalize_success_criteria(
         criterion_id = str(criterion.get("id", "")).strip()
         if not criterion_id or not description:
             continue
+        normalized_criterion = dict(criterion)
+        normalized_criterion.pop("required_source_types", None)
+        normalized_criterion.pop("target_source_types", None)
         normalized.append(
             {
-                **criterion,
+                **normalized_criterion,
                 "id": criterion_id,
                 "description": description,
-                "target_source_types": _string_list(
-                    criterion.get("target_source_types") or [],
-                ),
             }
         )
     return normalized

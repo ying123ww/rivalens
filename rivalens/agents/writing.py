@@ -1538,6 +1538,7 @@ class ReportWriterAgent:
             "branch_id": claim.get("branch_id", ""),
             "evidence_review_id": claim.get("evidence_review_id", ""),
             "claim": claim.get("claim", ""),
+            "claim_risk_level": claim.get("claim_risk_level", "medium"),
             "competitors": claim.get("competitors", []),
             "evidence_ids": evidence_ids,
             "citation_refs": [
@@ -1607,6 +1608,7 @@ class ReportWriterAgent:
             "report_section_id": review.get("report_section_id", ""),
             "support_status": review.get("support_status", ""),
             "recommended_action": review.get("recommended_action", ""),
+            "claim_risk_level": review.get("claim_risk_level", "medium"),
             "evidence_ids": review.get("evidence_ids", []),
             "knowledge_fact_ids": review.get("knowledge_fact_ids", []),
             "unsupported_phrases": review.get("unsupported_phrases", []),

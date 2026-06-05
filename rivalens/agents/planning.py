@@ -374,7 +374,6 @@ class PlanningAgent:
                     "minimum_coverage": [
                         "At least two source-backed public evidence items.",
                     ],
-                    "risk_level": "medium",
                     "expected_claim_types": ["industry_specific_signal"],
                     "origin": direction.get("origin", ""),
                     "required": direction.get("required", True),

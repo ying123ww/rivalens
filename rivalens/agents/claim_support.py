@@ -95,6 +95,7 @@ class ClaimSupportReviewer:
                     "report_section_id": claim.get("report_section_id", ""),
                     "support_status": status,
                     "recommended_action": recommended_action,
+                    "claim_risk_level": self._claim_risk_level(claim),
                     "evidence_ids": evidence_ids,
                     "knowledge_fact_ids": knowledge_fact_ids,
                     "unsupported_phrases": unsupported_phrases,
@@ -162,6 +163,7 @@ class ClaimSupportReviewer:
         knowledge_facts: list[dict[str, Any]],
     ) -> tuple[str, str, list[str], str, str, float]:
         claim_text = str(claim.get("claim", ""))
+        claim_risk_level = self._claim_risk_level(claim)
         try:
             base_score = float(claim.get("confidence", 0.5))
         except (TypeError, ValueError):
@@ -210,6 +212,15 @@ class ClaimSupportReviewer:
             )
 
         if not claim.get("knowledge_fact_ids"):
+            if claim_risk_level == "high":
+                return (
+                    "unverifiable",
+                    "evidence_gap",
+                    unsupported or claim_tokens[:4],
+                    suggested_revision,
+                    "High-risk claim is bound to evidence snippets but not to structured KnowledgeFact records.",
+                    round(max(0.0, min(1.0, base_score * 0.68)), 2),
+                )
             return (
                 "weak",
                 "revise",
@@ -246,7 +257,7 @@ class ClaimSupportReviewer:
             suggested_revision,
             "Evidence is traceable but the claim should be tightened to match cited facts.",
             round(max(0.0, min(1.0, base_score * 0.8)), 2),
-        )
+            )
 
     def _support_terms(self, text: str) -> list[str]:
         normalized = text.lower()
@@ -417,3 +428,46 @@ class ClaimSupportReviewer:
         if not source_text:
             return ""
         return f"{competitor} {dimension}: public evidence indicates {source_text}."
+
+    def _claim_risk_level(self, claim: dict[str, Any]) -> str:
+        risk_level = str(claim.get("claim_risk_level") or "").lower()
+        if risk_level in {"low", "medium", "high"}:
+            return risk_level
+        text = " ".join(
+            [
+                str(claim.get("claim_type", "")),
+                str(claim.get("analysis_dimension_id", "")),
+                str(claim.get("claim", "")),
+            ]
+        ).lower()
+        high_risk_terms = {
+            "pricing",
+            "price",
+            "billing",
+            "financial",
+            "compliance",
+            "security",
+            "privacy",
+            "regulator",
+            "incident",
+            "complaint",
+            "outperform",
+            "superior",
+            "leading",
+            "strongest",
+            "cheaper",
+            "定价",
+            "价格",
+            "合规",
+            "安全",
+            "隐私",
+            "监管",
+            "领先",
+            "最强",
+        }
+        if any(term in text for term in high_risk_terms):
+            return "high"
+        low_risk_terms = {"profile", "identity", "official", "基础信息", "官网"}
+        if any(term in text for term in low_risk_terms):
+            return "low"
+        return "medium"

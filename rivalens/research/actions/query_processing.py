@@ -126,6 +126,9 @@ def _format_collection_planning_context(trace_context: dict[str, Any] | None) ->
     source_hints = trace_context.get("source_hints") or []
     if source_hints:
         lines.append("Preferred source types: " + ", ".join(source_hints[:10]))
+    target_source_types = trace_context.get("target_source_types") or []
+    if target_source_types:
+        lines.append("Target source types: " + ", ".join(target_source_types[:5]))
     criteria = trace_context.get("success_criteria") or []
     if criteria:
         criterion_text = [

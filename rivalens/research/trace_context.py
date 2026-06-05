@@ -27,6 +27,7 @@ _TRACE_CONTEXT_KEYS = (
     "success_criteria",
     "target_url_count",
     "source_hints",
+    "target_source_types",
 )
 
 
@@ -46,6 +47,8 @@ def compact_trace_context(trace_context: dict[str, Any] | None) -> dict[str, Any
             compact[key] = list(value)[:6] if isinstance(value, list) else value
         elif key == "source_hints":
             compact[key] = list(value)[:10] if isinstance(value, list) else value
+        elif key == "target_source_types":
+            compact[key] = list(value)[:5] if isinstance(value, list) else value
         else:
             compact[key] = value
     return compact

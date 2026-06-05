@@ -282,6 +282,7 @@ def test_analysis_groups_fact_atoms_into_one_traceable_claim():
     claim = claims[0]
     assert claim["claim_source"] == "knowledge_fact_group"
     assert claim["claim_type"] == "pricing_strategy"
+    assert claim["claim_risk_level"] == "high"
     assert claim["knowledge_fact_ids"] == ["fact_1", "fact_2"]
     assert claim["evidence_ids"] == ["ev_1", "ev_2"]
     assert "public evidence" in claim["claim"]
@@ -346,6 +347,7 @@ def test_claim_support_accepts_supported_fact_bound_claim():
 
     assert review["support_status"] == "supported"
     assert review["recommended_action"] == "accept"
+    assert review["claim_risk_level"] == "high"
     assert review["required_follow_up_tasks"] == []
     assert "verification_task_queue" not in result
 
@@ -396,3 +398,38 @@ def test_claim_support_flags_overclaim_and_writer_filters_it():
         state["analysis_claims"],
         result["claim_support_reviews"],
     ) == []
+
+
+def test_high_risk_claim_without_knowledge_fact_requires_evidence_gap():
+    reviewer = ClaimSupportReviewer()
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_1",
+                "analysis_dimension_id": "pricing_model",
+                "claim_type": "pricing_strategy",
+                "claim_risk_level": "high",
+                "claim": "Acme pricing is cheaper than Beta for enterprise teams.",
+                "competitors": ["Acme"],
+                "evidence_ids": ["ev_1"],
+                "confidence": 0.8,
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_1",
+                "competitor": "Acme",
+                "analysis_dimension_id": "pricing_model",
+                "title": "Acme Pricing",
+                "excerpt": "Acme publishes public Pro and Enterprise pricing tiers.",
+                "url": "https://acme.example/pricing",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["claim_risk_level"] == "high"
+    assert review["support_status"] == "unverifiable"
+    assert review["recommended_action"] == "evidence_gap"

@@ -45,11 +45,13 @@ def _trace_collection_task(collection_task: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": criterion.get("id", ""),
                 "description": criterion.get("description", ""),
-                "target_source_types": list(criterion.get("target_source_types", []))[:5],
             }
             for criterion in collection_task.get("success_criteria", [])[:6]
             if isinstance(criterion, dict)
         ],
+        "target_source_types": list(
+            collection_task.get("target_source_types", []),
+        )[:5],
         "target_url_count": len(collection_task.get("target_urls", []) or []),
         "source_hints": list(collection_task.get("source_hints", []))[:10],
     })

@@ -38,7 +38,6 @@ def _criteria_trace_summary(criteria: list[dict[str, Any]]) -> list[dict[str, An
         {
             "id": criterion.get("id", ""),
             "description": criterion.get("description", ""),
-            "target_source_types": list(criterion.get("target_source_types", []))[:5],
             "status": criterion.get("status", ""),
             "evidence_ids": list(criterion.get("evidence_ids", []))[:10],
         }
