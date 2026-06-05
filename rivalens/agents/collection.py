@@ -4,6 +4,7 @@ import asyncio
 import os
 from typing import Any
 
+from rivalens.agents.coverage_state import BranchCoverageStateBuilder
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.evidence_review import EvidenceQualityReviewer
 from rivalens.agents.messages import create_agent_message, latest_message_for
@@ -40,6 +41,7 @@ class CollectionAgent:
         self.evidence_collector = evidence_collector or ResearchEngineEvidenceCollector()
         self.evidence_reviewer = evidence_reviewer or EvidenceQualityReviewer()
         self.coverage_reviewer = coverage_reviewer or CoverageReviewer()
+        self.coverage_state_builder = BranchCoverageStateBuilder(self.coverage_reviewer)
         self.search_query_builder = search_query_builder or SearchQueryBuilder()
         self.max_branch_depth = max_branch_depth
         self.max_expansion_branches = max_expansion_branches
@@ -106,6 +108,9 @@ class CollectionAgent:
         brief_by_branch = {brief["branch_id"]: brief for brief in new_briefs}
         processed_branch_count = 0
         expansion_branch_count = 0
+        selected_follow_up_count = 0
+        depth_blocked_follow_up_count = 0
+        budget_blocked_follow_up_count = 0
         file_context = state.get("file_context", {})
 
         while frontier:
@@ -216,6 +221,8 @@ class CollectionAgent:
 
                 follow_up_specs = coverage_assessment.get("selected_follow_up_specs", [])
                 focused_decision = coverage_assessment.get("decision", {})
+                if follow_up_specs:
+                    selected_follow_up_count += len(follow_up_specs)
                 if (
                     focused_decision.get("action") != "stop"
                     and follow_up_specs
@@ -224,6 +231,7 @@ class CollectionAgent:
                     branch["status"] = "expanded"
                     remaining_branch_slots = self.max_expansion_branches - expansion_branch_count
                     if remaining_branch_slots <= 0:
+                        budget_blocked_follow_up_count += len(follow_up_specs)
                         branch["status"] = "stopped"
                         continue
                     children = self._build_child_branches(
@@ -235,6 +243,12 @@ class CollectionAgent:
                     next_frontier.extend(children)
                     research_branches.extend(children)
                 else:
+                    if (
+                        focused_decision.get("action") != "stop"
+                        and follow_up_specs
+                        and branch.get("depth", 0) >= self.max_branch_depth
+                    ):
+                        depth_blocked_follow_up_count += len(follow_up_specs)
                     branch["status"] = "stopped"
 
             frontier = [
@@ -245,6 +259,27 @@ class CollectionAgent:
 
         accepted_evidence_ids = self._accepted_evidence_ids(evidence_reviews)
         rejected_evidence_ids = self._rejected_evidence_ids(evidence_reviews)
+        branch_coverage_states = self.coverage_state_builder.build(
+            research_branches,
+            evidence_reviews,
+            evidence_items,
+            coverage_assessments,
+        )
+        self.coverage_state_builder.attach_to_root_branches(
+            research_branches,
+            branch_coverage_states,
+        )
+        follow_up_branch_ids = {
+            branch.get("id", "")
+            for branch in research_branches
+            if branch.get("generated_from_gap")
+        }
+        follow_up_accepted_evidence_ids = [
+            evidence_id
+            for review in evidence_reviews
+            if review.get("branch_id", "") in follow_up_branch_ids
+            for evidence_id in review.get("accepted_evidence_ids", [])
+        ]
         collection_coverage = self._summarize_collection_coverage(evidence_items)
         evidence_payload = {
             "evidence_count": len(evidence_items),
@@ -289,6 +324,7 @@ class CollectionAgent:
             "research_briefs": research_briefs,
             "research_tasks": research_tasks,
             "coverage_assessments": coverage_assessments,
+            "branch_coverage_states": branch_coverage_states,
             "research_artifacts": research_artifacts,
             "messages": state.get("messages", []) + [message, analysis_message],
             "agent_events": state.get("agent_events", [])
@@ -326,10 +362,27 @@ class CollectionAgent:
                         "research_brief_count": len(research_briefs),
                         "research_task_count": len(research_tasks),
                         "expanded_branch_count": expansion_branch_count,
+                        "selected_follow_up_count": selected_follow_up_count,
+                        "depth_blocked_follow_up_count": depth_blocked_follow_up_count,
+                        "budget_blocked_follow_up_count": budget_blocked_follow_up_count,
                         "evidence_review_count": len(evidence_reviews),
                         "coverage_assessment_count": len(coverage_assessments),
                         "accepted_evidence_count": len(accepted_evidence_ids),
+                        "accepted_follow_up_evidence_count": len(
+                            dict.fromkeys(follow_up_accepted_evidence_ids),
+                        ),
                         "rejected_evidence_count": len(rejected_evidence_ids),
+                        "branch_coverage_state_count": len(branch_coverage_states),
+                        "ready_branch_coverage_count": sum(
+                            1
+                            for state in branch_coverage_states
+                            if state.get("status") == "ready_for_analysis"
+                        ),
+                        "blocked_branch_coverage_count": sum(
+                            1
+                            for state in branch_coverage_states
+                            if state.get("status") == "blocked"
+                        ),
                         "coverage": collection_coverage,
                     },
                 }

@@ -244,6 +244,8 @@ class ResearchBranch(TypedDict, total=False):
     guiding_questions: list[str]
     evidence_ids: list[str]
     status: Literal["active", "expanded", "stopped"]
+    coverage_state_id: str
+    coverage_status: str
     expansion_reason: str
 
 
@@ -318,6 +320,8 @@ class FollowUpTaskSpec(TypedDict, total=False):
     target_urls: list[str]
     target_source_types: list[str]
     generated_from_gap: str
+    triggering_finding_codes: list[str]
+    baseline_accepted_count: int
     reason: str
     search_stage: SearchStage
 
@@ -356,6 +360,8 @@ class CoverageAssessment(TypedDict, total=False):
     accepted_evidence_ids: list[str]
     rejected_evidence_ids: list[str]
     found_source_types: list[str]
+    source_type_gaps: list[dict[str, Any]]
+    quality_gap_codes: list[str]
     covered_questions: list[str]
     missing_questions: list[str]
     satisfied_criteria: list[SuccessCriterion]
@@ -370,6 +376,45 @@ class CoverageAssessment(TypedDict, total=False):
     arbitration: dict[str, Any]
     decision: ResearchRoutingDecision
     confidence: float
+
+
+CoverageGapStatus = Literal["open", "resolved", "blocked"]
+BranchCoverageStatus = Literal["ready_for_analysis", "needs_followup", "blocked"]
+
+
+class BranchCoverageGap(TypedDict, total=False):
+    id: str
+    gap_type: str
+    code: str
+    criterion_id: str
+    description: str
+    status: CoverageGapStatus
+    root_branch_id: str
+    opened_by_branch_id: str
+    opened_by_coverage_assessment_id: str
+    target_source_types: list[str]
+    baseline_accepted_count: int
+    resolved_by_branch_ids: list[str]
+    resolved_by_evidence_ids: list[str]
+    reason: str
+
+
+class BranchCoverageState(TypedDict, total=False):
+    id: str
+    root_branch_id: str
+    branch_ids: list[str]
+    competitor: str
+    analysis_dimension_id: str
+    dimension_id: str
+    dimension_name: str
+    status: BranchCoverageStatus
+    accepted_evidence_ids: list[str]
+    found_source_types: list[str]
+    success_criteria: list[SuccessCriterion]
+    coverage_gaps: list[BranchCoverageGap]
+    open_gap_codes: list[str]
+    resolved_gap_codes: list[str]
+    blocked_gap_codes: list[str]
 
 
 class IndustryCandidate(TypedDict, total=False):
@@ -1012,6 +1057,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     research_briefs: list[ResearchBrief]
     research_tasks: list[ResearchTask]
     coverage_assessments: list[CoverageAssessment]
+    branch_coverage_states: list[BranchCoverageState]
     evidence_reviews: list[EvidenceReviewResult]
     file_context: FileContext
     evidence_items: list[EvidenceItem]

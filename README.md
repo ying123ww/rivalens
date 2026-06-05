@@ -188,8 +188,12 @@ analysis. Collection branches carry one clean seed query while preserving
 competitor, dimension, source hints, success criteria, and task context as
 structured fields; `ResearchEngine` expands that seed into natural-language
 sub-queries using the structured collection context. `CoverageReviewer` records which criteria are satisfied, partial, or
-missing, then narrows follow-up tasks to the missing criteria instead of
-throwing away partially useful evidence. `KnowledgeStructuringAgent` first tries
+missing, detects missing expected source types, and narrows follow-up tasks to
+the missing criteria or source-type gaps instead of throwing away partially
+useful evidence. `BranchCoverageStateBuilder` then aggregates each root branch
+and its follow-up children into `branch_coverage_states`, recording current open
+gap codes, resolved/blocked gap records, and the final coverage status on the
+root branch. `KnowledgeStructuringAgent` first tries
 the configured knowledge-fact LLM extractor, then validates, normalizes, and
 deduplicates the returned candidates into `KnowledgeFact` atoms that cite
 accepted `EvidenceItem` IDs. If the LLM is not configured, fails, or returns no
@@ -252,6 +256,7 @@ CollectionAgent
   -> EvidenceItem[]
   -> EvidenceQualityReviewer (source-level accepted/rejected evidence and criterion matches)
   -> CoverageReviewer (criterion coverage gaps and follow-up task specs)
+  -> BranchCoverageStateBuilder (root branch/group coverage ledger)
 ```
 
 The collection path starts every confirmed competitor x dimension branch as
@@ -264,7 +269,10 @@ depth, and budget in
 `CompetitorAnalysisState.research_briefs`,
 `CompetitorAnalysisState.research_tasks`,
 `CompetitorAnalysisState.evidence_reviews`, and
-`CompetitorAnalysisState.coverage_assessments`.
+`CompetitorAnalysisState.coverage_assessments`. After collection finishes,
+`CompetitorAnalysisState.branch_coverage_states` records each root branch/group
+status, accepted evidence IDs, source types found, success-criteria status, and
+gap lifecycle.
 
 `ResearchRoutingAction` is intentionally a shared routing vocabulary, not the
 stage boundary. Consumers should distinguish stages with `search_stage` and the
@@ -435,9 +443,11 @@ because they created a late, claim-deletion-oriented pseudo loop.
 produces `EvidenceReviewResult` records with accepted/rejected evidence IDs,
 success-criterion matches, findings, score, and required action.
 `CoverageReviewer` consumes that result and remains responsible for branch-level
-coverage control: satisfied/partial/missing criteria, missing guiding questions,
-next action, and gap-driven follow-up task specs. `CollectionAgent` owns depth
-and expansion budget enforcement directly.
+coverage control: source-type gaps, satisfied/partial/missing criteria, missing
+guiding questions, next action, and gap-driven follow-up task specs.
+`CollectionAgent` owns depth and expansion budget enforcement directly, while
+`BranchCoverageStateBuilder` records whether the root branch/group became ready
+for analysis or remained blocked.
 `AnalysisAgent` runs after knowledge structuring and records
 `knowledge_fact_ids`, `evidence_ids`, claim type, and report routing on each
 generated `AnalysisClaim`. `ClaimSupportReviewer` marks claims as supported,

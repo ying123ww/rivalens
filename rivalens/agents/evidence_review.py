@@ -205,15 +205,14 @@ class EvidenceQualityReviewer:
             elif evidence_id:
                 accepted_evidence_ids.append(evidence_id)
 
-        coverage_findings = self._coverage_findings(
+        branch_findings = self._branch_quality_findings(
             branch,
             evidence_items,
-            accepted_evidence_ids,
         )
-        findings = item_findings + coverage_findings
+        findings = item_findings + branch_findings
         required_action = self._required_action(
             item_findings,
-            coverage_findings,
+            branch_findings,
             len(accepted_evidence_ids),
         )
         accepted = required_action == "accept"
@@ -231,23 +230,12 @@ class EvidenceQualityReviewer:
             "required_action": required_action,
         }
 
-    def _coverage_findings(
+    def _branch_quality_findings(
         self,
         branch: ResearchBranch,
         evidence_items: list[dict[str, Any]],
-        accepted_evidence_ids: list[str],
     ) -> list[EvidenceReviewFinding]:
         findings: list[EvidenceReviewFinding] = []
-        accepted_id_set = set(accepted_evidence_ids)
-        accepted_evidence = [
-            item
-            for item in evidence_items
-            if item.get("id", "") in accepted_id_set
-        ]
-        source_types = {item.get("source_type", "other") for item in accepted_evidence}
-        urls = [item.get("url", "") for item in accepted_evidence]
-        dimension_id = branch.get("dimension_id", "")
-
         if not evidence_items:
             findings.append(
                 self._finding(
@@ -259,84 +247,22 @@ class EvidenceQualityReviewer:
                     recommendation="Expand with a more targeted branch query.",
                 )
             )
-            return findings
-
-        if len(accepted_evidence_ids) < self.min_sources_per_branch:
-            findings.append(
-                self._finding(
-                    branch,
-                    code="insufficient_source_count",
-                    severity="medium",
-                    evidence_id=None,
-                    message="当前可用证据数量偏低，正在扩展检索范围补充更多来源。",
-                    recommendation="Expand collection with additional source-backed queries.",
-                )
-            )
-        if not any(self._looks_official(url, branch.get("competitor", "")) for url in urls):
-            findings.append(
-                self._finding(
-                    branch,
-                    code="missing_official_source",
-                    severity="medium",
-                    evidence_id=None,
-                    message="正在检索官方来源，当前尚未匹配到竞品官方页面。",
-                    recommendation="Expand collection toward official pages or docs.",
-                )
-            )
-        if self._dimension_matches(dimension_id, {"pricing_model", "pricing_business_model", "business_model_pricing"}) and "pricing_page" not in source_types:
-            findings.append(
-                self._finding(
-                    branch,
-                    code="missing_pricing_page",
-                    severity="medium",
-                    evidence_id=None,
-                    message="定价维度正在检索官方定价页面来源。",
-                    recommendation="Expand collection toward official pricing pages.",
-                )
-            )
-        if (
-            self._dimension_matches(
-                dimension_id,
-                {"security_compliance", "admin_governance", "integration_ecosystem", "compliance_risk", "technology_integrations"},
-            )
-            and "docs" not in source_types
-        ):
-            findings.append(
-                self._finding(
-                    branch,
-                    code="missing_docs_or_security_source",
-                    severity="medium",
-                    evidence_id=None,
-                    message="技术维度正在检索文档与安全合规相关来源。",
-                    recommendation="Expand collection toward docs, trust, or security pages.",
-                )
-            )
-        if self._dimension_matches(dimension_id, {"user_personas", "target_users"}) and "review" not in source_types:
-            findings.append(
-                self._finding(
-                    branch,
-                    code="missing_customer_or_review_source",
-                    severity="medium",
-                    evidence_id=None,
-                    message="用户画像维度正在检索客户评价与案例来源。",
-                    recommendation="Expand collection toward reviews, case studies, or use cases.",
-                )
-            )
 
         return findings
 
     def _required_action(
         self,
         item_findings: list[EvidenceReviewFinding],
-        coverage_findings: list[EvidenceReviewFinding],
+        branch_findings: list[EvidenceReviewFinding],
         accepted_count: int,
     ) -> str:
-        if not coverage_findings:
+        findings = item_findings + branch_findings
+        if not findings or accepted_count > 0:
             return "accept"
 
         high_codes = {
             finding.get("code")
-            for finding in item_findings + coverage_findings
+            for finding in findings
             if finding.get("severity") == "high"
         }
         if "competitor_mismatch" in high_codes and accepted_count == 0:
@@ -355,7 +281,7 @@ class EvidenceQualityReviewer:
             and accepted_count == 0
         ):
             return "retry"
-        return "expand"
+        return "retry"
 
     def _score(self, findings: list[EvidenceReviewFinding]) -> float:
         score = 1.0
@@ -414,19 +340,8 @@ class EvidenceQualityReviewer:
             and branch_dimension != evidence_dimension
         )
 
-    def _looks_official(self, url: str, competitor: str) -> bool:
-        if not url or not competitor:
-            return False
-        normalized_url = url.lower()
-        tokens = [token for token in competitor.lower().replace("-", " ").split() if token]
-        return any(token in normalized_url for token in tokens)
-
     def _normalize(self, value: Any) -> str:
         return str(value or "").strip().lower()
-
-    def _dimension_matches(self, dimension_id: str, candidates: set[str]) -> bool:
-        normalized = self._normalize(dimension_id)
-        return normalized in {self._normalize(candidate) for candidate in candidates}
 
     def _low_quality_text(self, evidence: dict[str, Any]) -> bool:
         text = " ".join(

@@ -18,6 +18,7 @@
 - `EvidenceQualityReviewer` 对每次 standard evidence result 做 source-level accept / reject。
 - `CoverageReviewer` 负责 expected source type、guiding question 覆盖和 gap-driven follow-up tasks。
 - `CoverageReviewer` 的 follow-up task 继续使用结构化 `decision_action`、`decision_subtype`、`generated_from_gap`、`target_source_types` 和 `search_stage` 字段。
+- `BranchCoverageStateBuilder` 将 root branch 及其 follow-up children 汇总成 `branch_coverage_states`，记录当前 open gap codes、resolved/blocked gap records，并把最终 `coverage_status` 回写到 root branch。
 - `ClaimSupportReviewer` 只做 claim-level citation support review，不再通过 collection 专用 verification 通道回到 `source_collection`。
 
 ## Collection Loop
@@ -31,6 +32,7 @@ PlanningAgent
    -> EvidenceQualityReviewer
    -> CoverageReviewer
    -> gap-driven focused child branches when budget allows
+   -> BranchCoverageStateBuilder
 -> KnowledgeStructuringAgent
 -> AnalysisAgent
 -> ClaimSupportReviewer
@@ -48,6 +50,7 @@ Collection state should keep these traceable objects:
 - `evidence_items`
 - `evidence_reviews`
 - `coverage_assessments`
+- `branch_coverage_states`
 - `research_artifacts`
 - `agent_events`
 
