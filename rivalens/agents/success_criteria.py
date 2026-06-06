@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 
 _STOPWORDS = {
@@ -45,6 +46,14 @@ _STOPWORDS = {
 }
 
 _CJK_TERM_ALIASES = {
+    "官网": {"official", "website", "site"},
+    "官方网站": {"official", "website", "site"},
+    "官方": {"official"},
+    "网站": {"website", "site"},
+    "主页": {"homepage", "website", "site"},
+    "首页": {"homepage", "website", "site"},
+    "公开来源": {"public", "source"},
+    "公开资料": {"public", "source"},
     "价格": {"price", "pricing"},
     "定价": {"price", "pricing"},
     "套餐": {"plan", "plans", "package", "packaging"},
@@ -112,6 +121,9 @@ def evidence_matches_success_criterion(
     criterion: dict[str, Any],
     branch: dict[str, Any],
 ) -> bool:
+    if _is_official_profile_criterion(criterion, branch):
+        return _evidence_matches_official_profile_source(evidence, branch)
+
     meaningful_terms = _criterion_terms(criterion, branch)
     if not meaningful_terms:
         return False
@@ -181,6 +193,62 @@ def _evidence_text(evidence: dict[str, Any]) -> str:
     return " ".join(
         str(evidence.get(field) or "")
         for field in ("title", "excerpt", "summary", "url", "source_type")
+    )
+
+
+def _is_official_profile_criterion(
+    criterion: dict[str, Any],
+    branch: dict[str, Any],
+) -> bool:
+    dimension_id = str(
+        branch.get("analysis_dimension_id")
+        or branch.get("dimension_id")
+        or ""
+    )
+    return (
+        criterion.get("id") == "official_profile_source"
+        and dimension_id == "competitor_profile"
+    )
+
+
+def _evidence_matches_official_profile_source(
+    evidence: dict[str, Any],
+    branch: dict[str, Any],
+) -> bool:
+    source_type = str(evidence.get("source_type") or "").lower()
+    if source_type in {"official_site", "public_registry", "marketplace"}:
+        return True
+
+    title = str(evidence.get("title") or "").lower()
+    url = str(evidence.get("url") or "").lower()
+    if _has_official_profile_marker(f"{title} {url}"):
+        return True
+
+    hostname = urlparse(url).netloc.lower()
+    competitor_tokens = [
+        token
+        for token in re.findall(
+            r"[a-z0-9]+",
+            str(branch.get("competitor") or "").lower(),
+        )
+        if len(token) > 2
+    ]
+    return bool(hostname and any(token in hostname for token in competitor_tokens))
+
+
+def _has_official_profile_marker(text: str) -> bool:
+    if any(marker in text for marker in ("非官网", "非官方", "unofficial")):
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "官网",
+            "官方网站",
+            "官方主页",
+            "官方页面",
+            "official site",
+            "official website",
+        )
     )
 
 

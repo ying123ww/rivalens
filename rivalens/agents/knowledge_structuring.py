@@ -5,6 +5,7 @@ import json
 import os
 import re
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import json_repair
 from pydantic import BaseModel, Field
@@ -547,6 +548,13 @@ class KnowledgeStructuringAgent:
                                 competitor
                                 for competitor in competitors
                                 if competitor.get("evidence_ids")
+                            ]
+                        ),
+                        "profile_website_count": len(
+                            [
+                                competitor
+                                for competitor in competitors
+                                if competitor.get("website")
                             ]
                         ),
                     },
@@ -1508,7 +1516,9 @@ class KnowledgeStructuringAgent:
             if name and not profile.get("product"):
                 profile["product"] = name
             if best_evidence and not profile.get("website"):
-                profile["website"] = best_evidence.get("url", "")
+                website = self._profile_website(best_evidence)
+                if website:
+                    profile["website"] = website
             if selected_industry and not profile.get("category"):
                 profile["category"] = selected_industry
             if best_evidence and not profile.get("notes"):
@@ -1557,10 +1567,106 @@ class KnowledgeStructuringAgent:
         return sorted(
             evidence_items,
             key=lambda evidence: (
-                0 if evidence.get("source_type") == "official_site" else 1,
+                -self._profile_evidence_score(evidence),
                 -float(evidence.get("confidence", 0.5)),
             ),
         )[0]
+
+    def _profile_evidence_score(self, evidence: dict[str, Any]) -> int:
+        text = self._profile_evidence_text(evidence)
+        marker_text = self._profile_evidence_marker_text(evidence)
+        score = 0
+        if evidence.get("source_type") == "official_site":
+            score += 4
+        if evidence.get("is_primary_source"):
+            score += 1
+        if self._has_official_profile_marker(marker_text):
+            score += 3
+        if any(marker in text for marker in ("homepage", "website", "canonical")):
+            score += 1
+        return score
+
+    def _profile_website(self, evidence: dict[str, Any]) -> str:
+        url = str(evidence.get("url") or "").strip()
+        if not url:
+            return ""
+        if not self._looks_like_official_profile_evidence(evidence):
+            return ""
+
+        parsed = urlsplit(url)
+        if not parsed.scheme or not parsed.netloc:
+            return url
+        hostname = (parsed.hostname or "").lower()
+        netloc = parsed.netloc.lower()
+        if self._has_official_profile_marker(
+            self._profile_evidence_marker_text(evidence)
+        ):
+            netloc = self._profile_site_host(hostname) or netloc
+        return urlunsplit((parsed.scheme.lower(), netloc, "", "", ""))
+
+    def _profile_site_host(self, hostname: str) -> str:
+        labels = [label for label in hostname.split(".") if label]
+        if len(labels) < 3:
+            return hostname
+        if labels[0] not in {
+            "act",
+            "content",
+            "landing",
+            "m",
+            "page",
+            "pages",
+            "promo",
+        }:
+            return hostname
+
+        public_suffix_size = 2 if tuple(labels[-2:]) in {
+            ("ac", "uk"),
+            ("co", "jp"),
+            ("co", "kr"),
+            ("co", "uk"),
+            ("com", "au"),
+            ("com", "cn"),
+            ("com", "hk"),
+            ("com", "sg"),
+            ("com", "tw"),
+            ("net", "cn"),
+            ("org", "cn"),
+        } else 1
+        return ".".join(labels[-(public_suffix_size + 1):])
+
+    def _looks_like_official_profile_evidence(self, evidence: dict[str, Any]) -> bool:
+        if evidence.get("source_type") == "official_site":
+            return True
+        return self._has_official_profile_marker(
+            self._profile_evidence_marker_text(evidence)
+        )
+
+    def _profile_evidence_text(self, evidence: dict[str, Any]) -> str:
+        return " ".join(
+            str(evidence.get(field) or "")
+            for field in ("title", "excerpt", "summary", "url", "source_type")
+        ).lower()
+
+    def _profile_evidence_marker_text(self, evidence: dict[str, Any]) -> str:
+        return " ".join(
+            str(evidence.get(field) or "")
+            for field in ("title", "url", "source_type")
+        ).lower()
+
+    def _has_official_profile_marker(self, text: str) -> bool:
+        if any(marker in text for marker in ("非官网", "非官方", "unofficial")):
+            return False
+        return any(
+            marker in text
+            for marker in (
+                "官网",
+                "官方网站",
+                "官方主页",
+                "官方页面",
+                "official site",
+                "official website",
+            )
+        )
 
     def _profile_note(self, evidence: dict[str, Any]) -> str:
         text = evidence.get("excerpt") or evidence.get("title") or ""

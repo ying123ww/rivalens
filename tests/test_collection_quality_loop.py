@@ -9,7 +9,11 @@ from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.source_metrics import SourceMetricsBuilder
 from rivalens.agents import source_gap_advisor as source_gap_module
 from rivalens.agents.source_gap_advisor import SourceGapDecision
-from rivalens.agents.success_criteria import normalize_success_criteria
+from rivalens.agents.success_criteria import (
+    matched_success_criterion_ids,
+    normalize_success_criteria,
+)
+from rivalens.research.evidence_collector import ResearchEngineEvidenceCollector
 from rivalens.research.skills.researcher import ResearchConductor
 from rivalens.research.utils import llm as llm_utils
 
@@ -238,6 +242,66 @@ def test_success_criteria_do_not_carry_source_targets():
             "description": "Identify public pricing and packaging.",
         }
     ]
+
+
+def test_chinese_official_profile_evidence_matches_profile_success_criterion():
+    branch = {
+        "id": "collect_dingtalk_competitor_profile",
+        "competitor": "钉钉",
+        "dimension_id": "competitor_profile",
+    }
+    evidence = {
+        "id": "ev_profile",
+        "title": "企业网盘安全空间-钉盘-钉钉官网",
+        "url": "https://page.dingtalk.com/wow/dingtalk/act/clouddisk",
+        "source_type": "other",
+        "excerpt": "钉钉官网公开介绍钉盘产品能力。",
+    }
+    criteria = [
+        {
+            "id": "official_profile_source",
+            "description": (
+                "Identify the competitor's official website or canonical public source."
+            ),
+        }
+    ]
+
+    assert matched_success_criterion_ids(evidence, criteria, branch) == [
+        "official_profile_source"
+    ]
+
+    third_party_evidence = {
+        "id": "ev_baidu",
+        "title": "钉钉怎么注册-百度经验",
+        "url": "https://jingyan.baidu.com/article/example.html",
+        "source_type": "other",
+        "excerpt": "教程正文提到可以访问钉钉官网完成注册。",
+    }
+
+    assert matched_success_criterion_ids(third_party_evidence, criteria, branch) == []
+
+    registry_evidence = {
+        "id": "ev_registry",
+        "title": "钉钉公开登记信息",
+        "url": "https://registry.example/dingtalk",
+        "source_type": "public_registry",
+        "excerpt": "公开登记资料。",
+    }
+
+    assert matched_success_criterion_ids(registry_evidence, criteria, branch) == [
+        "official_profile_source"
+    ]
+
+
+def test_evidence_collector_infers_chinese_official_site_title():
+    collector = ResearchEngineEvidenceCollector()
+
+    source_type = collector._infer_source_type(
+        "https://www.feishu.cn/content/article/example",
+        "OpenClaw - 飞书官网",
+    )
+
+    assert source_type == "official_site"
 
 
 def test_source_metrics_builder_counts_independent_sources():

@@ -365,4 +365,16 @@ class ResearchEngineEvidenceCollector:
             return "review"
         if "marketplace" in normalized or "apps." in normalized:
             return "marketplace"
+        if any(
+            marker in normalized
+            for marker in (
+                "官网",
+                "官方网站",
+                "官方主页",
+                "官方页面",
+                "official site",
+                "official website",
+            )
+        ):
+            return "official_site"
         return "other"

@@ -357,6 +357,91 @@ def test_knowledge_structuring_enriches_top_evidence_snippets():
     assert result["agent_events"][-1]["output"]["evidence_snippet_count"] >= 1
 
 
+def test_competitor_profile_evidence_fills_canonical_website():
+    agent = KnowledgeStructuringAgent()
+    evidence = [
+        {
+            "id": "ev_registry",
+            "competitor": "飞书",
+            "analysis_dimension_id": "competitor_profile",
+            "source_type": "public_registry",
+            "title": "飞书企业信息公开登记",
+            "excerpt": "公开登记资料描述飞书相关主体。",
+            "url": "https://registry.example/feishu",
+            "confidence": 0.96,
+        },
+        {
+            "id": "ev_official",
+            "competitor": "飞书",
+            "analysis_dimension_id": "competitor_profile",
+            "source_type": "other",
+            "title": "OpenClaw - 飞书官网",
+            "excerpt": "飞书官网公开介绍产品和品牌信息。",
+            "url": "https://www.feishu.cn/content/article/example?utm_source=search",
+            "confidence": 0.72,
+        },
+    ]
+
+    enriched = agent._enrich_competitors(
+        [{"name": "飞书"}],
+        evidence,
+        {"industry": {"name": "协同办公"}},
+    )
+
+    assert enriched[0]["website"] == "https://www.feishu.cn"
+    assert enriched[0]["category"] == "协同办公"
+    assert enriched[0]["evidence_ids"] == ["ev_registry", "ev_official"]
+    assert "飞书官网" in enriched[0]["notes"]
+
+
+def test_competitor_profile_registry_evidence_does_not_fill_website():
+    agent = KnowledgeStructuringAgent()
+
+    enriched = agent._enrich_competitors(
+        [{"name": "Acme"}],
+        [
+            {
+                "id": "ev_registry",
+                "competitor": "Acme",
+                "analysis_dimension_id": "competitor_profile",
+                "source_type": "public_registry",
+                "title": "Acme public registry profile",
+                "excerpt": "A registry record describes Acme.",
+                "url": "https://registry.example/acme",
+                "confidence": 0.9,
+            }
+        ],
+        {},
+    )
+
+    assert enriched[0]["website"] == ""
+    assert enriched[0]["evidence_ids"] == ["ev_registry"]
+
+
+def test_competitor_profile_page_subdomain_fills_site_root():
+    agent = KnowledgeStructuringAgent()
+
+    enriched = agent._enrich_competitors(
+        [{"name": "钉钉"}],
+        [
+            {
+                "id": "ev_dingtalk_official",
+                "competitor": "钉钉",
+                "analysis_dimension_id": "competitor_profile",
+                "source_type": "other",
+                "title": "企业网盘安全空间-钉盘-钉钉官网",
+                "excerpt": "钉钉官网公开介绍钉盘产品能力。",
+                "url": "https://page.dingtalk.com/wow/dingtalk/act/clouddisk",
+                "confidence": 0.78,
+            }
+        ],
+        {},
+    )
+
+    assert enriched[0]["website"] == "https://dingtalk.com"
+    assert enriched[0]["evidence_ids"] == ["ev_dingtalk_official"]
+
+
 def test_knowledge_structuring_splits_pricing_evidence_into_atom_facts():
     agent = KnowledgeStructuringAgent()
 

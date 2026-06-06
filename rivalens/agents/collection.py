@@ -621,6 +621,17 @@ class CollectionAgent:
                         "Identify the competitor's official website or canonical "
                         "public source."
                     ),
+                    "keywords": [
+                        "官网",
+                        "官方网站",
+                        "官方",
+                        "网站",
+                        "official",
+                        "website",
+                        "site",
+                        "homepage",
+                        "canonical",
+                    ],
                     "kind": "guiding_question",
                 }
             ],
