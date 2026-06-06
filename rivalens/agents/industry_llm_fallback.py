@@ -85,6 +85,7 @@ class IndustryLLMFallback:
             llm_provider=provider,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            rivalens_operation="industry_llm_fallback",
         )
         parsed = self._parse_response(response)
         return IndustryFallbackResult(**parsed)

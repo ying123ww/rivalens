@@ -75,7 +75,8 @@ class DeepResearchSkill:
             llm_provider=self.researcher.cfg.strategic_llm_provider,
             model=self.researcher.cfg.strategic_llm_model,
             reasoning_effort=self.researcher.cfg.reasoning_effort,
-            temperature=0.4
+            temperature=0.4,
+            rivalens_operation="deep_research_generate_search_queries",
         )
 
         lines = response.split('\n')
@@ -136,7 +137,8 @@ Format each question on a new line starting with 'Question: '"""}
             llm_provider=self.researcher.cfg.strategic_llm_provider,
             model=self.researcher.cfg.strategic_llm_model,
             reasoning_effort=ReasoningEfforts.High.value,
-            temperature=0.4
+            temperature=0.4,
+            rivalens_operation="deep_research_generate_plan",
         )
 
         questions = [q.replace('Question:', '').strip()
@@ -158,7 +160,8 @@ Format each question on a new line starting with 'Question: '"""}
             model=self.researcher.cfg.strategic_llm_model,
             temperature=0.4,
             reasoning_effort=ReasoningEfforts.High.value,
-            max_tokens=1000
+            max_tokens=1000,
+            rivalens_operation="deep_research_process_results",
         )
 
         lines = response.split('\n')

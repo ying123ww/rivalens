@@ -4,6 +4,7 @@ import asyncio
 
 from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.claim_support import ClaimSupportReviewer
+from rivalens.agents import knowledge_structuring as knowledge_module
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import ReportWriterAgent
 
@@ -117,6 +118,181 @@ def test_knowledge_structuring_uses_llm_extractor_when_configured():
     assert facts[0]["subject"] == "Acme pricing page"
     assert facts[0]["evidence_ids"] == ["ev_1"]
     assert facts[0]["normalized_key"]
+
+
+def test_knowledge_fact_llm_extractor_passes_evidence_trace_to_llm(monkeypatch):
+    captured_kwargs = {}
+
+    async def fake_completion(**kwargs):
+        captured_kwargs.update(kwargs)
+        return '{"facts": []}'
+
+    monkeypatch.setattr(knowledge_module, "create_chat_completion", fake_completion)
+    extractor = knowledge_module.KnowledgeFactLLMExtractor(llm_spec="fake:test-model")
+
+    facts, metadata = asyncio.run(
+        extractor.extract(
+            [
+                {
+                    "id": "ev_1",
+                    "competitor": "Acme",
+                    "branch_id": "branch_1",
+                    "parent_branch_id": "root_1",
+                    "collection_task_id": "task_1",
+                    "research_task_id": "research_task_1",
+                    "analysis_dimension_id": "pricing_model",
+                    "dimension_name": "Pricing Model",
+                    "source_type": "pricing_page",
+                    "title": "Acme Pricing",
+                    "excerpt": "Acme pricing page publishes Pro pricing.",
+                    "url": "https://acme.example/pricing",
+                    "confidence": 0.9,
+                }
+            ]
+        )
+    )
+
+    assert facts == []
+    assert metadata["llm_input_evidence_count"] == 1
+    assert captured_kwargs["rivalens_operation"] == "knowledge_fact_extraction"
+    assert captured_kwargs["rivalens_branch_ids"] == ["branch_1"]
+    assert captured_kwargs["rivalens_evidence_count"] == 1
+    assert captured_kwargs["rivalens_trace_context"] == {
+        "id": "task_1",
+        "branch_id": "branch_1",
+        "parent_branch_id": "root_1",
+        "research_task_id": "research_task_1",
+        "competitor": "Acme",
+        "dimension_id": "pricing_model",
+        "dimension_name": "Pricing Model",
+    }
+
+
+def test_knowledge_fact_llm_extractor_scopes_batches_by_dynamic_title(monkeypatch):
+    calls = []
+
+    async def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return '{"facts": []}'
+
+    monkeypatch.setattr(knowledge_module, "create_chat_completion", fake_completion)
+    extractor = knowledge_module.KnowledgeFactLLMExtractor(
+        llm_spec="fake:test-model",
+        max_evidence_items=2,
+    )
+
+    evidence = [
+        {
+            "id": "ev_ai_1",
+            "competitor": "Feishu",
+            "branch_id": "collect_feishu_ai",
+            "collection_task_id": "task_ai",
+            "analysis_dimension_id": "ai_capability_application",
+            "report_section_id": "ai_capability_application",
+            "dimension_name": "AI capability application",
+            "source_type": "official_site",
+            "title": "Feishu AI",
+            "excerpt": "Feishu describes AI meeting summary capability.",
+        },
+        {
+            "id": "ev_ai_2",
+            "competitor": "Feishu",
+            "branch_id": "collect_feishu_ai",
+            "collection_task_id": "task_ai",
+            "analysis_dimension_id": "ai_capability_application",
+            "report_section_id": "ai_capability_application",
+            "dimension_name": "AI capability application",
+            "source_type": "docs",
+            "title": "Feishu AI Docs",
+            "excerpt": "Feishu documents AI assistant workflows.",
+        },
+        {
+            "id": "ev_product_1",
+            "competitor": "Feishu",
+            "branch_id": "collect_feishu_product",
+            "collection_task_id": "task_product",
+            "analysis_dimension_id": "core_product_supply",
+            "report_section_id": "core_product_supply",
+            "dimension_name": "Core product supply",
+            "source_type": "official_site",
+            "title": "Feishu Product",
+            "excerpt": "Feishu describes messenger, docs, and meetings.",
+        },
+    ]
+
+    facts, metadata = asyncio.run(extractor.extract(evidence))
+
+    assert facts == []
+    assert metadata["llm_batch_count"] == 2
+    assert metadata["llm_failed_batch_count"] == 0
+    assert metadata["llm_input_evidence_count"] == 3
+    assert len(calls) == 2
+    assert [call["rivalens_branch_ids"] for call in calls] == [
+        ["collect_feishu_ai"],
+        ["collect_feishu_product"],
+    ]
+    assert [call["rivalens_evidence_count"] for call in calls] == [2, 1]
+    assert calls[0]["rivalens_trace_context"]["dimension_id"] == "ai_capability_application"
+    assert calls[1]["rivalens_trace_context"]["dimension_id"] == "core_product_supply"
+    assert "Do not classify or reassign evidence" in calls[0]["messages"][0]["content"]
+    assert "core_product_supply" not in calls[0]["messages"][0]["content"]
+
+
+def test_llm_fact_normalization_inherits_evidence_dynamic_title_scope():
+    evidence = [
+        {
+            "id": "ev_ai",
+            "competitor": "Feishu",
+            "analysis_dimension_id": "ai_capability_application",
+            "schema_field_ids": ["direction_ai_capability_application"],
+            "report_section_id": "ai_capability_application",
+            "dimension_name": "AI capability application",
+            "source_type": "official_site",
+            "title": "Feishu AI",
+            "excerpt": "Feishu describes AI meeting summary capability.",
+            "url": "https://feishu.example/ai",
+            "confidence": 0.9,
+        },
+        {
+            "id": "ev_product",
+            "competitor": "Feishu",
+            "analysis_dimension_id": "core_product_supply",
+            "schema_field_ids": ["direction_core_product_supply"],
+            "report_section_id": "core_product_supply",
+            "dimension_name": "Core product supply",
+            "source_type": "official_site",
+            "title": "Feishu Product",
+            "excerpt": "Feishu describes docs and meetings.",
+            "url": "https://feishu.example/product",
+            "confidence": 0.8,
+        },
+    ]
+    raw_facts = [
+        {
+            "competitor": "Feishu",
+            "analysis_dimension_id": "wrong_dimension",
+            "schema_field_id": "wrong_schema_field",
+            "report_section_id": "wrong_report_section",
+            "fact_type": "feature_presence",
+            "subject": "Feishu AI page",
+            "predicate": "describes",
+            "object": "AI meeting summary capability",
+            "statement": "Feishu AI page describes AI meeting summary capability.",
+            "normalized_key": "wrong|dimension|key",
+            "evidence_ids": ["ev_ai", "ev_product"],
+            "confidence": 0.9,
+        }
+    ]
+
+    facts = KnowledgeStructuringAgent()._normalize_llm_facts(raw_facts, evidence)
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact["analysis_dimension_id"] == "ai_capability_application"
+    assert fact["schema_field_id"] == "direction_ai_capability_application"
+    assert fact["report_section_id"] == "ai_capability_application"
+    assert fact["evidence_ids"] == ["ev_ai"]
+    assert "wrong" not in fact["normalized_key"]
 
 
 def test_knowledge_structuring_enriches_top_evidence_snippets():

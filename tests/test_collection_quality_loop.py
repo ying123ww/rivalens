@@ -7,9 +7,11 @@ from rivalens.agents.collection import CollectionAgent
 from rivalens.agents.coverage_state import BranchCoverageStateBuilder
 from rivalens.agents.coverage_review import CoverageReviewer
 from rivalens.agents.source_metrics import SourceMetricsBuilder
+from rivalens.agents import source_gap_advisor as source_gap_module
 from rivalens.agents.source_gap_advisor import SourceGapDecision
 from rivalens.agents.success_criteria import normalize_success_criteria
 from rivalens.research.skills.researcher import ResearchConductor
+from rivalens.research.utils import llm as llm_utils
 
 
 class FakeSourceGapAdvisor:
@@ -420,11 +422,9 @@ def test_mixed_quality_evidence_triggers_differential_retry():
 
 def test_research_conductor_filters_excluded_canonical_urls():
     class DummyResearcher:
-        kwargs = {
-            "rivalens_excluded_canonical_urls": [
-                "https://bad.example/a",
-            ]
-        }
+        rivalens_excluded_canonical_urls = [
+            "https://bad.example/a",
+        ]
 
     conductor = ResearchConductor.__new__(ResearchConductor)
     conductor.researcher = DummyResearcher()
@@ -433,6 +433,208 @@ def test_research_conductor_filters_excluded_canonical_urls():
         "https://www.bad.example/a?utm_source=retry"
     )
     assert not conductor._is_excluded_source_url("https://bad.example/b")
+
+
+def test_create_chat_completion_drops_rivalens_internal_kwargs(monkeypatch):
+    captured_kwargs: dict[str, Any] = {}
+
+    class FakeLimiter:
+        async def acquire(self, provider: str) -> bool:
+            return True
+
+    class FakeProvider:
+        async def get_chat_response(self, messages, stream, websocket=None, **kwargs):
+            captured_kwargs.update(kwargs)
+            return "ok"
+
+    monkeypatch.setattr(llm_utils, "get_llm_rate_limiter", lambda: FakeLimiter())
+    monkeypatch.setattr(llm_utils, "get_llm", lambda provider, **kwargs: FakeProvider())
+
+    response = asyncio.run(
+        llm_utils.create_chat_completion(
+            messages=[{"role": "user", "content": "hello"}],
+            model="test-model",
+            llm_provider="fake",
+            rivalens_excluded_canonical_urls=["https://bad.example/a"],
+            rivalens_trace_context={"branch_id": "branch_1"},
+            configurable={"thread_id": "thread_1"},
+        )
+    )
+
+    assert response == "ok"
+    assert captured_kwargs == {"configurable": {"thread_id": "thread_1"}}
+
+
+def test_create_chat_completion_logs_trace_context_for_empty_response(
+    monkeypatch,
+    caplog,
+):
+    captured_kwargs: dict[str, Any] = {}
+
+    class FakeLimiter:
+        async def acquire(self, provider: str) -> bool:
+            return True
+
+    class FakeProvider:
+        def get_response_debug_info(self):
+            return {
+                "message_type": "AIMessage",
+                "content": {"type": "str", "length": 0},
+                "response_metadata": {
+                    "finish_reason": "stop",
+                    "token_usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 0,
+                    },
+                },
+            }
+
+        async def get_chat_response(self, messages, stream, websocket=None, **kwargs):
+            captured_kwargs.update(kwargs)
+            return ""
+
+    async def no_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(llm_utils, "get_llm_rate_limiter", lambda: FakeLimiter())
+    monkeypatch.setattr(llm_utils, "get_llm", lambda provider, **kwargs: FakeProvider())
+    monkeypatch.setattr(llm_utils.asyncio, "sleep", no_sleep)
+
+    with caplog.at_level("WARNING", logger="rivalens.research.utils.llm"):
+        try:
+            asyncio.run(
+                llm_utils.create_chat_completion(
+                    messages=[{"role": "user", "content": "hello"}],
+                    model="test-model",
+                    llm_provider="fake",
+                    rivalens_operation="generate_sub_queries",
+                    rivalens_trace_context={
+                        "id": "task_1",
+                        "branch_id": "branch_1",
+                        "dimension_id": "pricing_model",
+                        "search_stage": "root",
+                    },
+                    configurable={"thread_id": "thread_1"},
+                )
+            )
+        except RuntimeError:
+            pass
+
+    assert captured_kwargs == {"configurable": {"thread_id": "thread_1"}}
+    log_text = caplog.text
+    assert "LLM returned empty response (attempt 1/10" in log_text
+    assert "provider=fake" in log_text
+    assert "model=test-model" in log_text
+    assert "operation=generate_sub_queries" in log_text
+    assert "branch_id=branch_1" in log_text
+    assert "task_id=task_1" in log_text
+    assert "dimension_id=pricing_model" in log_text
+    assert "search_stage=root" in log_text
+    assert "'finish_reason': 'stop'" in log_text
+    assert "'completion_tokens': 0" in log_text
+
+
+def test_source_gap_advisor_passes_branch_trace_to_llm(monkeypatch):
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_completion(**kwargs):
+        captured_kwargs.update(kwargs)
+        return (
+            '{"open_gap": false, "reason": "covered", '
+            '"target_source_types": [], "confidence": 0.7}'
+        )
+
+    monkeypatch.setattr(source_gap_module, "create_chat_completion", fake_completion)
+    advisor = source_gap_module.LLMSourceGapAdvisor(llm_spec="fake:test-model")
+
+    decision = asyncio.run(
+        advisor.decide(
+            branch={
+                "id": "branch_1",
+                "parent_branch_id": "root_1",
+                "depth": 1,
+                "competitor": "Acme",
+                "dimension_id": "pricing_model",
+                "dimension_name": "Pricing Model",
+                "search_stage": "follow_up",
+            },
+            accepted_evidence=[],
+            found_source_types=[],
+            source_preferences=[],
+            minimum_count=1,
+        )
+    )
+
+    assert not decision.open_gap
+    assert captured_kwargs["rivalens_operation"] == "source_gap_advisor"
+    assert captured_kwargs["rivalens_trace_context"] == {
+        "id": "branch_1",
+        "branch_id": "branch_1",
+        "parent_branch_id": "root_1",
+        "depth": 1,
+        "competitor": "Acme",
+        "dimension_id": "pricing_model",
+        "dimension_name": "Pricing Model",
+        "search_stage": "follow_up",
+    }
+
+
+def test_source_gap_advisor_uses_larger_configurable_output_budget(monkeypatch):
+    monkeypatch.delenv("RIVALENS_SOURCE_GAP_LLM_MAX_TOKENS", raising=False)
+    advisor = source_gap_module.LLMSourceGapAdvisor(llm_spec="fake:test-model")
+    assert advisor.max_tokens == 2200
+
+    monkeypatch.setenv("RIVALENS_SOURCE_GAP_LLM_MAX_TOKENS", "3200")
+    advisor = source_gap_module.LLMSourceGapAdvisor(llm_spec="fake:test-model")
+    assert advisor.max_tokens == 3200
+
+    monkeypatch.setenv("RIVALENS_SOURCE_GAP_LLM_MAX_TOKENS", "100")
+    advisor = source_gap_module.LLMSourceGapAdvisor(llm_spec="fake:test-model")
+    assert advisor.max_tokens == 900
+
+
+def test_source_gap_advisor_prompt_is_compact():
+    advisor = source_gap_module.LLMSourceGapAdvisor(
+        llm_spec="fake:test-model",
+        max_evidence_items=1,
+        max_excerpt_chars=120,
+    )
+    prompt = advisor._prompt(
+        branch={
+            "competitor": "Acme",
+            "dimension_id": "target_users_segments",
+            "dimension_name": "Target Users",
+            "research_goal": "Assess target users.",
+        },
+        accepted_evidence=[
+            {
+                "id": "ev_1",
+                "title": "Acme customer page",
+                "url": "https://acme.example/customers?utm_source=long",
+                "canonical_url": "https://acme.example/customers",
+                "source_domain": "acme.example",
+                "source_type": "official_site",
+                "excerpt": "Acme serves enterprise teams and small businesses. " * 20,
+            }
+        ],
+        found_source_types=["official_site"],
+        source_preferences=["official_site", "news"],
+        minimum_count=2,
+        source_metrics={
+            "accepted_evidence_count": 1,
+            "unique_canonical_url_count": 1,
+            "unique_domain_count": 1,
+            "independent_source_count": 1,
+            "source_type_counts": {"official_site": 1},
+            "domain_counts": {"acme.example": 1},
+        },
+    )
+
+    assert "Return strict JSON only" in prompt
+    assert "https://acme.example/customers" not in prompt
+    assert "Acme serves enterp" in prompt
+    assert ("Acme serves enterprise teams and small businesses. " * 3) not in prompt
+    assert len(prompt) < 2500
 
 
 def test_coverage_review_does_not_synthesize_dimension_guiding_questions():

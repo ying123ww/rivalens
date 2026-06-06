@@ -181,6 +181,7 @@ async def create_chat_completion_with_tools(
         logger.info("Falling back to simple chat completion without tools")
         
         # Fallback to simple chat completion without tools
+        kwargs.setdefault("rivalens_operation", "tool_completion_fallback")
         response = await create_chat_completion(
             model=model,
             messages=messages,

@@ -9,6 +9,7 @@ from langsmith import traceable
 from rivalens.research.agent import ResearchEngine
 from rivalens.research.modes import REPORT_TYPE_BY_MODE, ResearchMode
 from rivalens.research.trace_context import (
+    RIVALENS_EXCLUDED_CANONICAL_URLS_KEY,
     RIVALENS_SEARCH_QUERIES_KEY,
     RIVALENS_TRACE_CONTEXT_KEY,
     compact_trace_context,
@@ -147,7 +148,7 @@ class ResearchEngineEvidenceCollector:
             **{
                 RIVALENS_SEARCH_QUERIES_KEY: collection_task.get("search_queries", []),
                 RIVALENS_TRACE_CONTEXT_KEY: trace_context,
-                "rivalens_excluded_canonical_urls": collection_task.get(
+                RIVALENS_EXCLUDED_CANONICAL_URLS_KEY: collection_task.get(
                     "excluded_canonical_urls",
                     [],
                 ),

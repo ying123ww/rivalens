@@ -15,6 +15,14 @@ from ..utils.llm import create_chat_completion
 
 logger = logging.getLogger(__name__)
 
+
+def default_agent() -> tuple[str, str]:
+    return "Default Agent", (
+        "You are an AI critical thinker research assistant. Your sole purpose is to write well written, "
+        "critically acclaimed, objective and structured reports on given text."
+    )
+
+
 async def choose_agent(
     query,
     cfg,
@@ -40,6 +48,7 @@ async def choose_agent(
     """
     query = f"{parent_query} - {query}" if parent_query else f"{query}"
     response = None  # Initialize response to ensure it's defined
+    kwargs.setdefault("rivalens_operation", "choose_agent")
 
     try:
         response = await create_chat_completion(
@@ -59,6 +68,11 @@ async def choose_agent(
         return agent_dict["server"], agent_dict["agent_role_prompt"]
 
     except Exception as e:
+        logger.warning(
+            "Agent selection LLM failed or returned invalid JSON: %s: %s",
+            type(e).__name__,
+            e,
+        )
         return await handle_json_error(response)
 
 
@@ -75,6 +89,10 @@ async def handle_json_error(response: str | None):
         A tuple of (agent_name, agent_role_prompt). Returns default agent
         if all parsing attempts fail.
     """
+    if response is None:
+        logger.info("No agent selection response available. Falling back to default agent.")
+        return default_agent()
+
     try:
         agent_dict = json_repair.loads(response)
         if agent_dict.get("server") and agent_dict.get("agent_role_prompt"):
@@ -101,10 +119,7 @@ async def handle_json_error(response: str | None):
             )
 
     logger.info("No valid JSON found in LLM response. Falling back to default agent.")
-    return "Default Agent", (
-        "You are an AI critical thinker research assistant. Your sole purpose is to write well written, "
-        "critically acclaimed, objective and structured reports on given text."
-    )
+    return default_agent()
 
 
 def extract_json_with_regex(response: str | None) -> str | None:

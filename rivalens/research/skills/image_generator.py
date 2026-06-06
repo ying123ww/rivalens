@@ -237,6 +237,7 @@ Return 2-3 visualization concepts as a JSON array:"""
                 max_tokens=1000,
                 llm_kwargs=self.cfg.llm_kwargs,
                 cost_callback=self.researcher.add_costs,
+                rivalens_operation="image_concept_planning",
             )
             
             # Parse JSON response
@@ -307,6 +308,7 @@ Return 2-3 visualization concepts as a JSON array:"""
                 websocket=None,
                 max_tokens=1500,
                 llm_kwargs=self.cfg.llm_kwargs,
+                rivalens_operation="image_report_analysis",
             )
             
             # Parse the response

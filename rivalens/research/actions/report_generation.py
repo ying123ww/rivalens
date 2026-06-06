@@ -34,6 +34,7 @@ async def write_report_introduction(
     Returns:
         str: The generated introduction.
     """
+    kwargs.setdefault("rivalens_operation", "write_report_introduction")
     try:
         introduction = await create_chat_completion(
             model=config.smart_llm_model,
@@ -85,6 +86,7 @@ async def write_conclusion(
     Returns:
         str: The generated conclusion.
     """
+    kwargs.setdefault("rivalens_operation", "write_conclusion")
     try:
         conclusion = await create_chat_completion(
             model=config.smart_llm_model,
@@ -135,6 +137,7 @@ async def summarize_url(
     Returns:
         str: The summarized content.
     """
+    kwargs.setdefault("rivalens_operation", "summarize_url")
     try:
         summary = await create_chat_completion(
             model=config.smart_llm_model,
@@ -183,6 +186,7 @@ async def generate_draft_section_titles(
     Returns:
         List[str]: A list of generated section titles.
     """
+    kwargs.setdefault("rivalens_operation", "generate_draft_section_titles")
     try:
         section_titles = await create_chat_completion(
             model=config.smart_llm_model,
@@ -246,6 +250,7 @@ async def generate_report(
         report:
 
     """
+    kwargs.setdefault("rivalens_operation", "generate_report")
     available_images = available_images or []
     generate_prompt = get_prompt_by_report_type(report_type, prompt_family)
     report = ""

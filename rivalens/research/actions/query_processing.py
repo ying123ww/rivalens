@@ -7,7 +7,11 @@ from ..utils.llm import create_chat_completion
 from ..prompts import PromptFamily
 from typing import Any, List, Dict
 from ..config import Config
-from ..trace_context import compact_trace_context, trace_context_from_researcher
+from ..trace_context import (
+    RIVALENS_TRACE_CONTEXT_KEY,
+    compact_trace_context,
+    trace_context_from_researcher,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -234,6 +238,8 @@ async def generate_sub_queries(
         llm_kwargs=cfg.llm_kwargs,
         reasoning_effort=ReasoningEfforts.Medium.value,
         cost_callback=cost_callback,
+        rivalens_operation="generate_sub_queries",
+        **({RIVALENS_TRACE_CONTEXT_KEY: trace_context} if trace_context else {}),
         **kwargs
     )
 

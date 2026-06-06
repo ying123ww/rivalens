@@ -111,12 +111,70 @@ class ChatLogger:
                     "stacktrace": traceback.format_exc()
                 }) + "\n")
 
+
+def _content_summary(content: Any) -> dict[str, Any]:
+    if isinstance(content, str):
+        return {"type": "str", "length": len(content)}
+    if isinstance(content, list):
+        return {"type": "list", "length": len(content)}
+    if content is None:
+        return {"type": "NoneType", "length": 0}
+    return {"type": type(content).__name__, "length": len(str(content))}
+
+
+def _safe_metadata(metadata: Any) -> Any:
+    if not isinstance(metadata, dict):
+        return metadata
+    allowed_keys = {
+        "finish_reason",
+        "model_name",
+        "model",
+        "system_fingerprint",
+        "service_tier",
+        "token_usage",
+        "usage",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "content_filter_results",
+        "prompt_filter_results",
+    }
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key in allowed_keys or key.endswith("token_usage")
+    }
+
+
+def _message_debug_info(output: Any) -> dict[str, Any]:
+    additional_kwargs = getattr(output, "additional_kwargs", {}) or {}
+    response_metadata = getattr(output, "response_metadata", {}) or {}
+    usage_metadata = getattr(output, "usage_metadata", None)
+    debug_info = {
+        "message_type": type(output).__name__,
+        "content": _content_summary(getattr(output, "content", None)),
+        "response_metadata": _safe_metadata(response_metadata),
+        "usage_metadata": usage_metadata,
+        "additional_kwargs_keys": sorted(additional_kwargs.keys()),
+    }
+    for key in ("finish_reason", "refusal", "reasoning_content"):
+        if key in additional_kwargs:
+            value = additional_kwargs[key]
+            debug_info[f"additional_{key}"] = (
+                {"type": type(value).__name__, "length": len(value)}
+                if isinstance(value, str)
+                else value
+            )
+    return debug_info
+
+
 class GenericLLMProvider:
 
     def __init__(self, llm, chat_log: str | None = None,  verbose: bool = True):
         self.llm = llm
         self.chat_logger = ChatLogger(chat_log) if chat_log else None
         self.verbose = verbose
+        self.last_response_debug: dict[str, Any] = {}
     @classmethod
     def from_provider(cls, provider: str, chat_log: str | None = None, verbose: bool=True, **kwargs: Any):
         if provider == "openai":
@@ -318,15 +376,20 @@ class GenericLLMProvider:
                 _get_llm_executor(), lambda: context.run(self.llm.invoke, messages, **kwargs)
             )
 
+            self.last_response_debug = _message_debug_info(output)
             res = output.content
 
         else:
+            self.last_response_debug = {"stream": True}
             res = await self.stream_response(messages, websocket, **kwargs)
 
         if self.chat_logger:
             await self.chat_logger.log_request(messages, res)
 
         return res
+
+    def get_response_debug_info(self) -> dict[str, Any]:
+        return dict(self.last_response_debug)
 
     async def stream_response(self, messages, websocket=None, **kwargs):
         paragraph = ""

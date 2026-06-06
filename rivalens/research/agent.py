@@ -21,7 +21,11 @@ from .config import Config
 from .llm_provider import GenericLLMProvider
 from .memory import Memory
 from .prompts import get_prompt_family
-from .trace_context import RIVALENS_SEARCH_QUERIES_KEY, RIVALENS_TRACE_CONTEXT_KEY
+from .trace_context import (
+    RIVALENS_EXCLUDED_CANONICAL_URLS_KEY,
+    RIVALENS_SEARCH_QUERIES_KEY,
+    RIVALENS_TRACE_CONTEXT_KEY,
+)
 from .skills.browser import BrowserManager
 from .skills.context_manager import ContextManager
 from .skills.curator import SourceCurator
@@ -136,6 +140,10 @@ class ResearchEngine:
         """
         self.rivalens_search_queries = kwargs.pop(RIVALENS_SEARCH_QUERIES_KEY, [])
         self.rivalens_trace_context = kwargs.pop(RIVALENS_TRACE_CONTEXT_KEY, {})
+        self.rivalens_excluded_canonical_urls = kwargs.pop(
+            RIVALENS_EXCLUDED_CANONICAL_URLS_KEY,
+            [],
+        )
         self.kwargs = kwargs
         self.query = query
         self.report_type = report_type
@@ -509,7 +517,8 @@ class ResearchEngine:
             llm_provider=self.cfg.smart_llm_provider,
             max_tokens=self.cfg.smart_token_limit,
             llm_kwargs=self.cfg.llm_kwargs,
-            cost_callback=self.add_costs
+            cost_callback=self.add_costs,
+            rivalens_operation="quick_search_summary",
         )
 
         return summary

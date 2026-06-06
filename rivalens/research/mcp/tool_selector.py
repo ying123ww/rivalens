@@ -154,6 +154,7 @@ class MCPToolSelector:
                 llm_provider=self.cfg.strategic_llm_provider,
                 llm_kwargs=self.cfg.llm_kwargs,
                 cost_callback=self.researcher.add_costs if self.researcher and hasattr(self.researcher, 'add_costs') else None,
+                rivalens_operation="mcp_tool_selection",
             )
             return result
         except Exception as e:

@@ -6,6 +6,7 @@ from typing import Any
 
 RIVALENS_TRACE_CONTEXT_KEY = "rivalens_trace_context"
 RIVALENS_SEARCH_QUERIES_KEY = "rivalens_search_queries"
+RIVALENS_EXCLUDED_CANONICAL_URLS_KEY = "rivalens_excluded_canonical_urls"
 
 _TRACE_CONTEXT_KEYS = (
     "id",

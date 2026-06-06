@@ -1128,7 +1128,7 @@ class ResearchConductor:
 
     def _is_excluded_source_url(self, url: str) -> bool:
         excluded_canonical_urls = set(
-            self.researcher.kwargs.get("rivalens_excluded_canonical_urls", []) or []
+            getattr(self.researcher, "rivalens_excluded_canonical_urls", []) or []
         )
         if not excluded_canonical_urls:
             return False

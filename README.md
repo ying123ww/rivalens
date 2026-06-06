@@ -153,6 +153,29 @@ flowchart LR
     E --> F["publisher\nPublisherAgent"]
 ```
 
+### Agent-only local run
+
+To test one input through the full Rivalens Agent DAG without starting the
+backend, frontend app, Docker services, Postgres, or Redis, run:
+
+```bash
+.venv/bin/python scripts/run_agent_flow.py "Compare Feishu and DingTalk for enterprise collaboration"
+```
+
+For explicit competitor scope:
+
+```bash
+.venv/bin/python scripts/run_agent_flow.py "分析飞书和钉钉的企业协同竞争格局" \
+  --competitor 飞书 \
+  --competitor 钉钉
+```
+
+The command writes Markdown, HTML, and full state JSON under
+`outputs/agent_runs/`. By default it still runs every Agent node, but uses a
+small local-test collection budget and disables backend/session persistence. Use
+`--full-budget` for the normal workflow collection budget, or `--print-report`
+to print the final report in the terminal.
+
 `scope_planner` owns the planning phase end to end: it normalizes competitor
 inputs, selects an industry, composes the confirmed analysis directions from
 reusable industry facets, then emits one `research_plan` handoff to
@@ -403,21 +426,26 @@ example 飞书 or 钉钉, the planned sub-queries use Chinese source terms such 
 
 ```env
 RIVALENS_KNOWLEDGE_STRUCTURING_LLM=openai:gpt-4.1-mini
-RIVALENS_KNOWLEDGE_FACT_LLM_MAX_EVIDENCE=24
-RIVALENS_KNOWLEDGE_FACT_LLM_EXCERPT_CHARS=700
+RIVALENS_KNOWLEDGE_FACT_LLM_MAX_TOKENS=2200
+RIVALENS_KNOWLEDGE_FACT_LLM_MAX_EVIDENCE=4
+RIVALENS_KNOWLEDGE_FACT_LLM_EXCERPT_CHARS=360
 ```
 
 The LLM setting uses the same `<provider>:<model>` format as other Rivalens LLM
-configuration. If `RIVALENS_KNOWLEDGE_STRUCTURING_LLM` is unset, the agent also
-checks `KNOWLEDGE_STRUCTURING_LLM`, then `STRATEGIC_LLM`, then `SMART_LLM`.
-Every LLM fact candidate must cite accepted input evidence IDs; the agent
-rejects candidates without valid citations, fills dimension and schema metadata
-from the cited evidence, merges duplicates by `normalized_key`, and falls back
-to deterministic fact extraction when the LLM path is unavailable or invalid.
+configuration. LLM fact extraction is enabled only when
+`RIVALENS_KNOWLEDGE_STRUCTURING_LLM` or `KNOWLEDGE_STRUCTURING_LLM` is set, so a
+global writing or strategic model does not accidentally turn it on. The
+extractor batches accepted evidence by competitor, dynamic analysis dimension,
+report section, and branch; each `KnowledgeFact` keeps the cited evidence's
+`analysis_dimension_id` and `report_section_id` instead of reclassifying the
+source. Every LLM fact candidate must cite accepted input evidence IDs; the
+agent rejects candidates without valid citations, fills schema metadata from the
+cited evidence, merges duplicates by `normalized_key`, and falls back to
+deterministic fact extraction when the LLM path is unavailable or invalid.
 If an LLM pricing fact is too broad, the local atomizer splits it using the
 cited evidence before analysis. Agent events record the source, prompt ID,
-provider, model, input count, fact count, atomization counts, fallback reason,
-and estimated cost.
+provider, model, input count, batch count, failed batch count, fact count,
+atomization counts, fallback reason, and estimated cost.
 
 ## LangSmith Tracing
 

@@ -20,9 +20,45 @@ from rivalens.research.llm_provider.generic.base import (
 )
 
 from ..prompts import PromptFamily
+from ..trace_context import RIVALENS_TRACE_CONTEXT_KEY, compact_trace_context
 from .costs import estimate_llm_cost
 from .llm_rate_limiter import get_llm_rate_limiter
 from .validators import Subtopics
+
+
+def _provider_runtime_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if not key.startswith("rivalens_")
+    }
+
+
+def _llm_log_context(
+    *,
+    llm_provider: str | None,
+    model: str | None,
+    kwargs: dict[str, Any],
+) -> str:
+    trace_context = compact_trace_context(kwargs.get(RIVALENS_TRACE_CONTEXT_KEY))
+    langsmith_extra = kwargs.get("langsmith_extra") or {}
+    metadata = langsmith_extra.get("metadata") if isinstance(langsmith_extra, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+
+    fields = {
+        "provider": llm_provider or "<unset>",
+        "model": model or "<unset>",
+        "operation": metadata.get("rivalens_operation") or kwargs.get("rivalens_operation"),
+        "branch_id": trace_context.get("branch_id") or metadata.get("rivalens_branch_id"),
+        "branch_ids": metadata.get("rivalens_branch_ids") or kwargs.get("rivalens_branch_ids"),
+        "task_id": trace_context.get("id") or metadata.get("rivalens_id"),
+        "dimension_id": trace_context.get("dimension_id") or metadata.get("rivalens_dimension_id"),
+        "search_stage": trace_context.get("search_stage") or metadata.get("rivalens_search_stage"),
+        "competitor": trace_context.get("competitor") or metadata.get("rivalens_competitor"),
+        "evidence_count": metadata.get("rivalens_evidence_count") or kwargs.get("rivalens_evidence_count"),
+    }
+    parts = [f"{key}={value}" for key, value in fields.items() if value not in (None, "", [], {})]
+    return "; ".join(parts)
 
 
 def get_llm(llm_provider: str, **kwargs):
@@ -109,15 +145,22 @@ async def create_chat_completion(
     # create response
     max_attempts = 1 if (stream and websocket is not None) else 10
     last_exception: Exception | None = None
+    provider_runtime_kwargs = _provider_runtime_kwargs(kwargs)
+    log_context = _llm_log_context(
+        llm_provider=llm_provider,
+        model=model,
+        kwargs=kwargs,
+    )
+    log_suffix = f"; {log_context}" if log_context else ""
     for attempt in range(1, max_attempts + 1):
         try:
             response = await provider.get_chat_response(
-                messages, stream, websocket, **kwargs
+                messages, stream, websocket, **provider_runtime_kwargs
             )
         except Exception as exc:
             last_exception = exc
             logging.getLogger(__name__).warning(
-                f"LLM request failed (attempt {attempt}/{max_attempts}): {exc}"
+                f"LLM request failed (attempt {attempt}/{max_attempts}{log_suffix}): {exc}"
             )
             if attempt < max_attempts:
                 await asyncio.sleep(min(2 ** (attempt - 1), 8))
@@ -126,8 +169,14 @@ async def create_chat_completion(
 
         if not response:
             last_exception = RuntimeError("Empty response from LLM provider")
+            response_debug = (
+                provider.get_response_debug_info()
+                if hasattr(provider, "get_response_debug_info")
+                else {}
+            )
             logging.getLogger(__name__).warning(
-                f"LLM returned empty response (attempt {attempt}/{max_attempts})"
+                "LLM returned empty response "
+                f"(attempt {attempt}/{max_attempts}{log_suffix}; response_debug={response_debug})"
             )
             if attempt < max_attempts:
                 await asyncio.sleep(min(2 ** (attempt - 1), 8))
@@ -140,7 +189,7 @@ async def create_chat_completion(
 
         return response
 
-    logging.error(f"Failed to get response from {llm_provider} API")
+    logging.error(f"Failed to get response from {llm_provider} API{log_suffix}")
     raise RuntimeError(f"Failed to get response from {llm_provider} API") from last_exception
 
 
@@ -198,7 +247,7 @@ async def construct_subtopics(
             "data": data,
             "subtopics": subtopics,
             "max_subtopics": config.max_subtopics
-        }, **kwargs)
+        }, **_provider_runtime_kwargs(kwargs))
 
         return output
 

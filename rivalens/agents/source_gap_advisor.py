@@ -52,15 +52,27 @@ class LLMSourceGapAdvisor:
         self,
         llm_spec: str | None = None,
         temperature: float = 0.1,
-        max_tokens: int = 900,
-        max_evidence_items: int = 8,
-        max_excerpt_chars: int = 700,
+        max_tokens: int | None = None,
+        max_evidence_items: int | None = None,
+        max_excerpt_chars: int | None = None,
     ) -> None:
         self.llm_spec = llm_spec or self._llm_spec_from_env()
         self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.max_evidence_items = max_evidence_items
-        self.max_excerpt_chars = max_excerpt_chars
+        self.max_tokens = max_tokens or self._env_int(
+            "RIVALENS_SOURCE_GAP_LLM_MAX_TOKENS",
+            2200,
+            minimum=900,
+        )
+        self.max_evidence_items = max_evidence_items or self._env_int(
+            "RIVALENS_SOURCE_GAP_LLM_MAX_EVIDENCE",
+            6,
+            minimum=1,
+        )
+        self.max_excerpt_chars = max_excerpt_chars or self._env_int(
+            "RIVALENS_SOURCE_GAP_LLM_EXCERPT_CHARS",
+            360,
+            minimum=120,
+        )
 
     @property
     def provider(self) -> str | None:
@@ -112,6 +124,17 @@ class LLMSourceGapAdvisor:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             cost_callback=add_cost,
+            rivalens_operation="source_gap_advisor",
+            rivalens_trace_context={
+                "id": branch.get("id", ""),
+                "branch_id": branch.get("id", ""),
+                "parent_branch_id": branch.get("parent_branch_id"),
+                "depth": branch.get("depth", 0),
+                "competitor": branch.get("competitor", ""),
+                "dimension_id": branch.get("dimension_id", ""),
+                "dimension_name": branch.get("dimension_name", ""),
+                "search_stage": branch.get("search_stage", ""),
+            },
         )
         parsed = json_repair.loads(response)
         decision = SourceGapDecision.model_validate(parsed)
@@ -157,12 +180,9 @@ class LLMSourceGapAdvisor:
                 {
                     "id": evidence_id,
                     "title": evidence.get("title", ""),
-                    "url": evidence.get("url", ""),
-                    "canonical_url": evidence.get("canonical_url", ""),
                     "source_domain": evidence.get("source_domain", ""),
                     "source_type": evidence.get("source_type", ""),
                     "excerpt": excerpt[: self.max_excerpt_chars],
-                    "confidence": evidence.get("confidence", 0.5),
                 }
             )
         return compact
@@ -183,8 +203,6 @@ class LLMSourceGapAdvisor:
             "dimension_id": branch.get("dimension_id", ""),
             "dimension_name": branch.get("dimension_name", ""),
             "research_goal": branch.get("research_goal", ""),
-            "guiding_questions": list(branch.get("guiding_questions", []))[:6],
-            "success_criteria": list(branch.get("success_criteria", []))[:8],
             "source_preferences": source_preferences,
             "found_source_types": found_source_types,
             "accepted_count": source_metrics.get(
@@ -200,45 +218,31 @@ class LLMSourceGapAdvisor:
             ensure_ascii=False,
             indent=2,
         )
-        evidence_json = json.dumps(accepted_evidence, ensure_ascii=False, indent=2)
-        return f"""Decide whether this competitor-analysis branch needs an additional source coverage gap.
+        evidence_json = json.dumps(
+            self._compact_evidence(accepted_evidence),
+            ensure_ascii=False,
+            indent=2,
+        )
+        return f"""Return strict JSON only. Decide if this branch needs source-coverage follow-up.
 
-Return strict JSON only. Do not wrap it in Markdown.
+JSON shape:
+{{"open_gap": false, "gap_code": "", "query_focus": "", "target_source_types": [], "blocking": false, "reason": "", "expected_improvement": "", "confidence": 0.0}}
 
-You are not judging whether content success criteria are satisfied. CoverageReviewer handles content coverage separately.
-Your job is only to decide whether the accepted evidence source mix needs a targeted follow-up collection because another public source type would materially improve traceability, authority, or reliability.
+Rules:
+- Judge source mix only, not content coverage.
+- source_preferences are hints, not hard requirements.
+- Open a gap only if accepted sources are materially weak for traceability, authority, independence, or reliability.
+- Use blocking=true only when current sources are too weak for downstream analysis.
+- target_source_types must be from: {allowed_source_types}
+- Keep reason and expected_improvement under 160 chars each.
 
-Allowed target_source_types:
-{allowed_source_types}
-
-Required JSON shape:
-{{
-  "open_gap": false,
-  "gap_code": "stable_snake_case_code_when_open",
-  "query_focus": "specific follow-up collection focus when open",
-  "target_source_types": ["one_or_more_allowed_source_types_when_open"],
-  "blocking": false,
-  "reason": "short reason grounded in the accepted evidence and branch context",
-  "expected_improvement": "what the follow-up source would improve",
-  "confidence": 0.0
-}}
-
-Decision rules:
-- source_preferences are hints, not requirements. Do not open a gap just because a preferred source type is absent.
-- Open a gap only when the current accepted evidence source mix is materially weak for this branch.
-- Use blocking=true only when the current source mix is too weak to support downstream analysis without targeted collection.
-- If the accepted source mix is good enough, return open_gap=false even if another source type might be nice to have.
-- If open_gap=true, choose concise target_source_types from the allowed list and write a query_focus a collector can act on.
-- Use source_metrics for source independence. Do not treat accepted_count alone as enough when canonical URLs, domains, or content hashes show duplicates.
-- Do not invent evidence. Base the decision only on the branch context and accepted evidence below.
-
-Branch context:
+Branch:
 {branch_json}
 
-Source metrics:
+Metrics:
 {source_metrics_json}
 
-Accepted evidence:
+Evidence:
 {evidence_json}
 """
 
@@ -296,6 +300,16 @@ Accepted evidence:
         if not provider or not model:
             return None
         return provider, model
+
+    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
 
     def _slug(self, value: str) -> str:
         slug = "".join(
