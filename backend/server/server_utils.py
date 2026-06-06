@@ -518,6 +518,14 @@ async def handle_start_command(
             "type": "report_complete",
             "content": "report_complete",
             "output": report,
+            "metadata": {
+                "research_id": research_id,
+                "report_context": (
+                    _structured_report_client_context(report_payload)
+                    if isinstance(report_payload, dict)
+                    else {}
+                ),
+            },
         })
         file_paths = await generate_report_files(
             report,
@@ -653,6 +661,22 @@ def _structured_report_store_fields(
     elif generated_artifacts:
         fields["report_artifacts"] = dict(generated_artifacts)
 
+    return fields
+
+
+def _structured_report_client_context(response: Dict[str, Any]) -> Dict[str, Any]:
+    fields: Dict[str, Any] = {}
+    for key in (
+        "run_id",
+        "trace_summary",
+        "assessments",
+        "evidence_index",
+        "analysis_claims",
+        "claim_support_reviews",
+        "competitor_knowledge",
+    ):
+        if key in response:
+            fields[key] = response[key]
     return fields
 
 

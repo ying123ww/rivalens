@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useRef, useState, useEffect, useCallback } from 'react';
-import { Data, ChatBoxSettings } from '../types/data';
+import { Data, ChatBoxSettings, ResearchHistoryItem } from '../types/data';
 import { getHost } from '../helpers/getHost';
 
 export const useWebSocket = (
@@ -8,7 +8,8 @@ export const useWebSocket = (
   setLoading: Dispatch<SetStateAction<boolean>>,
   setShowHumanFeedback: Dispatch<SetStateAction<boolean>>,
   setQuestionForHuman: Dispatch<SetStateAction<boolean | true>>,
-  setCurrentResearchId?: Dispatch<SetStateAction<string | null>>
+  setCurrentResearchId?: Dispatch<SetStateAction<string | null>>,
+  setReportContext?: Dispatch<SetStateAction<Partial<ResearchHistoryItem> | Record<string, any> | null>>
 ) => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const heartbeatInterval = useRef<number>();
@@ -44,6 +45,7 @@ export const useWebSocket = (
       activeResearchIdRef.current = report.id;
       setCurrentResearchId?.(report.id);
     }
+    setReportContext?.(report);
 
     if (status === 'running') {
       if (Array.isArray(report.orderedData)) {
@@ -96,7 +98,7 @@ export const useWebSocket = (
     }
 
     return false;
-  }, [appendLog, setAnswer, setCurrentResearchId, setLoading, setOrderedData, stopRecoveryPolling]);
+  }, [appendLog, setAnswer, setCurrentResearchId, setLoading, setOrderedData, setReportContext, stopRecoveryPolling]);
 
   const pollRecoveredReport = useCallback((researchId: string, attempt = 0) => {
     stopRecoveryPolling();
@@ -167,6 +169,7 @@ export const useWebSocket = (
     activeResearchIdRef.current = null;
     localStorage.removeItem('activeResearchId');
     setCurrentResearchId?.(null);
+    setReportContext?.(null);
 
     if (typeof window !== 'undefined') {
       
@@ -258,7 +261,26 @@ export const useWebSocket = (
               // Replace entire report with the complete version (includes images)
               console.log('Received complete report with images');
               setAnswer(data.output);
+              const reportContext = data.metadata?.report_context;
+              if (reportContext && typeof reportContext === 'object') {
+                setReportContext?.({
+                  ...reportContext,
+                  id: activeResearchIdRef.current || researchId || undefined,
+                  answer: data.output,
+                });
+              }
             } else if (data.type === 'path') {
+              if (data.output && typeof data.output === 'object') {
+                setReportContext?.((current: any) => ({
+                  ...(current || {}),
+                  artifacts: data.output,
+                  report_artifacts: {
+                    ...((current || {}).report_artifacts || {}),
+                    ...data.output,
+                  },
+                  id: data.output.research_id || activeResearchIdRef.current || undefined,
+                }));
+              }
               researchActiveRef.current = false;
               setLoading(false);
               localStorage.removeItem('activeResearchId');
@@ -314,6 +336,7 @@ export const useWebSocket = (
     setShowHumanFeedback,
     setQuestionForHuman,
     setCurrentResearchId,
+    setReportContext,
     appendLog,
     pollRecoveredReport,
     stopRecoveryPolling,

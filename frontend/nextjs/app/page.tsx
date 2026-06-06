@@ -12,7 +12,8 @@ import {
   IndustryDirectionPlan,
   QuestionData,
   ChatMessage,
-  ChatData
+  ChatData,
+  ResearchHistoryItem
 } from '../types/data';
 import { preprocessOrderedData } from '../utils/dataProcessing';
 import { toast } from "react-hot-toast";
@@ -81,6 +82,7 @@ export default function Home() {
   const mainContentRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentResearchId, setCurrentResearchId] = useState<string | null>(null);
+  const [currentReportContext, setCurrentReportContext] = useState<Partial<ResearchHistoryItem> | Record<string, any> | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [isProcessingChat, setIsProcessingChat] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
@@ -125,7 +127,8 @@ export default function Home() {
     setLoading,
     setShowHumanFeedback,
     setQuestionForHuman,
-    setCurrentResearchId
+    setCurrentResearchId,
+    setCurrentReportContext
   );
 
   const handleFeedbackSubmit = (feedback: string | null) => {
@@ -270,7 +273,15 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           report: answer || "",
-          messages: formattedMessages
+          messages: formattedMessages,
+          research_id: currentResearchId,
+          trace_summary: currentReportContext?.trace_summary,
+          assessments: currentReportContext?.assessments,
+          evidence_index: currentReportContext?.evidence_index,
+          analysis_claims: currentReportContext?.analysis_claims,
+          claim_support_reviews: currentReportContext?.claim_support_reviews,
+          competitor_knowledge: currentReportContext?.competitor_knowledge,
+          state: currentReportContext?.state,
         }),
       });
       
@@ -381,6 +392,7 @@ export default function Home() {
     setPromptValue("");
     setAnswer("");
     setCurrentResearchId(null); // Reset current research ID for new research
+    setCurrentReportContext(null);
     setOrderedData((prevOrder) => [...prevOrder, { type: 'question', content: newQuestion }]);
 
     const rivalensSettings = {
@@ -555,6 +567,7 @@ export default function Home() {
     setIsStopped(false);
     setIsInChatMode(false);
     setCurrentResearchId(null); // Reset research ID
+    setCurrentReportContext(null);
     setIsProcessingChat(false);
     
     // Clear previous research data
@@ -641,7 +654,7 @@ export default function Home() {
       if (isUpdatingRef.current) return;
       
       if (showResult && !loading && answer && question && orderedData.length > 0) {
-        if (isInChatMode && currentResearchId) {
+        if (currentResearchId) {
           // Prevent redundant updates by checking if data has changed
           try {
             const currentResearch = await getResearchById(currentResearchId);
@@ -898,6 +911,7 @@ export default function Home() {
                   isProcessingChat={isProcessingChat}
                   onNewResearch={handleStartNewResearch}
                   toggleSidebar={toggleSidebar}
+                  reportContext={currentReportContext}
                 />
               ) : (
                 <ResearchContent
@@ -920,6 +934,7 @@ export default function Home() {
                   onShareClick={currentResearchId ? handleCopyUrl : undefined}
                   reset={reset}
                   isProcessingChat={isProcessingChat}
+                  reportContext={currentReportContext}
                 />
               )}
               
