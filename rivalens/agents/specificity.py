@@ -18,6 +18,8 @@ def extract_specificity_hints(text: str, limit: int = DETAIL_HINT_LIMIT) -> list
     candidates: list[str] = []
 
     patterns = [
+        r"\d+(?:[.,]\d+)?\s*(?:运行额度|额度|点数|算粒|次\s*AI\s*调用|次调用|次)",
+        r"(?:计费单元|基础运行|模型调用|运行额度|AI\s*运行调用|大模型调用)",
         r"(?:Gartner|Forrester|IDC|G2|艾瑞|易观|QuestMobile)?\s*《[^》]{2,48}》",
         r"[“\"]([^”\"]{2,48})[”\"]",
         r"\b(?:ISO|SOC|DSMM)\s*[A-Za-z0-9.-]{0,12}\b",
@@ -27,7 +29,7 @@ def extract_specificity_hints(text: str, limit: int = DETAIL_HINT_LIMIT) -> list
         r"\d+(?:[.,]\d+)?\s*%",
         r"\b20\d{2}(?:[-年./]\d{1,2}(?:[-月./]\d{1,2}日?)?)?\b",
         r"\bv?\d+(?:\.\d+){1,3}\b",
-        r"\d+(?:[.,]\d+)?\s*(?:天|个|家|项|人|用户|席位|小时|分钟|GB|TB|次|万|亿)",
+        r"\d+(?:[.,]\d+)?\s*(?:天|个|家|项|人|用户|席位|小时|分钟|GB|TB|次|万|亿|额度|点数|算粒)",
         r"[\u4e00-\u9fff]{1,10}[A-Za-z][A-Za-z0-9+._-]{1,24}",
         r"[A-Za-z]{2,}[A-Za-z0-9+._-]{0,24}[\u4e00-\u9fff]{1,10}",
         r"[\u4e00-\u9fffA-Za-z0-9+._-]{0,18}(?:飞书People|飞书项目|飞书云文档|飞书多维表格|飞书知识库|钉钉ONE|AI听记|AI助理|钉盘|服务窗)",
@@ -142,6 +144,9 @@ def _append_scenario_hints(candidates: list[str], segment: str) -> None:
         "合同",
         "审批",
         "协同",
+        "计费",
+        "额度",
+        "调用",
     )
     for keyword in keywords:
         start = 0
@@ -182,6 +187,25 @@ def _low_value_hint(hint: str) -> bool:
     if len(hint) < 2:
         return True
     lowered = hint.lower()
+    low_value_terms = (
+        "案例与方案",
+        "产品功能",
+        "合作与支持",
+        "飞行社",
+        "下载飞书",
+        "免费试用",
+        "登录",
+        "博客中心",
+        "联系我们",
+        "联系销售",
+        "手册精选",
+    )
+    if any(term in hint for term in low_value_terms):
+        return True
+    if "管理员" in hint and "权限" in hint and not re.search(r"\d", hint):
+        return True
+    if hint in {"飞书管理", "钉钉管理"}:
+        return True
     if lowered in {
         "public evidence",
         "multiple signals",

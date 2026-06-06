@@ -492,7 +492,21 @@ class ClaimSupportReviewer:
         lowered_claim = claim_text.lower()
         if not any(
             term in lowered_claim
-            for term in ("pricing", "price", "billing", "定价", "价格", "收费")
+            for term in (
+                "pricing",
+                "price",
+                "billing",
+                "定价",
+                "价格",
+                "收费",
+                "计费",
+                "运行额度",
+                "额度",
+                "消耗规则",
+                "调用次数",
+                "点数",
+                "算粒",
+            )
         ):
             return []
 
@@ -516,6 +530,11 @@ class ClaimSupportReviewer:
             evidence_items,
             knowledge_facts,
         )
+        if (
+            self._billing_usage_details(claim_text, [])
+            and self._billing_usage_details(context_text, [])
+        ):
+            return []
         context_hints = extract_specificity_hints(context_text)
         if len(context_hints) < 2:
             return []
@@ -546,8 +565,26 @@ class ClaimSupportReviewer:
         return bool(
             re.search(r"[$¥€£]\s?\d", text)
             or re.search(r"\d+(?:[.,]\d+)?\s*元", text)
+            or re.search(
+                r"\d+(?:[.,]\d+)?\s*(?:运行额度|额度|点数|算粒|次\s*AI\s*调用|次调用|次)",
+                text,
+                flags=re.IGNORECASE,
+            )
             or re.search(r"\bfree(?:\s+(?:plan|tier|version))?\b", text.lower())
-            or any(term in text for term in ("免费版", "免费套餐", "联系销售", "定制报价"))
+            or any(
+                term in text
+                for term in (
+                    "免费版",
+                    "免费套餐",
+                    "联系销售",
+                    "定制报价",
+                    "计费单元",
+                    "固定消耗",
+                    "基础运行",
+                    "模型调用",
+                    "运行额度",
+                )
+            )
         )
 
     def _pricing_details(self, text: str) -> list[str]:
@@ -565,6 +602,7 @@ class ClaimSupportReviewer:
                 detail = self._pricing_detail_from_match(match)
                 if detail and detail not in details:
                     details.append(detail)
+        details.extend(self._billing_usage_details(text, details))
         if re.search(r"\bfree(?:\s+(?:plan|tier|version))?\b", text.lower()) or any(
             term in text for term in ("免费版", "免费套餐", "免费计划")
         ):
@@ -572,6 +610,39 @@ class ClaimSupportReviewer:
             if free_detail not in details:
                 details.append(free_detail)
         return details[:8]
+
+    def _billing_usage_details(self, text: str, existing: list[str]) -> list[str]:
+        details: list[str] = []
+        billing_patterns = [
+            (
+                r"采用[「\"]?(?P<unit>[^」\"，。；;]{2,24})[」\"]?作为计费单元",
+                lambda match: f"计费单元: {match.group('unit')}",
+            ),
+            (
+                r"赠送\s*(?P<amount>\d+(?:[.,]\d+)?)\s*(?P<unit>运行额度|额度|点数|算粒)",
+                lambda match: f"赠送 {match.group('amount')} {match.group('unit')}",
+            ),
+            (
+                r"固定消耗\s*(?P<amount>\d+(?:[.,]\d+)?)\s*(?:个)?\s*(?P<unit>运行额度|额度|点数|算粒)",
+                lambda match: f"固定消耗 {match.group('amount')} {match.group('unit')}",
+            ),
+            (
+                r"(?P<amount>\d+(?:[.,]\d+)?)\s*(?P<unit>运行额度|额度|点数|算粒|次\s*AI\s*调用|次调用)",
+                lambda match: f"{match.group('amount')} {match.group('unit')}",
+            ),
+            (
+                r"运行额度由[「\"]?基础运行[」\"]?和[「\"]?模型调用[」\"]?两部分组成",
+                lambda match: "运行额度由基础运行和模型调用两部分组成",
+            ),
+        ]
+        seen = set(existing)
+        for pattern, formatter in billing_patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                detail = " ".join(formatter(match).split())
+                if detail and detail not in seen:
+                    details.append(detail)
+                    seen.add(detail)
+        return details
 
     def _pricing_detail_from_match(self, match: re.Match[str]) -> str:
         plan = " ".join((match.group("plan") or "").split()).strip(" ：:-")

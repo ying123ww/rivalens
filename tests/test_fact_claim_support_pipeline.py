@@ -832,6 +832,112 @@ def test_claim_support_flags_pricing_claim_without_available_price_detail():
     assert "$20/user/month" in review["suggested_revision"]
 
 
+def test_claim_support_accepts_ai_billing_claim_with_usage_quota_details():
+    reviewer = ClaimSupportReviewer()
+    excerpt = (
+        "智能伙伴创建平台采用「运行额度」作为计费单元。首次开通平台时，"
+        "我们将赠送 20,000 运行额度。运行额度由「基础运行」和「模型调用」"
+        "两部分组成。每次 AI 应用运行调用将固定消耗 1 个运行额度。"
+    )
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_ai_billing",
+                "analysis_dimension_id": "ai_capability_application",
+                "claim_type": "pricing_strategy",
+                "claim_risk_level": "high",
+                "knowledge_fact_ids": ["fact_ai_billing"],
+                "claim": (
+                    "飞书智能伙伴创建平台采用运行额度作为计费单元，首次开通赠送 "
+                    "20,000 运行额度；运行额度由基础运行和模型调用两部分组成，"
+                    "每次 AI 应用运行调用固定消耗 1 个运行额度。"
+                ),
+                "competitors": ["飞书"],
+                "evidence_ids": ["ev_ai_billing"],
+                "confidence": 0.9,
+            }
+        ],
+        "knowledge_facts": [
+            {
+                "id": "fact_ai_billing",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "object": excerpt,
+                "statement": excerpt,
+                "evidence_ids": ["ev_ai_billing"],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_ai_billing",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "title": "智能伙伴创建平台计费说明 - 飞书官网",
+                "excerpt": excerpt
+                + " 仅飞书超级管理员或拥有费用中心权限的管理员可以执行付费操作。",
+                "url": "https://www.feishu.cn/content/1cnvbb55",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "supported"
+    assert review["recommended_action"] == "accept"
+
+
+def test_claim_support_revises_generic_ai_billing_claim_without_quota_details():
+    reviewer = ClaimSupportReviewer()
+    excerpt = (
+        "智能伙伴创建平台采用「运行额度」作为计费单元。首次开通平台时，"
+        "我们将赠送 20,000 运行额度。运行额度由「基础运行」和「模型调用」"
+        "两部分组成。"
+    )
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_ai_billing_generic",
+                "analysis_dimension_id": "ai_capability_application",
+                "claim_type": "pricing_strategy",
+                "claim_risk_level": "high",
+                "knowledge_fact_ids": ["fact_ai_billing"],
+                "claim": "飞书 AI 计费有公开信息。",
+                "competitors": ["飞书"],
+                "evidence_ids": ["ev_ai_billing"],
+                "confidence": 0.9,
+            }
+        ],
+        "knowledge_facts": [
+            {
+                "id": "fact_ai_billing",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "object": excerpt,
+                "statement": excerpt,
+                "evidence_ids": ["ev_ai_billing"],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_ai_billing",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "title": "智能伙伴创建平台计费说明 - 飞书官网",
+                "excerpt": excerpt,
+                "url": "https://www.feishu.cn/content/1cnvbb55",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "weak"
+    assert review["recommended_action"] == "revise"
+    assert "20,000 运行额度" in review["suggested_revision"]
+
+
 def test_claim_support_flags_generic_non_pricing_claim_when_details_exist():
     reviewer = ClaimSupportReviewer()
     state = {
