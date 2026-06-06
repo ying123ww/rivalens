@@ -538,7 +538,12 @@ individual collection branch uses.
 competitor selection, an evidence-driven competitor-analysis chapter whose
 dimensions are dynamically derived from supported claims and accepted evidence,
 summary, and an automatically appended information-index appendix that maps
-paper-style citation refs such as `[1]` back to evidence IDs and source URLs. The
+paper-style citation refs such as `[1]` back to evidence IDs and source URLs.
+The summary chapter uses fixed SWOT and TOWS matrix skeletons; the LLM fills the
+cells but cannot change the matrix axes, row labels, or column labels. Dynamic
+analysis subsections are also checked before acceptance: if a competitor has
+supported citation-backed claims in the section, the generated subsection must
+include at least one citation from that competitor's claims. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and

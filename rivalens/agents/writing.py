@@ -261,13 +261,14 @@ class ReportWriterAgent:
 
 ### SWOT 因素矩阵
 
-先输出 2×2 SWOT 因素总览表：
+必须严格输出下面这个固定 2×2 SWOT 因素矩阵；不要改表头、不要改行名、不要新增列：
 
-| S 优势 | W 劣势 |
-| --- | --- |
-| O 机会 | T 威胁 |
+|  | 正向因素 | 负向因素 |
+| --- | --- | --- |
+| 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
+| 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
 
-每个象限 3-5 条，绑定 citation_ref。
+只替换每个格子里的编号内容；每个象限 3-5 条，绑定 citation_ref。证据不足可以少于 3 条，但必须在该象限格子中写“公开证据不足”，不要为了凑条数重复占位。
 
 各象限追问（必须在展开回答中覆盖，而非只列关键词）：
 
@@ -297,12 +298,14 @@ class ReportWriterAgent:
 
 基于 SWOT 因子交叉配对，输出竞品战略推演矩阵：
 
+必须严格输出下面这个固定 TOWS 战略矩阵；不要改表头、不要改行名、不要新增列：
+
 |  | O 机会 | T 威胁 |
 | --- | --- | --- |
-| **S 优势** | **SO 增长型**<br>竞品会如何用优势抢机会？<br>预计推出什么产品或动作？ | **ST 多点型**<br>竞品会如何用优势对冲威胁？<br>是否会分散经营化解风险？ |
-| **W 劣势** | **WO 扭转型**<br>机会暴露了竞品哪些可被追的短板？<br>竞品是否已在调整？ | **WT 防御型**<br>竞品哪些短板在威胁面前最脆弱？<br>这些脆弱点是否构成可攻击的突破口？ |
+| S 优势 | **SO 增长型**<br>1. ...<br>2. ... | **ST 多点型**<br>1. ...<br>2. ... |
+| W 劣势 | **WO 扭转型**<br>1. ...<br>2. ... | **WT 防御型**<br>1. ...<br>2. ... |
 
-每个格子输出 1-2 条具体战略推演，必须是可观察/可验证的动作，不能写空泛结论。
+只替换每个格子里的编号内容；每个格子输出 1-2 条具体战略推演，必须是可观察/可验证的动作，不能写空泛结论。
 
 示例（仅供参考格式与颗粒度）：
 假设 Context 中 S: “产品免费额度显著高于同类 [3]”，O: “中小企业对低成本工具的需求在增长 [5]”，则 SO 格应写为：
@@ -457,6 +460,12 @@ class ReportWriterAgent:
                     generation=generation,
                 )
                 section_body = self._clean_dynamic_section_body(generated)
+                if section_body and not self._dynamic_section_body_covers_claim_competitors(
+                    section_body,
+                    section_claims,
+                    citation_refs_by_evidence_id,
+                ):
+                    section_body = ""
 
             if not section_body:
                 if section_claims:
@@ -593,7 +602,14 @@ class ReportWriterAgent:
 ## 第四章：总结
 
 ### SWOT 因素矩阵
-输出 2×2 SWOT 因素总览表，每格 3-5 条，绑定 citation_ref。需覆盖以下追问：
+必须严格输出下面这个固定 2×2 SWOT 因素矩阵；不要改表头、不要改行名、不要新增列。只替换每个格子里的编号内容：
+
+|  | 正向因素 | 负向因素 |
+| --- | --- | --- |
+| 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
+| 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
+
+每个象限 3-5 条，绑定 citation_ref。证据不足可以少于 3 条，但必须在该象限格子中写“公开证据不足”，不要为了凑条数重复占位。需覆盖以下追问：
 - S: 核心优势是什么？差距多大？能维持多久？
 - W: 哪些劣势影响最大？是否被机会放大？
 - O: 哪些是结构性机会？竞品是否忽视？
@@ -602,6 +618,13 @@ class ReportWriterAgent:
 ### TOWS 战略矩阵
 
 基于 SWOT 因子交叉配对，输出 TOWS 战略矩阵（SO 增长型 / WO 扭转型 / ST 多点型 / WT 防御型）。
+必须严格输出下面这个固定 TOWS 战略矩阵；不要改表头、不要改行名、不要新增列。只替换每个格子里的编号内容：
+
+|  | O 机会 | T 威胁 |
+| --- | --- | --- |
+| S 优势 | **SO 增长型**<br>1. ...<br>2. ... | **ST 多点型**<br>1. ...<br>2. ... |
+| W 劣势 | **WO 扭转型**<br>1. ...<br>2. ... | **WT 防御型**<br>1. ...<br>2. ... |
+
 每个格子 1-2 条具体战略推演（可观察的动作，不是空泛结论），绑定 citation_ref。
 证据不足写"公开证据不足，无法推演"。
 
@@ -625,7 +648,23 @@ class ReportWriterAgent:
         summary_start = segment.find("## 第四章")
         if summary_start >= 0:
             segment = segment[summary_start:]
-        return self._truncate_before_any_heading(segment, ("## 附录",)).strip()
+        segment = self._truncate_before_any_heading(segment, ("## 附录",)).strip()
+        if not self._has_fixed_summary_matrices(segment):
+            return ""
+        return segment
+
+    def _has_fixed_summary_matrices(self, report: str) -> bool:
+        lines = [line.strip() for line in (report or "").splitlines()]
+        return (
+            "### SWOT 因素矩阵" in lines
+            and "|  | 正向因素 | 负向因素 |" in lines
+            and any(line.startswith("| 内部 | **S 优势**<br>") for line in lines)
+            and any(line.startswith("| 外部 | **O 机会**<br>") for line in lines)
+            and "### TOWS 战略矩阵" in lines
+            and "|  | O 机会 | T 威胁 |" in lines
+            and any(line.startswith("| S 优势 | **SO 增长型**<br>") for line in lines)
+            and any(line.startswith("| W 劣势 | **WO 扭转型**<br>") for line in lines)
+        )
 
     def _clean_dynamic_section_body(self, report: str) -> str:
         body = self._strip_leading_markdown_heading(report)
@@ -634,6 +673,34 @@ class ReportWriterAgent:
         if any(line.lstrip().startswith("#") for line in body.splitlines()):
             return ""
         return body
+
+    def _dynamic_section_body_covers_claim_competitors(
+        self,
+        body: str,
+        section_claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> bool:
+        if not section_claims:
+            return True
+        refs_by_competitor: dict[str, list[str]] = {}
+        for claim in section_claims:
+            citation_refs = self._citation_refs_for_evidence_ids(
+                claim.get("evidence_ids", []),
+                citation_refs_by_evidence_id,
+            )
+            if not citation_refs:
+                continue
+            competitors = claim.get("competitors", []) or ["综合"]
+            for competitor in competitors:
+                competitor_key = str(competitor or "综合").strip() or "综合"
+                refs_by_competitor.setdefault(competitor_key, [])
+                refs_by_competitor[competitor_key].extend(citation_refs)
+
+        for citation_refs in refs_by_competitor.values():
+            unique_refs = list(dict.fromkeys(citation_refs))
+            if unique_refs and not any(ref in body for ref in unique_refs):
+                return False
+        return True
 
     def _clean_dynamic_overview_body(self, report: str) -> str:
         body = (report or "").strip()
@@ -701,6 +768,8 @@ class ReportWriterAgent:
                 "Do not treat source-type preferences as a writing gate; keep indirect-evidence wording conservative.",
                 "Do not infer new claims from raw evidence.",
                 "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
+                "For every competitor represented in analysis_claims, include at least one citation_ref from that competitor's claims.",
+                "Do not write 公开证据不足 for a competitor that has citation-backed claims in analysis_claims.",
                 "If claims are missing, write 公开证据不足.",
             ],
             "task_query": state.get("task", {}).get("query", ""),
@@ -904,20 +973,17 @@ class ReportWriterAgent:
                 "",
                 "### SWOT 因素矩阵",
                 "",
-                "| S 优势 | W 劣势 |",
-                "| --- | --- |",
-                f"| 基于已接受证据的综合判断。{evidence_ids} | 未覆盖或证据不足的维度需继续补充。 |",
-                "",
-                "| O 机会 | T 威胁 |",
-                "| --- | --- |",
-                f"| 可围绕证据充分的差异化维度进一步定位。 | 竞品已有公开信号可能形成竞争压力。{evidence_ids} |",
+                "|  | 正向因素 | 负向因素 |",
+                "| --- | --- | --- |",
+                f"| 内部 | **S 优势**<br>1. 基于已接受证据的综合判断。{evidence_ids} | **W 劣势**<br>1. 未覆盖或证据不足的维度需继续补充。 |",
+                f"| 外部 | **O 机会**<br>1. 可围绕证据充分的差异化维度进一步定位。 | **T 威胁**<br>1. 竞品已有公开信号可能形成竞争压力。{evidence_ids} |",
                 "",
                 "### TOWS 战略矩阵",
                 "",
                 "|  | O 机会 | T 威胁 |",
                 "| --- | --- | --- |",
-                f"| **S 优势** | SO 增长型: 竞品可能以优势领域为核心扩展增量市场。{evidence_ids} | ST 多点型: 竞品可能通过多线布局对冲外部风险。{evidence_ids} |",
-                "| **W 劣势** | WO 扭转型: 竞品可能借市场机会调整弱势领域。 | WT 防御型: 竞品弱势领域在外部压力下可能成为突破口。 |",
+                f"| S 优势 | **SO 增长型**<br>1. 竞品可能以优势领域为核心扩展增量市场。{evidence_ids} | **ST 多点型**<br>1. 竞品可能通过多线布局对冲外部风险。{evidence_ids} |",
+                "| W 劣势 | **WO 扭转型**<br>1. 竞品可能借市场机会调整弱势领域。 | **WT 防御型**<br>1. 竞品弱势领域在外部压力下可能成为突破口。 |",
                 "",
                 "### 总结论述",
                 "",
@@ -2163,20 +2229,17 @@ class ReportWriterAgent:
                 "",
                 "### SWOT 因素矩阵",
                 "",
-                "| S 优势 | W 劣势 |",
-                "| --- | --- |",
-                f"| 基于已接受证据的综合判断。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} | 未覆盖或证据不足的维度需继续补充。 |",
-                "",
-                "| O 机会 | T 威胁 |",
-                "| --- | --- |",
-                f"| 可围绕证据充分的差异化维度进一步定位。 | 竞品已有公开信号可能形成竞争压力。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
+                "|  | 正向因素 | 负向因素 |",
+                "| --- | --- | --- |",
+                f"| 内部 | **S 优势**<br>1. 基于已接受证据的综合判断。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} | **W 劣势**<br>1. 未覆盖或证据不足的维度需继续补充。 |",
+                f"| 外部 | **O 机会**<br>1. 可围绕证据充分的差异化维度进一步定位。 | **T 威胁**<br>1. 竞品已有公开信号可能形成竞争压力。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
                 "",
                 "### TOWS 战略矩阵",
                 "",
                 "|  | O 机会 | T 威胁 |",
                 "| --- | --- | --- |",
-                f"| **S 优势** | SO 增长型: 竞品可能以优势领域为核心扩展增量市场。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} | ST 多点型: 竞品可能通过多线布局对冲外部风险。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
-                "| **W 劣势** | WO 扭转型: 竞品可能借市场机会调整弱势领域。 | WT 防御型: 竞品弱势领域在外部压力下可能成为突破口。 |",
+                f"| S 优势 | **SO 增长型**<br>1. 竞品可能以优势领域为核心扩展增量市场。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} | **ST 多点型**<br>1. 竞品可能通过多线布局对冲外部风险。{', '.join(self._ordered_evidence_ids(claims, evidence_items)) or '无'} |",
+                "| W 劣势 | **WO 扭转型**<br>1. 竞品可能借市场机会调整弱势领域。 | **WT 防御型**<br>1. 竞品弱势领域在外部压力下可能成为突破口。 |",
                 "",
                 "### 总结论述",
                 "",
