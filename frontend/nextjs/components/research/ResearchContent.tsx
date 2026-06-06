@@ -3,7 +3,7 @@ import { ResearchResults } from "@/components/ResearchResults";
 import InputArea from "@/components/ResearchBlocks/elements/InputArea";
 import ChatInput from "@/components/ResearchBlocks/elements/ChatInput";
 import LoadingDots from "@/components/LoadingDots";
-import { ChatBoxSettings, Data } from "@/types/data";
+import { ChatBoxSettings, Data, ResearchHistoryItem } from "@/types/data";
 
 interface ResearchContentProps {
   showResult: boolean;
@@ -26,6 +26,7 @@ interface ResearchContentProps {
   reset?: () => void;
   isProcessingChat?: boolean;
   bottomRef?: React.RefObject<HTMLDivElement>;
+  reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
 }
 
 export default function ResearchContent({
@@ -48,7 +49,8 @@ export default function ResearchContent({
   onShareClick,
   reset,
   isProcessingChat = false,
-  bottomRef
+  bottomRef,
+  reportContext
 }: ResearchContentProps) {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const internalBottomRef = useRef<HTMLDivElement>(null);
@@ -79,8 +81,9 @@ export default function ResearchContent({
             chatBoxSettings={chatBoxSettings}
             handleClickSuggestion={handleClickSuggestion}
             currentResearchId={currentResearchId}
-            isProcessingChat={isProcessingChat}
+            isProcessingChat={loading || isProcessingChat}
             onShareClick={onShareClick}
+            reportContext={reportContext}
           />
         </div>
 

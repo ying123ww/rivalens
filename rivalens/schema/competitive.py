@@ -500,6 +500,8 @@ class ClaimSupportReview(TypedDict, total=False):
     report_section_id: str
     support_status: ClaimSupportStatus
     evidence_ids: list[str]
+    retrieved_evidence_ids: list[str]
+    retrieval_notes: str
     unsupported_phrases: list[str]
     required_follow_up_tasks: list[dict[str, Any]]
     reviewer_notes: str
@@ -786,6 +788,8 @@ class ClaimSupportReviewPayload(StrictPayloadModel):
     report_section_id: str = ""
     support_status: ClaimSupportStatus
     evidence_ids: list[str] = Field(default_factory=list)
+    retrieved_evidence_ids: list[str] = Field(default_factory=list)
+    retrieval_notes: str = ""
     unsupported_phrases: list[str] = Field(default_factory=list)
     required_follow_up_tasks: list[dict[str, Any]] = Field(default_factory=list)
     reviewer_notes: str = ""
@@ -797,6 +801,7 @@ class ClaimSupportMessagePayload(StrictPayloadModel):
     supported_count: int = Field(ge=0)
     weak_count: int = Field(ge=0)
     reviews: list[ClaimSupportReviewPayload] = Field(default_factory=list)
+    retrieval: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReportMessagePayload(StrictPayloadModel):

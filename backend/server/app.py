@@ -1,5 +1,6 @@
 import json
 import os
+import asyncio
 from typing import Dict, List, Any
 import time
 import logging
@@ -52,6 +53,7 @@ from server.auth import (
     verify_password,
 )
 from server.report_store import ReportStore
+from server.evidence_vector_store import EvidenceVectorStore
 from server.rivalens_runner import set_trace_store
 from server.session_store import SessionStore
 from server.trace_store import TraceStore
@@ -85,6 +87,14 @@ class ChatRequest(BaseModel):
     
     report: str
     messages: List[Dict[str, Any]]
+    research_id: str | None = None
+    trace_summary: Dict[str, Any] | None = None
+    assessments: Dict[str, Any] | None = None
+    evidence_index: List[Dict[str, Any]] | None = None
+    analysis_claims: List[Dict[str, Any]] | None = None
+    claim_support_reviews: List[Dict[str, Any]] | None = None
+    competitor_knowledge: List[Dict[str, Any]] | None = None
+    state: Dict[str, Any] | None = None
 
 
 class IndustryDirectionRequest(BaseModel):
@@ -189,6 +199,7 @@ app.mount("/site", StaticFiles(directory=frontend_dir), name="site")
 manager = WebSocketManager()
 
 report_store = ReportStore()
+evidence_vector_store = EvidenceVectorStore()
 
 # Constants
 DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
@@ -203,6 +214,34 @@ def _extract_rivalens_report_text(report_information: Any) -> str:
     if isinstance(report_information, (tuple, list)):
         return str(report_information[0]) if report_information else ""
     return str(report_information)
+
+
+def _report_has_evidence(report: Dict[str, Any]) -> bool:
+    if isinstance(report.get("evidence_index"), list) and report["evidence_index"]:
+        return True
+    state = report.get("state")
+    return bool(isinstance(state, dict) and state.get("evidence_items"))
+
+
+async def _index_report_evidence(research_id: str, report: Dict[str, Any]) -> None:
+    if not _report_has_evidence(report):
+        return
+    try:
+        count = await asyncio.to_thread(
+            evidence_vector_store.index_report,
+            research_id,
+            report,
+        )
+        logger.info("Indexed %d EvidenceItem vectors for report %s", count, research_id)
+    except Exception:
+        logger.exception("Failed to index EvidenceItem vectors for report %s", research_id)
+
+
+async def _delete_report_evidence(research_id: str) -> None:
+    try:
+        await asyncio.to_thread(evidence_vector_store.delete_scope, research_id)
+    except Exception:
+        logger.exception("Failed to delete EvidenceItem vectors for report %s", research_id)
 
 
 def _build_report_store_record(
@@ -259,6 +298,7 @@ def _build_report_store_record(
         "assessments",
         "evidence_index",
         "analysis_claims",
+        "claim_support_reviews",
         "competitor_knowledge",
         "state",
     ):
@@ -297,12 +337,13 @@ async def _upsert_report_generation_record(
 async def write_report_and_store(research_request: ResearchRequest, research_id: str) -> Dict[str, Any]:
     try:
         response = await write_report(research_request, research_id)
-        await _upsert_report_generation_record(
+        record = await _upsert_report_generation_record(
             research_id,
             research_request,
             "completed",
             response=response,
         )
+        await _index_report_evidence(research_id, record)
         return response
     except Exception as exc:
         await _upsert_report_generation_record(
@@ -649,8 +690,20 @@ async def create_or_update_report(request: Request):
             "chatMessages": data.get("chatMessages") or [],
             "timestamp": timestamp,
         }
+        for key in (
+            "trace_summary",
+            "assessments",
+            "evidence_index",
+            "analysis_claims",
+            "claim_support_reviews",
+            "competitor_knowledge",
+            "state",
+        ):
+            if key in data:
+                report[key] = data[key]
 
         await report_store.upsert_report(research_id, report)
+        await _index_report_evidence(research_id, report)
         return {"success": True, "id": research_id}
     except Exception as e:
         logger.error(f"Error processing report creation: {e}")
@@ -674,6 +727,7 @@ async def update_report(research_id: str, request: Request):
     }
 
     await report_store.upsert_report(research_id, updated)
+    await _index_report_evidence(research_id, updated)
     return {"success": True, "id": research_id}
 
 
@@ -682,6 +736,7 @@ async def delete_report(research_id: str):
     existed = await report_store.delete_report(research_id)
     if not existed:
         raise HTTPException(status_code=404, detail="Report not found")
+    await _delete_report_evidence(research_id)
     return {"success": True}
 
 
@@ -782,6 +837,10 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
             "assessments": report_information.get("assessments", {}) if isinstance(report_information, dict) else {},
             "evidence_index": report_information.get("evidence_index", []) if isinstance(report_information, dict) else [],
             "analysis_claims": report_information.get("analysis_claims", []) if isinstance(report_information, dict) else [],
+            "claim_support_reviews": (
+                report_information.get("claim_support_reviews")
+                or (report_information.get("assessments", {}) or {}).get("claim_support_reviews", [])
+            ) if isinstance(report_information, dict) else [],
             "competitor_knowledge": report_information.get("competitor_knowledge", []) if isinstance(report_information, dict) else [],
             "state": report_information.get("state", {}) if isinstance(report_information, dict) else {},
         }
@@ -887,12 +946,36 @@ async def chat(chat_request: ChatRequest):
     """
     try:
         logger.info(f"Received chat request with {len(chat_request.messages)} messages")
+        report_record = None
+        if chat_request.research_id:
+            try:
+                report_record = await report_store.get_report(chat_request.research_id)
+            except Exception:
+                logger.exception("Failed to load report context for chat")
+
+        evidence_context = {
+            "research_id": chat_request.research_id or (report_record or {}).get("id"),
+            "run_id": (report_record or {}).get("run_id"),
+            "trace_summary": chat_request.trace_summary or (report_record or {}).get("trace_summary") or {},
+            "assessments": chat_request.assessments or (report_record or {}).get("assessments") or {},
+            "evidence_index": chat_request.evidence_index or (report_record or {}).get("evidence_index") or [],
+            "analysis_claims": chat_request.analysis_claims or (report_record or {}).get("analysis_claims") or [],
+            "claim_support_reviews": (
+                chat_request.claim_support_reviews
+                or (report_record or {}).get("claim_support_reviews")
+                or ((report_record or {}).get("assessments") or {}).get("claim_support_reviews")
+                or []
+            ),
+            "competitor_knowledge": chat_request.competitor_knowledge or (report_record or {}).get("competitor_knowledge") or [],
+            "state": chat_request.state or (report_record or {}).get("state") or {},
+        }
 
         # Create chat agent with the report
         chat_agent = ChatAgentWithMemory(
-            report=chat_request.report,
+            report=chat_request.report or (report_record or {}).get("answer", ""),
             config_path="default",
-            headers=None
+            headers=None,
+            evidence_context=evidence_context,
         )
 
         # Process the chat and get response with metadata

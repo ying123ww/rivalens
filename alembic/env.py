@@ -14,6 +14,7 @@ import server.user_store      # noqa: E402 — registers users on shared_metadat
 import server.trace_store     # noqa: E402 — registers trace tables
 import server.session_store   # noqa: E402 — registers chat_sessions
 import server.report_store    # noqa: E402 — registers reports
+import server.evidence_vector_store  # noqa: E402 — registers evidence pgvector index
 
 config = context.config
 

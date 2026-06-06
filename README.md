@@ -90,6 +90,24 @@ startup. To do a one-time import into the SQL `reports` table, start the backend
 with `RIVALENS_MIGRATE_LEGACY_REPORTS=true`; a `.migrated` marker prevents the
 same JSON file from restoring reports that were later deleted from the database.
 
+Evidence RAG uses PostgreSQL with pgvector. The `evidence_embeddings` table
+indexes compact `EvidenceItem` text plus metadata such as evidence id, source
+URL, competitor, dimension, and source type. Report persistence indexes completed
+report evidence, Ask About Evidence retrieves from this table before using report
+prose, and `ClaimSupportReviewer` can index the current run's EvidenceItems for
+retrieval-based claim verification before the final report exists.
+
+Configure it with:
+
+```env
+RIVALENS_ENABLE_EVIDENCE_RAG=true
+RIVALENS_ENABLE_CLAIM_RAG_VERIFICATION=true
+RIVALENS_MAX_CLAIM_RAG_RESULTS=5
+```
+
+The database must have the pgvector extension available; Alembic runs
+`CREATE EXTENSION IF NOT EXISTS vector` during startup migrations.
+
 ## Architecture
 
 ```mermaid

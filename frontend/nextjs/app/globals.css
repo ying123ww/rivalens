@@ -214,8 +214,8 @@ body::after {
   background-color: #6b7280;
 }
 
-/* Ensure sidebar is above other content */
+/* 确保侧边栏展开时高于登录用户卡片 */
 .sidebar-z-index {
-  z-index: 50;
+  z-index: 140;
 }
 

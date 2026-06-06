@@ -110,6 +110,7 @@ export interface ResearchHistoryItem {
   assessments?: Record<string, any>;
   evidence_index?: Record<string, any>[];
   analysis_claims?: Record<string, any>[];
+  claim_support_reviews?: Record<string, any>[];
   competitor_knowledge?: Record<string, any>[];
   state?: Record<string, any>;
   orderedData: Data[];

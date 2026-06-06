@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import ClaimSupportReview, CompetitorAnalysisState
+
+logger = logging.getLogger(__name__)
 
 
 class ClaimSupportReviewer:
@@ -17,6 +20,9 @@ class ClaimSupportReviewer:
         self,
         enable_verification: bool | None = None,
         max_verification_tasks: int | None = None,
+        enable_retrieval: bool | None = None,
+        max_retrieval_results: int | None = None,
+        evidence_vector_store: Any | None = None,
     ) -> None:
         self.enable_verification = (
             enable_verification
@@ -28,6 +34,17 @@ class ClaimSupportReviewer:
             if max_verification_tasks is not None
             else self._env_int("RIVALENS_MAX_CLAIM_VERIFICATION_TASKS", 8, minimum=1)
         )
+        self.enable_retrieval = (
+            enable_retrieval
+            if enable_retrieval is not None
+            else self._env_flag("RIVALENS_ENABLE_CLAIM_RAG_VERIFICATION", True)
+        )
+        self.max_retrieval_results = (
+            max_retrieval_results
+            if max_retrieval_results is not None
+            else self._env_int("RIVALENS_MAX_CLAIM_RAG_RESULTS", 5, minimum=1)
+        )
+        self._evidence_vector_store = evidence_vector_store
 
     def review(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         analysis_message = latest_message_for(
@@ -51,6 +68,12 @@ class ClaimSupportReviewer:
         verification_rounds = int(state.get("verification_rounds", 0) or 0)
         verification_enabled = self.enable_verification and verification_rounds == 0
         verification_task_candidates: list[dict[str, Any]] = []
+        retrieval_scope = self._retrieval_scope(state)
+        retrieval_available, retrieval_indexed_count = self._index_retrieval_scope(
+            retrieval_scope,
+            evidence_by_id,
+        )
+        retrieval_result_count = 0
 
         for claim in claims:
             claim_id = claim.get("id", "")
@@ -60,12 +83,24 @@ class ClaimSupportReviewer:
                 for evidence_id in claim.get("evidence_ids", [])
                 if evidence_id in evidence_by_id
             ]
+            retrieved_evidence_ids: list[str] = []
+            if retrieval_available:
+                retrieved_evidence_ids = self._retrieve_claim_evidence_ids(
+                    claim,
+                    retrieval_scope,
+                    evidence_by_id,
+                )
+                retrieval_result_count += len(retrieved_evidence_ids)
+                evidence_ids = list(dict.fromkeys(evidence_ids + retrieved_evidence_ids))
             evidence_items = [evidence_by_id[evidence_id] for evidence_id in evidence_ids]
             status, unsupported_phrases, reviewer_notes, confidence = self._support_status(
                 claim_text,
                 evidence_items,
                 claim.get("confidence", 0.5),
             )
+            retrieval_notes = self._retrieval_notes(retrieval_available, retrieved_evidence_ids)
+            if retrieval_notes:
+                reviewer_notes = f"{reviewer_notes} {retrieval_notes}"
             if status == "supported":
                 supported_count += 1
             elif status in {"weak", "contradicted"}:
@@ -88,6 +123,8 @@ class ClaimSupportReviewer:
                     "report_section_id": claim.get("report_section_id", ""),
                     "support_status": status,
                     "evidence_ids": evidence_ids,
+                    "retrieved_evidence_ids": retrieved_evidence_ids,
+                    "retrieval_notes": retrieval_notes,
                     "unsupported_phrases": unsupported_phrases,
                     "required_follow_up_tasks": follow_up_tasks,
                     "reviewer_notes": reviewer_notes,
@@ -116,6 +153,12 @@ class ClaimSupportReviewer:
                 "supported_count": supported_count,
                 "weak_count": weak_count,
                 "reviews": reviews,
+                "retrieval": {
+                    "enabled": retrieval_available,
+                    "scope": retrieval_scope,
+                    "indexed_evidence_count": retrieval_indexed_count,
+                    "retrieved_result_count": retrieval_result_count,
+                },
             },
             evidence_ids=[
                 evidence_id
@@ -139,6 +182,8 @@ class ClaimSupportReviewer:
                         "evidence_count": len(evidence_by_id),
                         "verification_rounds": verification_rounds,
                         "verification_enabled": verification_enabled,
+                        "retrieval_requested": self.enable_retrieval,
+                        "retrieval_scope": retrieval_scope,
                     },
                     "output": {
                         "review_count": len(reviews),
@@ -147,10 +192,112 @@ class ClaimSupportReviewer:
                         "verification_task_count": len(verification_task_queue),
                         "verification_task_candidate_count": len(verification_task_candidates),
                         "max_verification_tasks": self.max_verification_tasks,
+                        "retrieval_enabled": retrieval_available,
+                        "retrieval_indexed_count": retrieval_indexed_count,
+                        "retrieval_result_count": retrieval_result_count,
                     },
                 }
             ],
         }
+
+    def _get_evidence_vector_store(self) -> Any | None:
+        if self._evidence_vector_store is False:
+            return None
+        if self._evidence_vector_store is not None:
+            return self._evidence_vector_store
+        try:
+            from rivalens.retrieval.evidence_vector_store import EvidenceVectorStore
+        except Exception:
+            logger.exception("Unable to load EvidenceVectorStore for claim retrieval")
+            self._evidence_vector_store = False
+            return None
+        self._evidence_vector_store = EvidenceVectorStore()
+        return self._evidence_vector_store
+
+    def _retrieval_scope(self, state: CompetitorAnalysisState) -> str:
+        task = state.get("task", {})
+        if not isinstance(task, dict):
+            task = {}
+        return str(
+            task.get("run_id")
+            or state.get("run_id")
+            or task.get("id")
+            or ""
+        )
+
+    def _index_retrieval_scope(
+        self,
+        retrieval_scope: str,
+        evidence_by_id: dict[str, dict[str, Any]],
+    ) -> tuple[bool, int]:
+        if not self.enable_retrieval or not retrieval_scope or not evidence_by_id:
+            return False, 0
+        store = self._get_evidence_vector_store()
+        if store is None:
+            return False, 0
+        try:
+            count = store.index_evidence_items(
+                research_id=retrieval_scope,
+                run_id=retrieval_scope,
+                evidence_items=evidence_by_id.values(),
+                replace_existing=True,
+            )
+            return count > 0, count
+        except Exception:
+            logger.exception("ClaimSupportReview evidence retrieval indexing failed")
+            return False, 0
+
+    def _retrieve_claim_evidence_ids(
+        self,
+        claim: dict[str, Any],
+        retrieval_scope: str,
+        evidence_by_id: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        store = self._get_evidence_vector_store()
+        if store is None:
+            return []
+        try:
+            results = store.search(
+                self._retrieval_query(claim),
+                research_id=retrieval_scope,
+                run_id=retrieval_scope,
+                limit=self.max_retrieval_results,
+            )
+        except Exception:
+            logger.exception("ClaimSupportReview evidence retrieval failed")
+            return []
+
+        return list(
+            dict.fromkeys(
+                str(item.get("id", ""))
+                for item in results
+                if item.get("id") in evidence_by_id
+            )
+        )
+
+    def _retrieval_query(self, claim: dict[str, Any]) -> str:
+        competitors = " ".join(str(item) for item in claim.get("competitors", []) or [])
+        return "\n".join(
+            value
+            for value in [
+                str(claim.get("claim", "")),
+                str(claim.get("analysis_dimension_id", "")),
+                competitors,
+                str(claim.get("reasoning", "")),
+            ]
+            if value
+        )
+
+    def _retrieval_notes(
+        self,
+        retrieval_available: bool,
+        retrieved_evidence_ids: list[str],
+    ) -> str:
+        if not retrieval_available:
+            return ""
+        if retrieved_evidence_ids:
+            return "Pgvector retrieval checked EvidenceItem ids: " + ", ".join(retrieved_evidence_ids) + "."
+        return "Pgvector retrieval found no additional traceable EvidenceItem."
 
     def _env_flag(self, env_name: str, default: bool) -> bool:
         raw_value = os.getenv(env_name)

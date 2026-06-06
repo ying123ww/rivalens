@@ -3,6 +3,46 @@ import { toast } from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
 import { ResearchHistoryItem, Data, ChatMessage } from '../types/data';
 
+const RESEARCH_HISTORY_STORAGE_KEY = 'researchHistory';
+const DELETED_RESEARCH_IDS_STORAGE_KEY = 'deletedResearchIds';
+
+const loadDeletedResearchIdsFromStorage = () => {
+  const deletedIdsStr = localStorage.getItem(DELETED_RESEARCH_IDS_STORAGE_KEY);
+  if (!deletedIdsStr) {
+    return new Set<string>();
+  }
+
+  try {
+    const parsedIds = JSON.parse(deletedIdsStr);
+    if (Array.isArray(parsedIds)) {
+      return new Set(parsedIds.filter((id): id is string => typeof id === 'string'));
+    }
+  } catch (error) {
+    console.error('Error parsing deleted research IDs:', error);
+  }
+
+  return new Set<string>();
+};
+
+const saveDeletedResearchIdsToStorage = (deletedIds: Set<string>) => {
+  localStorage.setItem(
+    DELETED_RESEARCH_IDS_STORAGE_KEY,
+    JSON.stringify(Array.from(deletedIds))
+  );
+};
+
+const rememberDeletedResearchId = (id: string) => {
+  const deletedIds = loadDeletedResearchIdsFromStorage();
+  deletedIds.add(id);
+  saveDeletedResearchIdsToStorage(deletedIds);
+};
+
+// 本地删除优先于服务端同步，避免重启后旧报告重新出现。
+const filterDeletedResearch = (
+  items: ResearchHistoryItem[],
+  deletedIds: Set<string>
+) => items.filter(item => item.id && !deletedIds.has(item.id));
+
 export const useResearchHistory = () => {
   const [history, setHistory] = useState<ResearchHistoryItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -20,10 +60,12 @@ export const useResearchHistory = () => {
         console.log('Fetching research history from server...');
         // First, load data from localStorage for immediate display
         const localHistory = loadFromLocalStorage();
+        const deletedIds = loadDeletedResearchIdsFromStorage();
+        const visibleLocalHistory = filterDeletedResearch(localHistory || [], deletedIds);
         
         // Set local history immediately to show something to user
-        if (localHistory && localHistory.length > 0) {
-          setHistory(localHistory);
+        if (visibleLocalHistory.length > 0) {
+          setHistory(visibleLocalHistory);
         }
         
         // Always fetch server history so refreshed browsers can recover runs
@@ -34,7 +76,7 @@ export const useResearchHistory = () => {
 
           if (data.reports && Array.isArray(data.reports)) {
             console.log('Loaded research history from server:', data.reports.length, 'items');
-            await syncLocalHistoryWithServer(localHistory || [], data.reports);
+            await syncLocalHistoryWithServer(visibleLocalHistory, data.reports, deletedIds);
           } else {
             console.warn('Server response did not contain reports array', data);
           }
@@ -52,7 +94,7 @@ export const useResearchHistory = () => {
     
     // Helper to load from localStorage
     const loadFromLocalStorage = () => {
-      const localHistoryStr = localStorage.getItem('researchHistory');
+      const localHistoryStr = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistoryStr) {
         try {
           const parsedHistory = JSON.parse(localHistoryStr);
@@ -71,13 +113,18 @@ export const useResearchHistory = () => {
         return [];
       }
     };
-    
+
     // Helper to sync local history with server
-    const syncLocalHistoryWithServer = async (localHistory: ResearchHistoryItem[], serverHistory: ResearchHistoryItem[]) => {
+    const syncLocalHistoryWithServer = async (
+      localHistory: ResearchHistoryItem[],
+      serverHistory: ResearchHistoryItem[],
+      deletedIds: Set<string>
+    ) => {
       console.log('Syncing local history with server...');
+      const visibleServerHistory = filterDeletedResearch(serverHistory, deletedIds);
       
       // Create a map of server history IDs for quick lookup
-      const serverIds = new Set(serverHistory.map(item => item.id));
+      const serverIds = new Set(visibleServerHistory.map(item => item.id));
       
       // Find local reports that aren't on the server
       const localOnlyReports = localHistory.filter(item => !serverIds.has(item.id));
@@ -114,7 +161,7 @@ export const useResearchHistory = () => {
       }
       
       // Create a unified history with server data prioritized
-      const combinedHistory = [...serverHistory];
+      const combinedHistory = [...visibleServerHistory];
       
       // Add local-only reports to the combined history
       for (const report of localOnlyReports) {
@@ -133,7 +180,7 @@ export const useResearchHistory = () => {
       setHistory(sortedHistory);
       
       // Update localStorage with the complete merged set
-      localStorage.setItem('researchHistory', JSON.stringify(sortedHistory));
+      localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(sortedHistory));
       
       console.log('History sync complete, total items:', sortedHistory.length);
     };
@@ -179,10 +226,10 @@ export const useResearchHistory = () => {
         setHistory(prev => [newResearch, ...prev]);
         
         // Also save to localStorage as fallback
-        const localHistory = localStorage.getItem('researchHistory');
+        const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
         const parsedHistory = localHistory ? JSON.parse(localHistory) : [];
         localStorage.setItem(
-          'researchHistory',
+          RESEARCH_HISTORY_STORAGE_KEY,
           JSON.stringify([newResearch, ...parsedHistory])
         );
         
@@ -208,10 +255,10 @@ export const useResearchHistory = () => {
       setHistory(prev => [newResearch, ...prev]);
       
       // Save to localStorage
-      const localHistory = localStorage.getItem('researchHistory');
+      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       const parsedHistory = localHistory ? JSON.parse(localHistory) : [];
       localStorage.setItem(
-        'researchHistory',
+        RESEARCH_HISTORY_STORAGE_KEY,
         JSON.stringify([newResearch, ...parsedHistory])
       );
       
@@ -246,13 +293,13 @@ export const useResearchHistory = () => {
       );
       
       // Also update localStorage as fallback
-      const localHistory = localStorage.getItem('researchHistory');
+      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistory) {
         const parsedHistory = JSON.parse(localHistory);
         const updatedHistory = parsedHistory.map((item: any) => 
           item.id === id ? { ...item, answer, orderedData, timestamp: Date.now() } : item
         );
-        localStorage.setItem('researchHistory', JSON.stringify(updatedHistory));
+        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
       }
       
       return true;
@@ -267,13 +314,13 @@ export const useResearchHistory = () => {
       );
       
       // Update localStorage
-      const localHistory = localStorage.getItem('researchHistory');
+      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistory) {
         const parsedHistory = JSON.parse(localHistory);
         const updatedHistory = parsedHistory.map((item: any) => 
           item.id === id ? { ...item, answer, orderedData, timestamp: Date.now() } : item
         );
-        localStorage.setItem('researchHistory', JSON.stringify(updatedHistory));
+        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
       }
       
       return false;
@@ -282,6 +329,10 @@ export const useResearchHistory = () => {
 
   // Get research by ID
   const getResearchById = async (id: string) => {
+    if (loadDeletedResearchIdsFromStorage().has(id)) {
+      return null;
+    }
+
     try {
       const response = await fetch(`/api/reports/${id}`);
       if (response.ok) {
@@ -289,7 +340,7 @@ export const useResearchHistory = () => {
         return data.report;
       } else if (response.status === 404) {
         // If not found on server, try localStorage
-        const localHistory = localStorage.getItem('researchHistory');
+        const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
         if (localHistory) {
           const parsedHistory = JSON.parse(localHistory);
           return parsedHistory.find((item: any) => item.id === id) || null;
@@ -301,7 +352,7 @@ export const useResearchHistory = () => {
       console.error('Error getting research by ID:', error);
       
       // Try localStorage as fallback
-      const localHistory = localStorage.getItem('researchHistory');
+      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistory) {
         const parsedHistory = JSON.parse(localHistory);
         return parsedHistory.find((item: any) => item.id === id) || null;
@@ -313,6 +364,16 @@ export const useResearchHistory = () => {
 
   // Delete research
   const deleteResearch = async (id: string) => {
+    rememberDeletedResearchId(id);
+    setHistory(prev => prev.filter(item => item.id !== id));
+
+    const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
+    if (localHistory) {
+      const parsedHistory = JSON.parse(localHistory);
+      const filteredHistory = parsedHistory.filter((item: any) => item.id !== id);
+      localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(filteredHistory));
+    }
+
     try {
       const response = await fetch(`/api/reports/${id}`, {
         method: 'DELETE',
@@ -322,21 +383,10 @@ export const useResearchHistory = () => {
         throw new Error(`API error: ${response.status}`);
       }
 
-      // Update local state
-      setHistory(prev => prev.filter(item => item.id !== id));
-
-      // Also update localStorage
-      const localHistory = localStorage.getItem('researchHistory');
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        const filteredHistory = parsedHistory.filter((item: any) => item.id !== id);
-        localStorage.setItem('researchHistory', JSON.stringify(filteredHistory));
-      }
-
       return true;
     } catch (error) {
       console.error('Error deleting research:', error);
-      toast.error('删除失败，请检查后端是否运行');
+      toast.error('已从侧边栏隐藏；后端删除失败，稍后会继续被本地过滤。');
       return false;
     }
   };
@@ -368,7 +418,7 @@ export const useResearchHistory = () => {
       );
       
       // Also update localStorage
-      const localHistory = localStorage.getItem('researchHistory');
+      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistory) {
         const parsedHistory = JSON.parse(localHistory);
         const updatedHistory = parsedHistory.map((item: any) => {
@@ -378,7 +428,7 @@ export const useResearchHistory = () => {
           }
           return item;
         });
-        localStorage.setItem('researchHistory', JSON.stringify(updatedHistory));
+        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
       }
       
       return true;
@@ -397,7 +447,7 @@ export const useResearchHistory = () => {
       );
       
       // Update localStorage
-      const localHistory = localStorage.getItem('researchHistory');
+      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistory) {
         const parsedHistory = JSON.parse(localHistory);
         const updatedHistory = parsedHistory.map((item: any) => {
@@ -407,7 +457,7 @@ export const useResearchHistory = () => {
           }
           return item;
         });
-        localStorage.setItem('researchHistory', JSON.stringify(updatedHistory));
+        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
       }
       
       return false;
@@ -428,7 +478,7 @@ export const useResearchHistory = () => {
     }
     
     // Fallback to localStorage
-    const localHistory = localStorage.getItem('researchHistory');
+    const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
     if (localHistory) {
       try {
         const parsedHistory = JSON.parse(localHistory);
@@ -452,12 +502,17 @@ export const useResearchHistory = () => {
   // Clear all history from local storage and server
   const clearHistory = async () => {
     try {
-      // Not implementing bulk delete on the server for now
-      // This would require a new API endpoint
+      const deletedIds = loadDeletedResearchIdsFromStorage();
+      history.forEach(item => {
+        if (item.id) {
+          deletedIds.add(item.id);
+        }
+      });
+      saveDeletedResearchIdsToStorage(deletedIds);
       
-      // Just clear local state and storage
+      // 清空本地列表，并用 tombstone 阻止服务端旧记录重新同步回来。
       setHistory([]);
-      localStorage.removeItem('researchHistory');
+      localStorage.removeItem(RESEARCH_HISTORY_STORAGE_KEY);
       
       return true;
     } catch (error) {

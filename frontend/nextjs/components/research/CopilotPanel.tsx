@@ -137,7 +137,7 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({
                 {loading ? (
                   <p>Working on your research... I&apos;ll analyze the results once they&apos;re complete.</p>
                 ) : (
-                  <p>I&apos;ve analyzed all the research results and can answer any questions about it. How can I help?</p>
+                  <p>I can trace report claims to evidence IDs and source URLs. Ask about claim support, weak evidence, source details, or conservative rewrites.</p>
                 )}
               </div>
             </div>

@@ -7,7 +7,7 @@ import SubQuestions from './ResearchBlocks/elements/SubQuestions';
 import LogsSection from './ResearchBlocks/LogsSection';
 import AccessReport from './ResearchBlocks/AccessReport';
 import { preprocessOrderedData } from '../utils/dataProcessing';
-import { Data } from '../types/data';
+import { Data, ResearchHistoryItem } from '../types/data';
 
 interface ResearchResultsProps {
   orderedData: Data[];
@@ -18,6 +18,7 @@ interface ResearchResultsProps {
   currentResearchId?: string;
   isProcessingChat?: boolean;
   onShareClick?: () => void;
+  reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
 }
 
 export const ResearchResults: React.FC<ResearchResultsProps> = ({
@@ -28,7 +29,8 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
   handleClickSuggestion,
   currentResearchId,
   isProcessingChat = false,
-  onShareClick
+  onShareClick,
+  reportContext
 }) => {
   const groupedData = preprocessOrderedData(orderedData);
   const pathData = groupedData.find(data => data.type === 'path');
@@ -66,7 +68,13 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
   return (
     <>
       {initialQuestion && <Question question={initialQuestion.content} />}
-      {orderedData.length > 0 && <LogsSection logs={allLogs} />}
+      {orderedData.length > 0 && (
+        <LogsSection
+          logs={allLogs}
+          reportContext={reportContext}
+          isResearching={isProcessingChat}
+        />
+      )}
       {subqueriesComponent && (
         <SubQuestions
           metadata={subqueriesComponent.metadata}

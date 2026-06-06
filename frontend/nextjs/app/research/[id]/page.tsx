@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useResearchHistoryContext } from "@/hooks/ResearchHistoryContext";
 import { preprocessOrderedData } from "@/utils/dataProcessing";
-import { ChatBoxSettings, Data, ChatData, ChatMessage, QuestionData } from "@/types/data";
+import { ChatBoxSettings, Data, ChatData, ChatMessage, QuestionData, ResearchHistoryItem } from "@/types/data";
 import { toast } from "react-hot-toast";
 import { getAppropriateLayout } from "@/utils/getLayout";
 
@@ -28,6 +28,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
   const [chatPromptValue, setChatPromptValue] = useState("");
   const [orderedData, setOrderedData] = useState<Data[]>([]);
   const [allLogs, setAllLogs] = useState<any[]>([]);
+  const [currentReport, setCurrentReport] = useState<Partial<ResearchHistoryItem> | null>(null);
   const [isStopped, setIsStopped] = useState(false);
   const [currentResearchId, setCurrentResearchId] = useState<string | null>(null);
   const [isProcessingChat, setIsProcessingChat] = useState(false);
@@ -153,6 +154,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             setQuestion(data.report.question);
             setAnswer(data.report.answer || '');
             setOrderedData(Array.isArray(data.report.orderedData) ? data.report.orderedData : []);
+            setCurrentReport(data.report);
             setCurrentResearchId(id);
             setLoading(false);
           }
@@ -174,6 +176,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             setQuestion(localItem.question);
             setAnswer(localItem.answer || '');
             setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
+            setCurrentReport(localItem);
             setCurrentResearchId(id);
             setLoading(false);
             return;
@@ -202,6 +205,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
           setQuestion(localItem.question);
           setAnswer(localItem.answer || '');
           setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
+          setCurrentReport(localItem);
           setCurrentResearchId(id);
           setLoading(false);
           return;
@@ -219,6 +223,12 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             answer: localItem.answer || '',
             orderedData: Array.isArray(localItem.orderedData) ? JSON.parse(JSON.stringify(localItem.orderedData)) : [],
             chatMessages: Array.isArray(localItem.chatMessages) ? JSON.parse(JSON.stringify(localItem.chatMessages)) : [],
+            trace_summary: localItem.trace_summary,
+            assessments: localItem.assessments,
+            evidence_index: localItem.evidence_index,
+            analysis_claims: localItem.analysis_claims,
+            competitor_knowledge: localItem.competitor_knowledge,
+            state: localItem.state,
           };
           
           const saveResponse = await fetch('/api/reports', {
@@ -239,6 +249,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
           setQuestion(localItem.question);
           setAnswer(localItem.answer || '');
           setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
+          setCurrentReport(localItem);
           setCurrentResearchId(id);
           setLoading(false);
         } catch (error) {
@@ -248,6 +259,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
           setQuestion(localItem.question);
           setAnswer(localItem.answer || '');
           setOrderedData(Array.isArray(localItem.orderedData) ? localItem.orderedData : []);
+          setCurrentReport(localItem);
           setCurrentResearchId(id);
           setLoading(false);
         }
@@ -356,14 +368,22 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
         role: msg.role,
         content: msg.content
       }));
+      const reportForChat = currentReport as Record<string, any> | null;
       
       // Call the chat API
       const response = await fetch(`/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          research_id: currentResearchId,
           report: answer,
-          messages: formattedMessages
+          messages: formattedMessages,
+          trace_summary: reportForChat?.trace_summary || {},
+          assessments: reportForChat?.assessments || {},
+          evidence_index: reportForChat?.evidence_index || reportForChat?.state?.evidence_items || [],
+          analysis_claims: reportForChat?.analysis_claims || reportForChat?.state?.analysis_claims || [],
+          competitor_knowledge: reportForChat?.competitor_knowledge || reportForChat?.state?.competitor_knowledge || [],
+          state: reportForChat?.state || {}
         }),
       });
       
@@ -565,6 +585,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             onShareClick={handleCopyUrl}
             isProcessingChat={isProcessingChat}
             onNewResearch={handleNewResearch}
+            reportContext={currentReport}
           />
         ) : (
           <ResearchContent
@@ -586,6 +607,7 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
             currentResearchId={currentResearchId || undefined}
             onShareClick={handleCopyUrl}
             isProcessingChat={isProcessingChat}
+            reportContext={currentReport}
           />
         )}
       </div>

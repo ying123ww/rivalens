@@ -18,6 +18,7 @@ import hashlib
 
 from rivalens.report_export import generate_report_files
 from .rivalens_runner import run_rivalens_task
+from .evidence_vector_store import EvidenceVectorStore
 
 # Import chat agent
 try:
@@ -30,6 +31,28 @@ except ImportError:
     ChatAgentWithMemory = None
 
 logger = logging.getLogger(__name__)
+_evidence_vector_store = EvidenceVectorStore()
+
+
+def _report_has_evidence(report: Dict[str, Any]) -> bool:
+    if isinstance(report.get("evidence_index"), list) and report["evidence_index"]:
+        return True
+    state = report.get("state")
+    return bool(isinstance(state, dict) and state.get("evidence_items"))
+
+
+async def _index_report_evidence_safely(research_id: str, report: Dict[str, Any]) -> None:
+    if not _report_has_evidence(report):
+        return
+    try:
+        count = await asyncio.to_thread(
+            _evidence_vector_store.index_report,
+            research_id,
+            report,
+        )
+        logger.info("Indexed %d EvidenceItem vectors for report %s", count, research_id)
+    except Exception:
+        logger.exception("Failed to index EvidenceItem vectors for report %s", research_id)
 
 class CustomLogsHandler:
     """Captures streaming events from the research process and relays them to
@@ -367,6 +390,7 @@ async def handle_start_command(
     ) -> None:
         if report_store is None:
             return
+        indexable_report: Dict[str, Any] | None = None
         async with report_store_lock:
             existing = await report_store.get_report(research_id) or {}
             if status == "running" and existing.get("status") in {
@@ -408,6 +432,8 @@ async def handle_start_command(
                 updated["error"] = error
             try:
                 await report_store.upsert_report(research_id, updated)
+                if status == "completed":
+                    indexable_report = dict(updated)
             except OSError as exc:
                 logger.warning(
                     "Failed to update report store for run %s with status %s: %s",
@@ -415,6 +441,8 @@ async def handle_start_command(
                     status,
                     exc,
                 )
+        if indexable_report is not None:
+            await _index_report_evidence_safely(research_id, indexable_report)
 
     await upsert_run_report("running")
     await logs_handler.send_json({
@@ -609,6 +637,7 @@ def _structured_report_store_fields(
         "assessments",
         "evidence_index",
         "analysis_claims",
+        "claim_support_reviews",
         "competitor_knowledge",
         "state",
     ):

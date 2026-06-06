@@ -238,7 +238,7 @@ def _report_to_row(report_id: str, report: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "orderedData", "chatMessages", "artifacts", "report_artifacts",
         "trace_summary", "assessments", "evidence_index",
-        "analysis_claims", "competitor_knowledge", "state",
+        "analysis_claims", "claim_support_reviews", "competitor_knowledge", "state",
         "research_information", "research_costs", "visited_urls",
         "research_images",
     ):

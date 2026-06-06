@@ -71,6 +71,7 @@ def build_rivalens_structured_response(
         },
         "evidence_index": _json_safe(evidence_items),
         "analysis_claims": _json_safe(analysis_claims),
+        "claim_support_reviews": _json_safe(claim_support_reviews),
         "competitor_knowledge": _json_safe(_list_field(state, "competitor_knowledge")),
         "state": _json_safe(state),
     }
