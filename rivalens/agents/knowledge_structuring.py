@@ -1188,10 +1188,17 @@ class KnowledgeStructuringAgent:
         if not analysis_dimension_id or not text:
             return []
         kinds = self._detected_pricing_atom_kinds(text)
-        facts = [
-            self._pricing_fact_for_kind(evidence, kind, text)
-            for kind in kinds
-        ]
+        facts = []
+        for kind in kinds:
+            if kind == "published_plan_price":
+                price_details = self._published_plan_prices(text)
+                if price_details:
+                    facts.extend(
+                        self._pricing_fact_for_kind(evidence, kind, text, price_detail)
+                        for price_detail in price_details
+                    )
+                    continue
+            facts.append(self._pricing_fact_for_kind(evidence, kind, text))
         return [fact for fact in facts if fact]
 
     def _detected_pricing_atom_kinds(self, text: str) -> list[str]:
@@ -1225,10 +1232,11 @@ class KnowledgeStructuringAgent:
         evidence: dict[str, Any],
         kind: str,
         text: str,
+        price_detail: dict[str, str] | None = None,
     ) -> KnowledgeFact | None:
         predicate = PRICING_ATOM_PREDICATES.get(kind, "publishes")
-        subject = self._pricing_subject(kind, text)
-        fact_object = self._pricing_object(kind, text)
+        subject = self._pricing_subject(kind, text, price_detail)
+        fact_object = self._pricing_object(kind, text, price_detail)
         if not subject or not fact_object:
             return None
         schema_field_ids = list(evidence.get("schema_field_ids", []) or [])
@@ -1272,25 +1280,65 @@ class KnowledgeStructuringAgent:
         }
 
     def _published_plan_price(self, text: str) -> dict[str, str]:
+        prices = self._published_plan_prices(text)
+        return prices[0] if prices else {}
+
+    def _published_plan_prices(self, text: str) -> list[dict[str, str]]:
         patterns = [
             r"\b(?P<plan>[A-Z][A-Za-z0-9+ -]{1,40})\s+(?:plan\s+)?(?:is|starts at|from|costs|priced at)\s+(?P<price>[$¥€£]\s?\d+(?:[.,]\d+)?(?:\s*/\s*(?:user|seat|month|mo|year|yr))*)",
             r"\b(?P<plan>[A-Z][A-Za-z0-9+ -]{1,40})\s+(?:plan\s+)?(?P<price>[$¥€£]\s?\d+(?:[.,]\d+)?(?:\s*/\s*(?:user|seat|month|mo|year|yr))*)",
             r"(?P<plan>[A-Za-z0-9+ -]{1,40})\s*版[^。；;,.]{0,30}(?P<price>[¥$]\s?\d+(?:[.,]\d+)?(?:\s*/?\s*(?:月|年|人|用户))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{1,24})\s*版\s*(?P<price>[¥$]\s?\d+(?:[.,]\d+)?(?:\s*/?\s*(?:人|用户)?\s*/?\s*(?:月|年))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{1,24})\s*(?:定价为|价格为|收费为|每人每月)\s*(?P<price>\d+(?:[.,]\d+)?\s*元(?:\s*/?\s*(?:人|用户)?\s*/?\s*(?:月|年))?)",
         ]
+        prices = []
         for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return {
-                    "plan": " ".join(match.group("plan").split()),
+            for match in re.finditer(pattern, text):
+                price = {
+                    "plan": self._clean_pricing_plan(match.group("plan")),
                     "price": " ".join(match.group("price").split()),
                 }
-        return {}
+                if not self._valid_pricing_plan(price["plan"]):
+                    continue
+                if price not in prices:
+                    prices.append(price)
+        return prices
 
-    def _pricing_subject(self, kind: str, text: str) -> str:
+    def _clean_pricing_plan(self, value: str) -> str:
+        plan = " ".join(str(value or "").split()).strip(" ：:-")
+        if " " in plan:
+            plan = plan.split()[-1]
+        if (
+            plan
+            and re.fullmatch(r"[\u4e00-\u9fff]{1,8}", plan)
+            and not plan.endswith(("版", "套餐", "计划"))
+        ):
+            plan = f"{plan}版"
+        return plan
+
+    def _valid_pricing_plan(self, plan: str) -> bool:
+        if not plan:
+            return True
+        return plan.lower() not in {
+            "at",
+            "costs",
+            "from",
+            "is",
+            "plan",
+            "priced",
+            "starts",
+        }
+
+    def _pricing_subject(
+        self,
+        kind: str,
+        text: str,
+        price_detail: dict[str, str] | None = None,
+    ) -> str:
         if kind == "free_tier":
             return "Free plan"
         if kind == "published_plan_price":
-            price = self._published_plan_price(text)
+            price = price_detail or self._published_plan_price(text)
             plan = price.get("plan", "").strip()
             return f"{plan} plan" if plan else "Paid plan"
         if kind == "quote_only":
@@ -1301,11 +1349,16 @@ class KnowledgeStructuringAgent:
             return "Annual billing"
         return ""
 
-    def _pricing_object(self, kind: str, text: str) -> str:
+    def _pricing_object(
+        self,
+        kind: str,
+        text: str,
+        price_detail: dict[str, str] | None = None,
+    ) -> str:
         if kind == "free_tier":
             return "free tier available"
         if kind == "published_plan_price":
-            price = self._published_plan_price(text)
+            price = price_detail or self._published_plan_price(text)
             plan = price.get("plan", "paid plan").strip()
             amount = price.get("price", "public price").strip()
             return f"{plan} pricing is {amount}"

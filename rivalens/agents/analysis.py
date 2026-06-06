@@ -1,6 +1,7 @@
 """Analysis agent that turns evidence into traceable claims."""
 
 from collections import defaultdict
+import re
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
@@ -26,8 +27,17 @@ class AnalysisAgent:
         schema_payload = knowledge_message.get("payload", {}) if knowledge_message else {}
         competitor_knowledge = state.get("competitor_knowledge") or schema_payload.get("competitor_knowledge", [])
         knowledge_facts = state.get("knowledge_facts") or schema_payload.get("knowledge_facts", [])
-        claims = self._claims_from_knowledge_facts(state, knowledge_facts)
-        claim_source = "knowledge_facts" if claims else "accepted_evidence_reviews"
+        previous_claims = state.get("analysis_claims", [])
+        claim_support_reviews = state.get("claim_support_reviews", [])
+        claims = self._revised_claims_from_support_reviews(
+            previous_claims,
+            claim_support_reviews,
+        )
+        claim_source = "claim_support_revision" if claims else "knowledge_facts"
+
+        if not claims:
+            claims = self._claims_from_knowledge_facts(state, knowledge_facts)
+            claim_source = "knowledge_facts" if claims else "accepted_evidence_reviews"
 
         if not claims:
             claims = self._claims_from_quality_accepted_evidence(state)
@@ -66,12 +76,16 @@ class AnalysisAgent:
                     "output": {
                         "claim_count": len(claims),
                         "claim_granularity": (
-                            "knowledge_fact"
-                            if claim_source == "knowledge_facts"
+                            "claim_support_revision"
+                            if claim_source == "claim_support_revision"
                             else (
-                                "accepted_evidence_cluster"
-                                if claim_source == "accepted_evidence_reviews"
-                                else "competitor_knowledge"
+                                "knowledge_fact"
+                                if claim_source == "knowledge_facts"
+                                else (
+                                    "accepted_evidence_cluster"
+                                    if claim_source == "accepted_evidence_reviews"
+                                    else "competitor_knowledge"
+                                )
                             )
                         ),
                     },
@@ -310,6 +324,10 @@ class AnalysisAgent:
         unique_objects = self._dedupe(fact_objects)
         if not unique_objects:
             return f"{competitor} {dimension_name}: accepted public evidence contains {label}."
+        if fact_type == "pricing_signal":
+            pricing_summary = self._pricing_claim_summary(unique_objects)
+            if pricing_summary:
+                return f"{competitor} {dimension_name}: public evidence reports {pricing_summary}."
         subject = clean_text(subject)
         if len(unique_objects) == 1:
             if subject and predicate_phrase:
@@ -323,6 +341,111 @@ class AnalysisAgent:
             f"{competitor} {dimension_name}: public evidence contains multiple "
             f"{label}, including {examples}."
         )[:520]
+
+    def _revised_claims_from_support_reviews(
+        self,
+        claims: list[dict[str, Any]],
+        reviews: list[dict[str, Any]],
+    ) -> list[AnalysisClaim]:
+        if not claims or not reviews:
+            return []
+        review_by_claim = {
+            review.get("claim_id", ""): review
+            for review in reviews
+            if review.get("claim_id")
+        }
+        revised_claims: list[AnalysisClaim] = []
+        changed = False
+        for claim in claims:
+            review = review_by_claim.get(claim.get("id", ""), {})
+            if (
+                review.get("recommended_action") == "revise"
+                and review.get("suggested_revision")
+            ):
+                changed = True
+                revised_claims.append(
+                    {
+                        **claim,
+                        "claim": review["suggested_revision"],
+                        "reasoning": (
+                            str(claim.get("reasoning", "")).rstrip()
+                            + " Revised after ClaimSupportReviewer requested tighter wording."
+                        ).strip(),
+                        "confidence": min(
+                            float(claim.get("confidence", 0.5)),
+                            float(review.get("confidence", 0.5)),
+                        ),
+                    }
+                )
+                continue
+            revised_claims.append(claim)
+        return revised_claims if changed else []
+
+    def _pricing_claim_summary(self, fact_objects: list[str]) -> str:
+        details: list[str] = []
+        for text in fact_objects:
+            details.extend(self._pricing_details(text))
+            lowered = text.lower()
+            if (
+                "free tier available" in lowered
+                or any(term in text for term in ("免费版", "免费套餐", "免费计划"))
+            ) and "free tier available" not in details:
+                details.append("free tier available")
+            if (
+                "quote" in lowered
+                or any(term in text for term in ("联系销售", "定制报价", "企业版询价"))
+            ) and "enterprise pricing requires sales contact" not in details:
+                details.append("enterprise pricing requires sales contact")
+        if not details:
+            return ""
+        return "; ".join(self._dedupe(details)[:5])
+
+    def _pricing_details(self, text: str) -> list[str]:
+        details: list[str] = []
+        patterns = [
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{1,24})\s+pricing is\s+(?P<price>[$¥€£]\s?\d+(?:[.,]\d+)?(?:\s*/?\s*(?:人|用户|user|seat)?\s*/?\s*(?:月|年|month|mo|year|yr))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{0,24}(?:版|套餐|计划|plan|tier)?)\s*(?P<price>[$¥€£]\s?\d+(?:[.,]\d+)?(?:\s*/?\s*(?:人|用户|user|seat)?\s*/?\s*(?:月|年|month|mo|year|yr))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{0,24}(?:版|套餐|计划|plan|tier)?)\s*(?:定价为|价格为|收费为|每人每月)\s*(?P<price>\d+(?:[.,]\d+)?\s*元(?:\s*/?\s*(?:人|用户)?\s*/?\s*(?:月|年))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{0,24}(?:版|套餐|计划|plan|tier)?)\s*(?P<price>\d+(?:[.,]\d+)?\s*元(?:\s*/?\s*(?:人|用户)?\s*/?\s*(?:月|年))?)",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                plan = " ".join((match.group("plan") or "").split()).strip(" ：:-")
+                plan = self._clean_pricing_plan(plan)
+                price = " ".join((match.group("price") or "").split())
+                if not price:
+                    continue
+                if not self._valid_pricing_plan(plan):
+                    continue
+                detail = f"{plan} {price}" if plan else price
+                if detail not in details:
+                    details.append(detail)
+        return details
+
+    def _clean_pricing_plan(self, value: str) -> str:
+        plan = " ".join(str(value or "").split()).strip(" ：:-")
+        if " " in plan:
+            plan = plan.split()[-1]
+        if (
+            plan
+            and re.fullmatch(r"[\u4e00-\u9fff]{1,8}", plan)
+            and not plan.endswith(("版", "套餐", "计划"))
+        ):
+            plan = f"{plan}版"
+        return plan
+
+    def _valid_pricing_plan(self, plan: str) -> bool:
+        if not plan:
+            return True
+        return plan.lower() not in {
+            "at",
+            "costs",
+            "from",
+            "is",
+            "plan",
+            "priced",
+            "starts",
+        }
 
     def _fact_type_label(self, fact_type: str) -> str:
         return {

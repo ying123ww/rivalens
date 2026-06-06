@@ -446,7 +446,7 @@ ReportWriterAgent
 
 - Review only claim-bound evidence.
 - Emit structured support status, recommended action, unsupported phrases, and suggested revision when needed.
-- Do not trigger a collection-specific verification path.
+- Route revision feedback back to `AnalysisAgent` for claim wording only; do not trigger a collection-specific verification path.
 - Do not rewrite dimensions through natural language.
 
 ### ReportWriterAgent

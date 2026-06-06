@@ -149,7 +149,8 @@ flowchart LR
     B --> C["knowledge_structuring\nKnowledgeStructuringAgent"]
     C --> D["dimension_analysis\nAnalysisAgent"]
     D --> G["claim_support_review\nClaimSupportReviewer"]
-    G --> E["report_writer\nReportWriterAgent"]
+    G -->|"accept / suppress after max revision"| E["report_writer\nReportWriterAgent"]
+    G -->|"revise claim wording once"| D
     E --> F["publisher\nPublisherAgent"]
 ```
 
@@ -230,9 +231,9 @@ usage-based-billing, and annual-discount atoms when those signals are present.
 predicate, and normalized fact key before generating traceable `AnalysisClaim`
 records.
 `ClaimSupportReviewer` checks claim-level citation support before writing.
-It does not launch a special collection path; future claim-support follow-up
-should enter the same structured collection protocol used for normal coverage
-gaps.
+It does not launch collection. When wording is too broad or too strong, it asks
+`AnalysisAgent` to tighten the claim to the cited evidence; claims without
+traceable bindings are suppressed before writing.
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
@@ -549,7 +550,7 @@ for analysis or remained blocked.
 `knowledge_fact_ids`, `evidence_ids`, claim type, `claim_risk_level`, and report
 routing on each generated `AnalysisClaim`. `ClaimSupportReviewer` marks claims
 as supported, weak, contradicted, or unverifiable and emits a recommended action:
-accept, revise, suppress, or evidence gap. Higher-risk claims are reviewed more
-conservatively at the claim gate, not during collection. Only
-supported/accepted claims enter the writer context; claim support review does
-not currently trigger a collection-specific verification pass.
+accept, revise, or suppress. Higher-risk claims are reviewed more conservatively
+at the claim gate, not during collection. Claims recommended for revision can
+route back to `AnalysisAgent` once for tighter evidence-bound wording; only
+supported/accepted claims enter the writer context.

@@ -171,10 +171,10 @@ class ClaimSupportReviewer:
         if not evidence_items:
             return (
                 "unverifiable",
-                "evidence_gap",
+                "suppress",
                 ["missing evidence ids"],
                 "",
-                "Claim has no traceable evidence bindings.",
+                "Claim has no traceable evidence bindings and is suppressed at the claim gate.",
                 round(min(1.0, max(0.0, base_score * 0.6)), 2),
             )
 
@@ -200,6 +200,19 @@ class ClaimSupportReviewer:
             evidence_items,
             knowledge_facts,
         )
+        pricing_detail_issue = self._pricing_detail_issue(
+            claim_text,
+            context_text,
+        )
+        if pricing_detail_issue:
+            return (
+                "weak",
+                "revise",
+                pricing_detail_issue[:4],
+                suggested_revision,
+                "Pricing claim omits concrete price or plan details present in the bound evidence.",
+                round(max(0.0, min(1.0, base_score * 0.78)), 2),
+            )
 
         if overclaim_terms and not self._overclaim_supported(overclaim_terms, context_text):
             return (
@@ -214,11 +227,11 @@ class ClaimSupportReviewer:
         if not claim.get("knowledge_fact_ids"):
             if claim_risk_level == "high":
                 return (
-                    "unverifiable",
-                    "evidence_gap",
+                    "weak",
+                    "revise",
                     unsupported or claim_tokens[:4],
                     suggested_revision,
-                    "High-risk claim is bound to evidence snippets but not to structured KnowledgeFact records.",
+                    "High-risk claim should be tightened to the cited evidence wording; claim support does not trigger collection.",
                     round(max(0.0, min(1.0, base_score * 0.68)), 2),
                 )
             return (
@@ -432,7 +445,118 @@ class ClaimSupportReviewer:
         source_text = " ".join(source_text.split())[:220]
         if not source_text:
             return ""
+        pricing_details = self._pricing_details(source_text)
+        if pricing_details:
+            return (
+                f"{competitor} {dimension}: public evidence reports "
+                f"{'; '.join(pricing_details[:4])}."
+            )
         return f"{competitor} {dimension}: public evidence indicates {source_text}."
+
+    def _pricing_detail_issue(
+        self,
+        claim_text: str,
+        context_text: str,
+    ) -> list[str]:
+        lowered_claim = claim_text.lower()
+        if not any(
+            term in lowered_claim
+            for term in ("pricing", "price", "billing", "定价", "价格", "收费")
+        ):
+            return []
+
+        details = self._pricing_details(context_text)
+        if not details:
+            return []
+        if self._has_pricing_detail(claim_text) and not self._generic_pricing_claim(
+            claim_text,
+        ):
+            return []
+        return details
+
+    def _generic_pricing_claim(self, claim_text: str) -> bool:
+        lowered = claim_text.lower()
+        return any(
+            phrase in lowered
+            for phrase in (
+                "multiple pricing signals",
+                "pricing signals around",
+                "public pricing-model signals",
+                "多梯度付费",
+                "付费套餐布局",
+                "定价信号",
+            )
+        )
+
+    def _has_pricing_detail(self, text: str) -> bool:
+        if not text:
+            return False
+        return bool(
+            re.search(r"[$¥€£]\s?\d", text)
+            or re.search(r"\d+(?:[.,]\d+)?\s*元", text)
+            or re.search(r"\bfree(?:\s+(?:plan|tier|version))?\b", text.lower())
+            or any(term in text for term in ("免费版", "免费套餐", "联系销售", "定制报价"))
+        )
+
+    def _pricing_details(self, text: str) -> list[str]:
+        if not text:
+            return []
+        details: list[str] = []
+        patterns = [
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{1,24})\s+pricing is\s+(?P<price>[$¥€£]\s?\d+(?:[.,]\d+)?(?:\s*/?\s*(?:人|用户|user|seat)?\s*/?\s*(?:月|年|month|mo|year|yr))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{0,24}(?:版|套餐|计划|plan|tier)?)\s*(?P<price>[$¥€£]\s?\d+(?:[.,]\d+)?(?:\s*/?\s*(?:人|用户|user|seat)?\s*/?\s*(?:月|年|month|mo|year|yr))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{0,24}(?:版|套餐|计划|plan|tier)?)\s*(?:定价为|价格为|收费为|每人每月)\s*(?P<price>\d+(?:[.,]\d+)?\s*元(?:\s*/?\s*(?:人|用户)?\s*/?\s*(?:月|年))?)",
+            r"(?P<plan>[\u4e00-\u9fffA-Za-z0-9+ -]{0,24}(?:版|套餐|计划|plan|tier)?)\s*(?P<price>\d+(?:[.,]\d+)?\s*元(?:\s*/?\s*(?:人|用户)?\s*/?\s*(?:月|年))?)",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                detail = self._pricing_detail_from_match(match)
+                if detail and detail not in details:
+                    details.append(detail)
+        if re.search(r"\bfree(?:\s+(?:plan|tier|version))?\b", text.lower()) or any(
+            term in text for term in ("免费版", "免费套餐", "免费计划")
+        ):
+            free_detail = "free tier available"
+            if free_detail not in details:
+                details.append(free_detail)
+        return details[:8]
+
+    def _pricing_detail_from_match(self, match: re.Match[str]) -> str:
+        plan = " ".join((match.group("plan") or "").split()).strip(" ：:-")
+        plan = self._clean_pricing_plan(plan)
+        price = " ".join((match.group("price") or "").split())
+        if not price:
+            return ""
+        if not self._valid_pricing_plan(plan):
+            return ""
+        if plan:
+            return f"{plan} {price}"
+        return price
+
+    def _clean_pricing_plan(self, value: str) -> str:
+        plan = " ".join(str(value or "").split()).strip(" ：:-")
+        if " " in plan:
+            plan = plan.split()[-1]
+        if (
+            plan
+            and re.fullmatch(r"[\u4e00-\u9fff]{1,8}", plan)
+            and not plan.endswith(("版", "套餐", "计划"))
+        ):
+            plan = f"{plan}版"
+        return plan
+
+    def _valid_pricing_plan(self, plan: str) -> bool:
+        if not plan:
+            return True
+        return plan.lower() not in {
+            "at",
+            "costs",
+            "from",
+            "is",
+            "plan",
+            "priced",
+            "starts",
+        }
 
     def _evidence_snippet_text(self, evidence: dict[str, Any]) -> str:
         snippets = evidence.get("evidence_snippets", []) or []

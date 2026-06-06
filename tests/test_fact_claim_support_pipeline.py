@@ -7,6 +7,7 @@ from rivalens.agents.claim_support import ClaimSupportReviewer
 from rivalens.agents import knowledge_structuring as knowledge_module
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import ReportWriterAgent
+from rivalens.workflows.competitive_analysis import _route_after_claim_support
 
 
 class FakeFactExtractor:
@@ -474,6 +475,32 @@ def test_knowledge_structuring_splits_pricing_evidence_into_atom_facts():
     assert all(fact["evidence_ids"] == ["ev_pricing"] for fact in facts)
 
 
+def test_knowledge_structuring_keeps_multiple_published_price_atoms():
+    agent = KnowledgeStructuringAgent()
+    evidence = [
+        {
+            "id": "ev_project_pricing",
+            "competitor": "飞书",
+            "analysis_dimension_id": "pricing_model",
+            "dimension_name": "商业模式与定价",
+            "source_type": "pricing_page",
+            "title": "飞书项目管理工具收费标准",
+            "excerpt": (
+                "*所有版本需按年付费 商业版 ¥60/人/月 "
+                "旗舰版 ¥80/人/月 核心功能：项目管理全场景覆盖"
+            ),
+            "url": "https://pricing.example/feishu-project",
+            "confidence": 0.9,
+        }
+    ]
+
+    facts = agent._build_knowledge_facts(evidence)
+    objects = sorted(fact["object"] for fact in facts)
+
+    assert "商业版 pricing is ¥60/人/月" in objects
+    assert "旗舰版 pricing is ¥80/人/月" in objects
+
+
 def test_llm_broad_pricing_fact_is_split_before_analysis():
     agent = KnowledgeStructuringAgent(fact_extractor=FakeBroadPricingExtractor())
 
@@ -638,6 +665,33 @@ def test_analysis_keeps_distinct_pricing_atoms_as_distinct_claims():
     assert not any("multiple pricing signals" in claim["claim"] for claim in claims)
 
 
+def test_analysis_pricing_claim_includes_specific_price():
+    evidence = [
+        {
+            "id": "ev_project_pricing",
+            "competitor": "飞书",
+            "analysis_dimension_id": "pricing_model",
+            "dimension_name": "商业模式与定价",
+            "source_type": "pricing_page",
+            "title": "飞书项目管理工具收费标准",
+            "excerpt": "商业版 ¥60/人/月 旗舰版 ¥80/人/月",
+            "url": "https://pricing.example/feishu-project",
+            "confidence": 0.9,
+        }
+    ]
+    facts = KnowledgeStructuringAgent()._build_knowledge_facts(evidence)
+    state = {
+        "analysis_dimensions": [
+            {"id": "pricing_model", "name": "商业模式与定价"},
+        ],
+    }
+
+    claims = AnalysisAgent()._claims_from_knowledge_facts(state, facts)
+
+    assert any("¥60/人/月" in claim["claim"] for claim in claims)
+    assert any("¥80/人/月" in claim["claim"] for claim in claims)
+
+
 def test_claim_support_accepts_supported_fact_bound_claim():
     reviewer = ClaimSupportReviewer()
     state = {
@@ -732,7 +786,112 @@ def test_claim_support_flags_overclaim_and_writer_filters_it():
     ) == []
 
 
-def test_high_risk_claim_without_knowledge_fact_requires_evidence_gap():
+def test_claim_support_flags_pricing_claim_without_available_price_detail():
+    reviewer = ClaimSupportReviewer()
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_price",
+                "analysis_dimension_id": "pricing_model",
+                "claim_type": "pricing_strategy",
+                "claim_risk_level": "high",
+                "knowledge_fact_ids": ["fact_price"],
+                "claim": "Acme Pricing Model: public evidence contains multiple pricing signals.",
+                "competitors": ["Acme"],
+                "evidence_ids": ["ev_price"],
+                "confidence": 0.9,
+            }
+        ],
+        "knowledge_facts": [
+            {
+                "id": "fact_price",
+                "competitor": "Acme",
+                "analysis_dimension_id": "pricing_model",
+                "object": "Pro pricing is $20/user/month",
+                "statement": "Pro plan publishes pricing at $20/user/month.",
+                "evidence_ids": ["ev_price"],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_price",
+                "competitor": "Acme",
+                "analysis_dimension_id": "pricing_model",
+                "title": "Acme Pricing",
+                "excerpt": "Pro plan is $20/user/month.",
+                "url": "https://acme.example/pricing",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "weak"
+    assert review["recommended_action"] == "revise"
+    assert "$20/user/month" in review["suggested_revision"]
+
+
+def test_analysis_rewrites_claims_from_claim_support_feedback():
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_price",
+                "analysis_dimension_id": "pricing_model",
+                "claim": "Acme Pricing Model: public evidence contains multiple pricing signals.",
+                "competitors": ["Acme"],
+                "evidence_ids": ["ev_price"],
+                "confidence": 0.9,
+            }
+        ],
+        "claim_support_reviews": [
+            {
+                "claim_id": "claim_price",
+                "recommended_action": "revise",
+                "suggested_revision": (
+                    "Acme pricing_model: public evidence reports Pro $20/user/month."
+                ),
+                "confidence": 0.7,
+            }
+        ],
+    }
+
+    result = asyncio.run(AnalysisAgent().run(state))
+    claim = result["analysis_claims"][0]
+
+    assert claim["claim"] == "Acme pricing_model: public evidence reports Pro $20/user/month."
+    assert claim["confidence"] == 0.7
+    assert result["agent_events"][-1]["output"]["claim_granularity"] == (
+        "claim_support_revision"
+    )
+
+
+def test_workflow_routes_revision_once_after_claim_support():
+    first_review_state = {
+        "claim_support_reviews": [
+            {
+                "claim_id": "claim_price",
+                "recommended_action": "revise",
+                "suggested_revision": "Acme pricing reports Pro $20/user/month.",
+            }
+        ],
+        "agent_events": [
+            {"agent": "claim_support", "action": "review_claim_support"},
+        ],
+    }
+    second_review_state = {
+        **first_review_state,
+        "agent_events": [
+            {"agent": "claim_support", "action": "review_claim_support"},
+            {"agent": "claim_support", "action": "review_claim_support"},
+        ],
+    }
+
+    assert _route_after_claim_support(first_review_state) == "dimension_analysis"
+    assert _route_after_claim_support(second_review_state) == "report_writer"
+
+
+def test_high_risk_claim_without_knowledge_fact_requires_revision_only():
     reviewer = ClaimSupportReviewer()
     state = {
         "analysis_claims": [
@@ -763,5 +922,31 @@ def test_high_risk_claim_without_knowledge_fact_requires_evidence_gap():
     review = result["claim_support_reviews"][0]
 
     assert review["claim_risk_level"] == "high"
+    assert review["support_status"] == "weak"
+    assert review["recommended_action"] == "revise"
+    assert review["suggested_revision"]
+
+
+def test_claim_support_suppresses_claim_without_evidence_binding():
+    reviewer = ClaimSupportReviewer()
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_without_evidence",
+                "analysis_dimension_id": "pricing_model",
+                "claim_type": "pricing_strategy",
+                "claim_risk_level": "high",
+                "claim": "Acme pricing is cheaper than Beta.",
+                "competitors": ["Acme"],
+                "evidence_ids": [],
+                "confidence": 0.8,
+            }
+        ],
+        "evidence_items": [],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
     assert review["support_status"] == "unverifiable"
-    assert review["recommended_action"] == "evidence_gap"
+    assert review["recommended_action"] == "suppress"
