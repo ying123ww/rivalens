@@ -4,6 +4,10 @@ import json
 from typing import Any, Callable
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.agents.specificity import (
+    combined_specificity_text,
+    extract_specificity_hints,
+)
 from rivalens.schema import CompetitorAnalysisState
 from rivalens.research.config import Config
 from rivalens.research.prompts import get_prompt_family
@@ -575,7 +579,8 @@ class ReportWriterAgent:
 3. 表格或段落中保留相关 citation_ref，例如 [1]。
 4. 只要 Context 中存在与本动态维度相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
 5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
-6. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
+6. 如果 claim 带有 specificity_hints，表格中的竞品单元格或紧随其后的分析文字至少使用其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要把这些细节压成“多种能力”“能力体系”“产品矩阵”“相关信号”等概述性描述。
+7. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
 
 动态维度：{section['title']}
 维度说明：{section['guiding_question']}
@@ -603,6 +608,7 @@ class ReportWriterAgent:
 ### 总结论述
 - 输出一段综合结论，说明核心竞争差异、竞品下一步最可能的战略动作及关键机会窗口。
 
+如果 Context 中的 claim 带有 specificity_hints，SWOT/TOWS/总结论述应优先保留模块名、数字、版本、报告/认证名称或业务场景，不要只写“能力体系”“多种能力”“相关信号”等概述词。
 必须保留可用的 citation_ref，例如 [1]。不要输出附录。
 """
 
@@ -679,6 +685,8 @@ class ReportWriterAgent:
         citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         report_evidence_ids = set(citation_refs_by_evidence_id)
+        evidence_by_id = self._evidence_by_id(state)
+        knowledge_fact_by_id = self._knowledge_fact_by_id(state)
         mapped_dimensions = [
             dimension
             for dimension in self._analysis_dimensions(state, [])
@@ -692,6 +700,7 @@ class ReportWriterAgent:
                 "Use any relevant citation-backed claim for this section regardless of source type.",
                 "Do not treat source-type preferences as a writing gate; keep indirect-evidence wording conservative.",
                 "Do not infer new claims from raw evidence.",
+                "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
                 "If claims are missing, write 公开证据不足.",
             ],
             "task_query": state.get("task", {}).get("query", ""),
@@ -712,6 +721,8 @@ class ReportWriterAgent:
                     claim,
                     report_evidence_ids,
                     citation_refs_by_evidence_id,
+                    evidence_by_id,
+                    knowledge_fact_by_id,
                 )
                 for claim in self._fair_sample_claims_by_competitor(
                     claims,
@@ -729,12 +740,15 @@ class ReportWriterAgent:
         citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         report_evidence_ids = set(citation_refs_by_evidence_id)
+        evidence_by_id = self._evidence_by_id(state)
+        knowledge_fact_by_id = self._knowledge_fact_by_id(state)
         payload = {
             "reporting_constraints": [
                 "Only write the dynamic analysis overview table.",
                 "Use dynamic_analysis_sections as the section set.",
                 "Do not use a preset product-dimension checklist.",
                 "Use citation_ref values like [1] where available.",
+                "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
             ],
             "task_query": state.get("task", {}).get("query", ""),
             "competitors": self._compact_competitors_for_context(
@@ -747,6 +761,8 @@ class ReportWriterAgent:
                     claim,
                     report_evidence_ids,
                     citation_refs_by_evidence_id,
+                    evidence_by_id,
+                    knowledge_fact_by_id,
                 )
                 for claim in claims[:SUMMARY_CLAIM_LIMIT]
             ],
@@ -761,11 +777,14 @@ class ReportWriterAgent:
         citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         report_evidence_ids = set(citation_refs_by_evidence_id)
+        evidence_by_id = self._evidence_by_id(state)
+        knowledge_fact_by_id = self._knowledge_fact_by_id(state)
         payload = {
             "reporting_constraints": [
                 "Only write chapter four.",
                 "Use claims and citation_ref values like [1].",
                 "Do not infer new claims from raw evidence.",
+                "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
                 "Do not write appendix.",
             ],
             "task_query": state.get("task", {}).get("query", ""),
@@ -779,6 +798,8 @@ class ReportWriterAgent:
                     claim,
                     report_evidence_ids,
                     citation_refs_by_evidence_id,
+                    evidence_by_id,
+                    knowledge_fact_by_id,
                 )
                 for claim in claims[:SUMMARY_CLAIM_LIMIT]
             ],
@@ -1208,6 +1229,8 @@ class ReportWriterAgent:
             for evidence in evidence_items
             if evidence.get("id")
         }
+        evidence_by_id = self._evidence_by_id(state)
+        knowledge_fact_by_id = self._knowledge_fact_by_id(state)
         payload = {
             "reporting_constraints": [
                 "Use analysis_claims as the main claim set.",
@@ -1215,6 +1238,7 @@ class ReportWriterAgent:
                 "Use EvidenceItem.url values as source URLs.",
                 "Do not use rejected evidence as support for claims.",
                 "Let chapter three dimensions follow the available claims and evidence; do not use a preset product-dimension template.",
+                "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
                 "Do not write the appendix; the system appends the information index.",
             ],
             "dynamic_analysis_sections": self._dynamic_analysis_sections(
@@ -1234,6 +1258,8 @@ class ReportWriterAgent:
                     claim,
                     report_evidence_ids,
                     citation_refs_by_evidence_id,
+                    evidence_by_id,
+                    knowledge_fact_by_id,
                 )
                 for claim in claims
             ],
@@ -1518,17 +1544,52 @@ class ReportWriterAgent:
         text = dimension_id.removeprefix("direction_").replace("_", " ").strip()
         return text.title() if text else "动态分析维度"
 
+    def _evidence_by_id(
+        self,
+        state: CompetitorAnalysisState,
+    ) -> dict[str, dict[str, Any]]:
+        return {
+            evidence.get("id", ""): evidence
+            for evidence in state.get("evidence_items", [])
+            if evidence.get("id")
+        }
+
+    def _knowledge_fact_by_id(
+        self,
+        state: CompetitorAnalysisState,
+    ) -> dict[str, dict[str, Any]]:
+        return {
+            fact.get("id", ""): fact
+            for fact in state.get("knowledge_facts", [])
+            if fact.get("id")
+        }
+
     def _compact_claim(
         self,
         claim: dict[str, Any],
         report_evidence_ids: set[str],
         citation_refs_by_evidence_id: dict[str, str],
+        evidence_by_id: dict[str, dict[str, Any]] | None = None,
+        knowledge_fact_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         evidence_ids = [
             evidence_id
             for evidence_id in claim.get("evidence_ids", [])
             if evidence_id in report_evidence_ids
         ]
+        evidence_items = [
+            evidence_by_id[evidence_id]
+            for evidence_id in evidence_ids
+            if evidence_by_id and evidence_id in evidence_by_id
+        ]
+        knowledge_facts = [
+            knowledge_fact_by_id[fact_id]
+            for fact_id in claim.get("knowledge_fact_ids", [])
+            if knowledge_fact_by_id and fact_id in knowledge_fact_by_id
+        ]
+        specificity_hints = extract_specificity_hints(
+            combined_specificity_text(claim, evidence_items, knowledge_facts),
+        )
         return {
             "id": claim.get("id", ""),
             "analysis_dimension_id": claim.get("analysis_dimension_id", ""),
@@ -1549,6 +1610,7 @@ class ReportWriterAgent:
             "reasoning": claim.get("reasoning", ""),
             "support_status": claim.get("support_status", ""),
             "support_reviewer_notes": claim.get("support_reviewer_notes", ""),
+            "specificity_hints": specificity_hints,
             "confidence": claim.get("confidence", 0.5),
         }
 

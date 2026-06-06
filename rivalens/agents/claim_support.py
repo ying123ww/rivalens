@@ -6,6 +6,12 @@ import re
 from typing import Any
 
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.agents.specificity import (
+    combined_specificity_text,
+    extract_specificity_hints,
+    is_generic_specificity_claim,
+    missing_specificity_hints,
+)
 from rivalens.schema import ClaimSupportReview, CompetitorAnalysisState
 
 
@@ -214,6 +220,21 @@ class ClaimSupportReviewer:
                 round(max(0.0, min(1.0, base_score * 0.78)), 2),
             )
 
+        specificity_issue = self._specificity_detail_issue(
+            claim_text,
+            evidence_items,
+            knowledge_facts,
+        )
+        if specificity_issue:
+            return (
+                "weak",
+                "revise",
+                specificity_issue[:4],
+                suggested_revision,
+                "Claim omits concrete modules, metrics, reports, or scenarios present in the bound evidence.",
+                round(max(0.0, min(1.0, base_score * 0.8)), 2),
+            )
+
         if overclaim_terms and not self._overclaim_supported(overclaim_terms, context_text):
             return (
                 "weak",
@@ -335,7 +356,7 @@ class ClaimSupportReviewer:
                     evidence.get("url", ""),
                 ]
             )
-        return " ".join(str(part or "") for part in parts).lower()
+        return " ".join(str(part or "") for part in parts)
 
     def _alignment_issue(
         self,
@@ -401,8 +422,9 @@ class ClaimSupportReviewer:
         return any(term in normalized for term in overclaim_terms)
 
     def _context_has_uncertainty(self, context_text: str) -> bool:
+        normalized = context_text.lower()
         return any(
-            keyword in context_text
+            keyword in normalized
             for keyword in [
                 "no ",
                 "not ",
@@ -451,6 +473,15 @@ class ClaimSupportReviewer:
                 f"{competitor} {dimension}: public evidence reports "
                 f"{'; '.join(pricing_details[:4])}."
             )
+        specificity_hints = extract_specificity_hints(
+            combined_specificity_text(claim, evidence_items, knowledge_facts),
+        )
+        if specificity_hints:
+            return (
+                f"{competitor} {dimension}: public evidence indicates "
+                f"{source_text}; concrete details include "
+                f"{'; '.join(specificity_hints[:5])}."
+            )[:520]
         return f"{competitor} {dimension}: public evidence indicates {source_text}."
 
     def _pricing_detail_issue(
@@ -473,6 +504,27 @@ class ClaimSupportReviewer:
         ):
             return []
         return details
+
+    def _specificity_detail_issue(
+        self,
+        claim_text: str,
+        evidence_items: list[dict[str, Any]],
+        knowledge_facts: list[dict[str, Any]],
+    ) -> list[str]:
+        context_text = combined_specificity_text(
+            {"claim": claim_text},
+            evidence_items,
+            knowledge_facts,
+        )
+        context_hints = extract_specificity_hints(context_text)
+        if len(context_hints) < 2:
+            return []
+        missing_hints = missing_specificity_hints(claim_text, context_hints)
+        if len(missing_hints) < 2:
+            return []
+        if not is_generic_specificity_claim(claim_text):
+            return []
+        return missing_hints
 
     def _generic_pricing_claim(self, claim_text: str) -> bool:
         lowered = claim_text.lower()

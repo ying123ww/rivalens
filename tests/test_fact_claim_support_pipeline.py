@@ -832,6 +832,102 @@ def test_claim_support_flags_pricing_claim_without_available_price_detail():
     assert "$20/user/month" in review["suggested_revision"]
 
 
+def test_claim_support_flags_generic_non_pricing_claim_when_details_exist():
+    reviewer = ClaimSupportReviewer()
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_feature",
+                "analysis_dimension_id": "ai_capability_application",
+                "claim_type": "capability_signal",
+                "claim_risk_level": "medium",
+                "knowledge_fact_ids": ["fact_feature"],
+                "claim": (
+                    "飞书 AI capability: public evidence contains multiple "
+                    "capability signals for enterprise collaboration."
+                ),
+                "competitors": ["飞书"],
+                "evidence_ids": ["ev_feature"],
+                "confidence": 0.86,
+            }
+        ],
+        "knowledge_facts": [
+            {
+                "id": "fact_feature",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "object": (
+                    "飞书People supports talent management, 飞书项目 supports ITR管理, "
+                    "and 安全白皮书 3.0 cites ISO 27001 certification."
+                ),
+                "statement": (
+                    "飞书 publishes concrete modules including 飞书People, 飞书项目, "
+                    "ITR管理, 安全白皮书 3.0, and ISO 27001."
+                ),
+                "evidence_ids": ["ev_feature"],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_feature",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "title": "飞书 People and Project capability pages",
+                "excerpt": (
+                    "飞书People covers talent management. 飞书项目 supports ITR管理. "
+                    "安全白皮书 3.0 cites ISO 27001."
+                ),
+                "url": "https://example.com/feishu/features",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "weak"
+    assert review["recommended_action"] == "revise"
+    assert "飞书People" in review["suggested_revision"]
+    assert "飞书项目" in review["suggested_revision"]
+    assert review["required_follow_up_tasks"] == []
+
+
+def test_writer_compact_claim_includes_non_pricing_specificity_hints():
+    writer = ReportWriterAgent()
+    claim = {
+        "id": "claim_feature",
+        "analysis_dimension_id": "ai_capability_application",
+        "knowledge_fact_ids": ["fact_feature"],
+        "claim": "飞书 AI capability: public evidence contains multiple capability signals.",
+        "competitors": ["飞书"],
+        "evidence_ids": ["ev_feature"],
+        "confidence": 0.86,
+    }
+    fact = {
+        "id": "fact_feature",
+        "object": "飞书People, 飞书项目, ITR管理, 安全白皮书 3.0, ISO 27001",
+        "statement": "飞书 publishes concrete capability and security details.",
+        "evidence_ids": ["ev_feature"],
+    }
+    evidence = {
+        "id": "ev_feature",
+        "title": "飞书 People and Project capability pages",
+        "excerpt": "飞书People covers talent management. 飞书项目 supports ITR管理.",
+    }
+
+    compact = writer._compact_claim(
+        claim,
+        {"ev_feature"},
+        {"ev_feature": "[1]"},
+        {"ev_feature": evidence},
+        {"fact_feature": fact},
+    )
+
+    assert "飞书People" in compact["specificity_hints"]
+    assert "飞书项目" in compact["specificity_hints"]
+    assert compact["citation_refs"] == ["[1]"]
+
+
 def test_analysis_rewrites_claims_from_claim_support_feedback():
     state = {
         "analysis_claims": [

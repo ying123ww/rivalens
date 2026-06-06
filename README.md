@@ -233,7 +233,11 @@ records.
 `ClaimSupportReviewer` checks claim-level citation support before writing.
 It does not launch collection. When wording is too broad or too strong, it asks
 `AnalysisAgent` to tighten the claim to the cited evidence; claims without
-traceable bindings are suppressed before writing.
+traceable bindings are suppressed before writing. The claim gate and writer
+context also preserve concrete specificity hints from bound facts and evidence,
+such as module names, metrics, versions, reports, certifications, and business
+scenarios, so non-pricing sections are less likely to collapse into generic
+capability summaries.
 
 CSV, Excel, JSON, and screenshot inputs are ingested by `rivalens/file_context`
 instead of being modeled as agents. `PlanningAgent` uses the resulting summaries
@@ -553,4 +557,7 @@ as supported, weak, contradicted, or unverifiable and emits a recommended action
 accept, revise, or suppress. Higher-risk claims are reviewed more conservatively
 at the claim gate, not during collection. Claims recommended for revision can
 route back to `AnalysisAgent` once for tighter evidence-bound wording; only
-supported/accepted claims enter the writer context.
+supported/accepted claims enter the writer context. The writer context includes
+specificity hints from each claim's bound facts and evidence, and the segmented
+writer prompts require those hints to remain visible instead of being replaced by
+generic capability wording.
