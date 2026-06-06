@@ -589,7 +589,8 @@ class ReportWriterAgent:
 4. 只要 Context 中存在与本动态维度相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
 5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
 6. 如果 claim 带有 specificity_hints，表格中的竞品单元格或紧随其后的分析文字至少使用其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要把这些细节压成“多种能力”“能力体系”“产品矩阵”“相关信号”等概述性描述。
-7. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
+7. 对比表行必须是双方都适用的共同口径；如果某条证据只描述单一竞品的特色，不要把它做成强行横向对齐的行并让另一侧写“公开证据不足”，应在各竞品单元格分别概括其已引用 claim。
+8. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
 
 动态维度：{section['title']}
 维度说明：{section['guiding_question']}
@@ -700,7 +701,81 @@ class ReportWriterAgent:
             unique_refs = list(dict.fromkeys(citation_refs))
             if unique_refs and not any(ref in body for ref in unique_refs):
                 return False
+        if self._has_supported_competitor_gap_placeholder(
+            body,
+            refs_by_competitor,
+        ):
+            return False
         return True
+
+    def _has_supported_competitor_gap_placeholder(
+        self,
+        body: str,
+        refs_by_competitor: dict[str, list[str]],
+    ) -> bool:
+        supported_competitors = {
+            competitor
+            for competitor, citation_refs in refs_by_competitor.items()
+            if competitor != "综合" and citation_refs
+        }
+        if not supported_competitors:
+            return False
+
+        lines = [line.strip() for line in body.splitlines()]
+        for index, line in enumerate(lines[:-1]):
+            if not self._is_markdown_table_row(line):
+                continue
+            separator = lines[index + 1]
+            if not self._is_markdown_table_separator(separator):
+                continue
+
+            header_cells = self._markdown_row_cells(line)
+            competitor_columns = {
+                column_index: competitor
+                for column_index, header in enumerate(header_cells)
+                for competitor in supported_competitors
+                if competitor in header
+            }
+            if not competitor_columns:
+                continue
+
+            for row in lines[index + 2 :]:
+                if not self._is_markdown_table_row(row):
+                    break
+                cells = self._markdown_row_cells(row)
+                for column_index, competitor in competitor_columns.items():
+                    if column_index < len(cells) and self._is_gap_placeholder(
+                        cells[column_index],
+                    ):
+                        return True
+        return False
+
+    def _is_gap_placeholder(self, text: str) -> bool:
+        return any(
+            phrase in text
+            for phrase in (
+                "公开证据不足",
+                "公开资料不足",
+                "有效证据不足",
+                "数据不足",
+                "证据不足",
+            )
+        )
+
+    def _is_markdown_table_row(self, line: str) -> bool:
+        return line.startswith("|") and line.endswith("|") and line.count("|") >= 2
+
+    def _is_markdown_table_separator(self, line: str) -> bool:
+        if not self._is_markdown_table_row(line):
+            return False
+        cells = self._markdown_row_cells(line)
+        return bool(cells) and all(
+            cell and set(cell) <= {"-", ":", " "}
+            for cell in cells
+        )
+
+    def _markdown_row_cells(self, line: str) -> list[str]:
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
     def _clean_dynamic_overview_body(self, report: str) -> str:
         body = (report or "").strip()
@@ -766,6 +841,7 @@ class ReportWriterAgent:
                 "Use citation_ref values like [1] for material claims.",
                 "Use any relevant citation-backed claim for this section regardless of source type.",
                 "Do not treat source-type preferences as a writing gate; keep indirect-evidence wording conservative.",
+                "If branch_coverage_states show blocked coverage with accepted_evidence_ids, describe this as same-basis, authority, or source-type coverage limits rather than no public evidence.",
                 "Do not infer new claims from raw evidence.",
                 "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
                 "For every competitor represented in analysis_claims, include at least one citation_ref from that competitor's claims.",
@@ -785,6 +861,13 @@ class ReportWriterAgent:
                 "source_dimension_ids": section.get("source_dimension_ids", []),
             },
             "mapped_analysis_dimensions": mapped_dimensions,
+            "branch_coverage_states": self._compact_branch_coverage_states(
+                [
+                    coverage_state
+                    for coverage_state in state.get("branch_coverage_states", [])
+                    if self._matches_dynamic_section(coverage_state, section)
+                ],
+            ),
             "analysis_claims": [
                 self._compact_claim(
                     claim,
@@ -1218,6 +1301,7 @@ class ReportWriterAgent:
             "analysis_claims": claim_limit,
             "competitors": competitor_limit,
             "analysis_dimensions": dimension_limit,
+            "branch_coverage_states": dimension_limit * 2,
             "guiding_questions": 3,
             "evidence_ids": evidence_limit,
             "citation_refs": evidence_limit,
@@ -1271,6 +1355,7 @@ class ReportWriterAgent:
             "analysis_claims",
             "profile_evidence_items",
             "evidence_items",
+            "branch_coverage_states",
         ):
             if key in payload:
                 minimal[key] = payload[key][:2] if isinstance(payload[key], list) else payload[key]
@@ -1304,6 +1389,7 @@ class ReportWriterAgent:
                 "Use EvidenceItem.url values as source URLs.",
                 "Do not use rejected evidence as support for claims.",
                 "Let chapter three dimensions follow the available claims and evidence; do not use a preset product-dimension template.",
+                "If branch_coverage_states show blocked coverage with accepted evidence, treat it as a coverage limitation, not as absence of public evidence.",
                 "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
                 "Do not write the appendix; the system appends the information index.",
             ],
@@ -1319,6 +1405,9 @@ class ReportWriterAgent:
             ),
             "industry_direction_plan": state.get("industry_direction_plan", {}),
             "analysis_dimensions": analysis_dimensions,
+            "branch_coverage_states": self._compact_branch_coverage_states(
+                state.get("branch_coverage_states", []),
+            ),
             "analysis_claims": [
                 self._compact_claim(
                     claim,
@@ -1767,6 +1856,33 @@ class ReportWriterAgent:
             "reviewer_notes": review.get("reviewer_notes", ""),
             "confidence": review.get("confidence", 0.5),
         }
+
+    def _compact_branch_coverage_states(
+        self,
+        coverage_states: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        compact = []
+        for coverage_state in coverage_states:
+            compact.append(
+                {
+                    "id": coverage_state.get("id", ""),
+                    "competitor": coverage_state.get("competitor", ""),
+                    "analysis_dimension_id": coverage_state.get(
+                        "analysis_dimension_id",
+                        "",
+                    ),
+                    "dimension_id": coverage_state.get("dimension_id", ""),
+                    "dimension_name": coverage_state.get("dimension_name", ""),
+                    "status": coverage_state.get("status", ""),
+                    "accepted_evidence_count": len(
+                        coverage_state.get("accepted_evidence_ids", []),
+                    ),
+                    "found_source_types": coverage_state.get("found_source_types", []),
+                    "open_gap_codes": coverage_state.get("open_gap_codes", []),
+                    "blocked_gap_codes": coverage_state.get("blocked_gap_codes", []),
+                }
+            )
+        return compact
 
     def _report_evidence_items(
         self,
