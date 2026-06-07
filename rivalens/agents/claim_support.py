@@ -47,15 +47,10 @@ class ClaimSupportReviewer:
         accepted_count = 0
         revision_count = 0
         suppressed_count = 0
+        repaired_evidence_binding_count = 0
 
         for claim in claims:
             claim_id = claim.get("id", "")
-            evidence_ids = [
-                evidence_id
-                for evidence_id in claim.get("evidence_ids", [])
-                if evidence_id in evidence_by_id
-            ]
-            evidence_items = [evidence_by_id[evidence_id] for evidence_id in evidence_ids]
             knowledge_fact_ids = [
                 fact_id
                 for fact_id in claim.get("knowledge_fact_ids", [])
@@ -65,6 +60,27 @@ class ClaimSupportReviewer:
                 knowledge_fact_by_id[fact_id]
                 for fact_id in knowledge_fact_ids
             ]
+            original_evidence_ids = {
+                evidence_id
+                for evidence_id in claim.get("evidence_ids", [])
+                if evidence_id in evidence_by_id
+            }
+            evidence_ids = self._claim_evidence_ids(
+                claim,
+                knowledge_facts,
+                evidence_by_id,
+            )
+            repaired_evidence_binding_count += sum(
+                1
+                for evidence_id in evidence_ids
+                if evidence_id not in original_evidence_ids
+            )
+            evidence_items = [evidence_by_id[evidence_id] for evidence_id in evidence_ids]
+            review_claim = {
+                **claim,
+                "evidence_ids": evidence_ids,
+                "knowledge_fact_ids": knowledge_fact_ids,
+            }
             (
                 status,
                 recommended_action,
@@ -73,7 +89,7 @@ class ClaimSupportReviewer:
                 reviewer_notes,
                 confidence,
             ) = self._review_claim_support(
-                claim,
+                review_claim,
                 evidence_items,
                 knowledge_facts,
             )
@@ -101,7 +117,7 @@ class ClaimSupportReviewer:
                     "report_section_id": claim.get("report_section_id", ""),
                     "support_status": status,
                     "recommended_action": recommended_action,
-                    "claim_risk_level": self._claim_risk_level(claim),
+                    "claim_risk_level": self._claim_risk_level(review_claim),
                     "evidence_ids": evidence_ids,
                     "knowledge_fact_ids": knowledge_fact_ids,
                     "unsupported_phrases": unsupported_phrases,
@@ -157,10 +173,30 @@ class ClaimSupportReviewer:
                         "accepted_count": accepted_count,
                         "revision_count": revision_count,
                         "suppressed_count": suppressed_count,
+                        "repaired_evidence_binding_count": repaired_evidence_binding_count,
                     },
                 }
             ],
         }
+
+    def _claim_evidence_ids(
+        self,
+        claim: dict[str, Any],
+        knowledge_facts: list[dict[str, Any]],
+        evidence_by_id: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        evidence_ids = [
+            evidence_id
+            for evidence_id in claim.get("evidence_ids", [])
+            if evidence_id in evidence_by_id
+        ]
+        fact_evidence_ids = [
+            evidence_id
+            for fact in knowledge_facts
+            for evidence_id in fact.get("evidence_ids", [])
+            if evidence_id in evidence_by_id
+        ]
+        return list(dict.fromkeys(evidence_ids + fact_evidence_ids))
 
     def _review_claim_support(
         self,

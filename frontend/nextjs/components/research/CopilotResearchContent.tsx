@@ -1,7 +1,7 @@
 import { useRef, Dispatch, SetStateAction, useState, useCallback, useEffect } from "react";
 import ResearchPanel from "@/components/research/ResearchPanel";
 import CopilotPanel from "@/components/research/CopilotPanel";
-import { ChatBoxSettings, Data } from "@/types/data";
+import { ChatBoxSettings, Data, ResearchHistoryItem } from "@/types/data";
 
 interface CopilotResearchContentProps {
   orderedData: Data[];
@@ -23,6 +23,7 @@ interface CopilotResearchContentProps {
   isProcessingChat?: boolean;
   onNewResearch?: () => void;
   toggleSidebar?: () => void;
+  reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
 }
 
 export default function CopilotResearchContent({
@@ -44,14 +45,13 @@ export default function CopilotResearchContent({
   reset,
   isProcessingChat = false,
   onNewResearch,
-  toggleSidebar
+  toggleSidebar,
+  reportContext
 }: CopilotResearchContentProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   // Initialize copilot as hidden when loading
   const [isCopilotVisible, setIsCopilotVisible] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
-  // Track if user manually closed the copilot panel
-  const [userClosedCopilot, setUserClosedCopilot] = useState(false);
   // State for split pane resizing
   const [resizingActive, setResizingActive] = useState(false);
   const [researchPanelWidth, setResearchPanelWidth] = useState(58); // percentage
@@ -86,11 +86,6 @@ export default function CopilotResearchContent({
     // Set state without triggering scroll
     setIsCopilotVisible(newValue);
     
-    // Track user's explicit action of closing the panel
-    if (newValue === false) {
-      setUserClosedCopilot(true);
-    }
-    
     // If we're showing the copilot, trigger the animation
     if (newValue && !isCopilotVisible) {
       setShowAnimation(true);
@@ -108,24 +103,13 @@ export default function CopilotResearchContent({
     });
   }, [isCopilotVisible]);
   
-  // Effect to handle initial state and research completion
+  // 研究开始时重置证据问答面板，报告完成后保持默认收起。
   useEffect(() => {
-    // Reset userClosedCopilot when new research starts
     if (loading) {
-      setUserClosedCopilot(false);
+      setIsCopilotVisible(false);
+      setShowAnimation(false);
     }
-    
-    // Automatically open the copilot when research completes BUT only if user hasn't manually closed it
-    if (!loading && answer && !isCopilotVisible && !userClosedCopilot) {
-      // Add a slight delay before showing the copilot for a better UX
-      const timer = setTimeout(() => {
-        setIsCopilotVisible(true);
-        setShowAnimation(true);
-      }, 800);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [loading, answer, isCopilotVisible, userClosedCopilot]);
+  }, [loading]);
   
   // Extract the initial question from orderedData
   const initialQuestion = orderedData.find(data => data.type === 'question');
@@ -219,6 +203,7 @@ export default function CopilotResearchContent({
           onNewResearch={onNewResearch}
           loading={loading}
           toggleSidebar={toggleSidebar}
+          reportContext={reportContext}
         />
       </div>
 

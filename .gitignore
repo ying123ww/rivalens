@@ -27,6 +27,9 @@ my-docs/
 
 #Ignore mypy cache
 .mypy_cache/
+.test-tmp/
+.tmp/
+pytest-tmp-*/
 node_modules
 .idea
 .DS_Store

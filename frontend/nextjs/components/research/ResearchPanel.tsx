@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ResearchResults } from '@/components/ResearchResults';
-import { Data, ChatBoxSettings } from '@/types/data';
+import { Data, ChatBoxSettings, ResearchHistoryItem } from '@/types/data';
 import LoadingDots from '@/components/LoadingDots';
 import Image from 'next/image';
 
@@ -17,6 +17,7 @@ interface ResearchPanelProps {
   onNewResearch?: () => void;
   loading?: boolean;
   toggleSidebar?: () => void;
+  reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
 }
 
 const ResearchPanel: React.FC<ResearchPanelProps> = ({
@@ -31,7 +32,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   setIsCopilotVisible,
   onNewResearch,
   loading,
-  toggleSidebar
+  toggleSidebar,
+  reportContext
 }) => {
   // Determine if research is complete (has answer) and copilot should be highlighted
   const researchComplete = Boolean(answer && answer.length > 0);
@@ -76,16 +78,17 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             </button>
           )}
           
-          {/* Show Copilot button - only visible when copilot is hidden */}
+          {/* 证据问答入口仅在面板收起时显示 */}
           {!isCopilotVisible && setIsCopilotVisible && (
             <button 
               onClick={() => setIsCopilotVisible(true)}
-              className={`px-3 py-1.5 bg-teal-800/70 hover:bg-teal-700 text-teal-100 rounded-md flex items-center gap-1.5 transition-colors border border-teal-700/60 text-sm ${researchComplete ? 'animate-chat-button-pulse' : ''}`}
+              className={`px-3 py-1.5 bg-teal-800/70 hover:bg-teal-700 text-teal-100 rounded-md flex items-center gap-1.5 transition-colors border border-teal-700/60 text-sm font-medium ${researchComplete ? 'animate-chat-button-pulse' : ''}`}
+              aria-label="Ask About Evidence"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
               </svg>
-              Chat
+              Ask About Evidence
             </button>
           )}
         </div>
@@ -112,6 +115,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             chatBoxSettings={chatBoxSettings}
             handleClickSuggestion={handleClickSuggestion}
             currentResearchId={currentResearchId}
+            isProcessingChat={loading}
+            reportContext={reportContext}
           />
           
           {/* Loading indicator - show during research */}
