@@ -1,19 +1,13 @@
 """Structure collected evidence into the active competitor knowledge schema."""
 
 from collections import defaultdict
-import json
-import os
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-import json_repair
-from pydantic import BaseModel, Field
-
 from rivalens.agents.evidence_snippets import EvidenceSnippetBuilder
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge, KnowledgeFact
-from rivalens.research.utils.llm import create_chat_completion
 from rivalens.text_quality import clean_text, is_low_quality_text
 
 
@@ -40,363 +34,6 @@ PRICING_PREDICATE_ATOM_KINDS = {
     for atom_kind, predicate in PRICING_ATOM_PREDICATES.items()
 }
 
-
-class LLMKnowledgeFactCandidate(BaseModel):
-    competitor: str = ""
-    analysis_dimension_id: str = ""
-    schema_field_id: str = ""
-    fact_type: str = "public_evidence_signal"
-    subject: str = ""
-    predicate: str = "indicates"
-    object: str = ""
-    qualifiers: dict[str, Any] = Field(default_factory=dict)
-    normalized_key: str = ""
-    statement: str = ""
-    value: dict[str, Any] = Field(default_factory=dict)
-    evidence_ids: list[str] = Field(default_factory=list)
-    report_section_id: str = ""
-    confidence: float = Field(default=0.5, ge=0, le=1)
-
-
-class LLMKnowledgeFactResponse(BaseModel):
-    facts: list[LLMKnowledgeFactCandidate] = Field(default_factory=list)
-
-
-class KnowledgeFactLLMExtractor:
-    """Extract KnowledgeFact candidates with an LLM, leaving validation to the agent."""
-
-    def __init__(
-        self,
-        llm_spec: str | None = None,
-        temperature: float = 0.1,
-        max_tokens: int | None = None,
-        max_evidence_items: int | None = None,
-        max_excerpt_chars: int | None = None,
-    ) -> None:
-        self.llm_spec = llm_spec or self._llm_spec_from_env()
-        self.temperature = temperature
-        self.max_tokens = max_tokens or self._env_int(
-            "RIVALENS_KNOWLEDGE_FACT_LLM_MAX_TOKENS",
-            2200,
-            minimum=900,
-        )
-        self.max_evidence_items = max_evidence_items or self._env_int(
-            "RIVALENS_KNOWLEDGE_FACT_LLM_MAX_EVIDENCE",
-            4,
-            minimum=1,
-        )
-        self.max_excerpt_chars = max_excerpt_chars or self._env_int(
-            "RIVALENS_KNOWLEDGE_FACT_LLM_EXCERPT_CHARS",
-            360,
-            minimum=120,
-        )
-
-    @property
-    def provider(self) -> str | None:
-        parsed = self._parse_llm_spec(self.llm_spec)
-        return parsed[0] if parsed else None
-
-    @property
-    def model(self) -> str | None:
-        parsed = self._parse_llm_spec(self.llm_spec)
-        return parsed[1] if parsed else None
-
-    def is_configured(self) -> bool:
-        return bool(self.provider and self.model)
-
-    async def extract(
-        self,
-        evidence_items: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        provider = self.provider
-        model = self.model
-        if not provider or not model:
-            raise ValueError("KnowledgeFact LLM extractor is not configured.")
-
-        batches = self._scoped_batches(evidence_items)
-        if not batches:
-            return [], {
-                "llm_prompt": "knowledge_fact_atom_extraction_v2",
-                "llm_provider": provider,
-                "llm_model": model,
-                "llm_cost": 0.0,
-                "llm_input_evidence_count": 0,
-                "llm_input_evidence_ids": [],
-                "llm_batch_count": 0,
-                "llm_failed_batch_count": 0,
-            }
-
-        llm_cost = 0.0
-
-        def add_cost(cost: float) -> None:
-            nonlocal llm_cost
-            llm_cost += float(cost)
-
-        extracted_facts: list[dict[str, Any]] = []
-        input_evidence_ids: list[str] = []
-        input_evidence_count = 0
-        failed_batch_count = 0
-        batch_errors: list[dict[str, Any]] = []
-
-        for batch_index, batch in enumerate(batches, start=1):
-            compact_evidence = self._compact_evidence(batch)
-            if not compact_evidence:
-                continue
-            input_evidence_count += len(compact_evidence)
-            input_evidence_ids.extend(
-                evidence.get("id", "")
-                for evidence in compact_evidence
-                if evidence.get("id")
-            )
-            scope_context = self._scope_context(batch)
-            try:
-                response = await create_chat_completion(
-                    model=model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": self._prompt(
-                                compact_evidence,
-                                scope_context,
-                            ),
-                        }
-                    ],
-                    llm_provider=provider,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    cost_callback=add_cost,
-                    rivalens_operation="knowledge_fact_extraction",
-                    rivalens_branch_ids=[
-                        scope_context["branch_id"]
-                    ]
-                    if scope_context.get("branch_id")
-                    else [],
-                    rivalens_evidence_count=len(compact_evidence),
-                    rivalens_trace_context=self._trace_context_from_evidence(batch),
-                    rivalens_batch_index=batch_index,
-                    rivalens_batch_count=len(batches),
-                )
-                parsed = json_repair.loads(response)
-                validated = LLMKnowledgeFactResponse.model_validate(parsed)
-                extracted_facts.extend(
-                    fact.model_dump()
-                    for fact in validated.facts
-                )
-            except Exception as exc:
-                failed_batch_count += 1
-                if len(batch_errors) < 8:
-                    batch_errors.append(
-                        {
-                            "batch_index": batch_index,
-                            "branch_id": scope_context.get("branch_id", ""),
-                            "competitor": scope_context.get("competitor", ""),
-                            "analysis_dimension_id": scope_context.get(
-                                "analysis_dimension_id",
-                                "",
-                            ),
-                            "evidence_ids": [
-                                evidence.get("id", "")
-                                for evidence in compact_evidence
-                                if evidence.get("id")
-                            ],
-                            "error": f"{type(exc).__name__}: {exc}"[:300],
-                        }
-                    )
-                continue
-
-        return extracted_facts, {
-            "llm_prompt": "knowledge_fact_atom_extraction_v2",
-            "llm_provider": provider,
-            "llm_model": model,
-            "llm_cost": round(llm_cost, 6),
-            "llm_input_evidence_count": input_evidence_count,
-            "llm_input_evidence_ids": list(dict.fromkeys(input_evidence_ids)),
-            "llm_batch_count": len(batches),
-            "llm_failed_batch_count": failed_batch_count,
-            "llm_batch_errors": batch_errors,
-            "llm_max_tokens": self.max_tokens,
-            "llm_max_evidence_items": self.max_evidence_items,
-            "llm_max_excerpt_chars": self.max_excerpt_chars,
-            "llm_scope": "competitor+analysis_dimension+report_section+branch",
-        }
-
-    def _scoped_batches(
-        self,
-        evidence_items: list[dict[str, Any]],
-    ) -> list[list[dict[str, Any]]]:
-        grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
-        group_order: list[tuple[str, str, str, str]] = []
-        for evidence in evidence_items:
-            evidence_id = evidence.get("id", "")
-            analysis_dimension_id = self._evidence_analysis_dimension_id(evidence)
-            if not evidence_id or not analysis_dimension_id:
-                continue
-            key = (
-                str(evidence.get("competitor", "") or ""),
-                analysis_dimension_id,
-                str(evidence.get("report_section_id", "") or ""),
-                str(evidence.get("branch_id", "") or ""),
-            )
-            if key not in grouped:
-                grouped[key] = []
-                group_order.append(key)
-            grouped[key].append(evidence)
-
-        batches: list[list[dict[str, Any]]] = []
-        for key in group_order:
-            scoped_evidence = grouped[key]
-            for index in range(0, len(scoped_evidence), self.max_evidence_items):
-                batches.append(scoped_evidence[index : index + self.max_evidence_items])
-        return batches
-
-    def _compact_evidence(
-        self,
-        evidence_items: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        compact = []
-        for evidence in evidence_items[: self.max_evidence_items]:
-            evidence_id = evidence.get("id", "")
-            if not evidence_id:
-                continue
-            excerpt = clean_text(evidence.get("excerpt") or evidence.get("title") or "")
-            compact.append(
-                {
-                    "id": evidence_id,
-                    "competitor": evidence.get("competitor", ""),
-                    "analysis_dimension_id": evidence.get("analysis_dimension_id", ""),
-                    "schema_field_ids": list(evidence.get("schema_field_ids", []) or []),
-                    "report_section_id": evidence.get("report_section_id", ""),
-                    "dimension_name": evidence.get("dimension_name", ""),
-                    "source_type": evidence.get("source_type", ""),
-                    "title": evidence.get("title", ""),
-                    "excerpt": excerpt[: self.max_excerpt_chars],
-                    "support_snippets": self._compact_snippets(
-                        evidence.get("evidence_snippets", []),
-                    )[:2],
-                    "confidence": evidence.get("confidence", 0.5),
-                }
-            )
-        return compact
-
-    def _scope_context(self, evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
-        for evidence in evidence_items:
-            if not evidence.get("id"):
-                continue
-            return {
-                "competitor": evidence.get("competitor", ""),
-                "analysis_dimension_id": self._evidence_analysis_dimension_id(evidence),
-                "dimension_name": evidence.get("dimension_name", ""),
-                "report_section_id": evidence.get("report_section_id", ""),
-                "branch_id": evidence.get("branch_id", ""),
-            }
-        return {
-            "competitor": "",
-            "analysis_dimension_id": "",
-            "dimension_name": "",
-            "report_section_id": "",
-            "branch_id": "",
-        }
-
-    def _trace_context_from_evidence(
-        self,
-        evidence_items: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        for evidence in evidence_items:
-            if not evidence.get("id"):
-                continue
-            return {
-                "id": evidence.get("collection_task_id", "") or evidence.get("id", ""),
-                "branch_id": evidence.get("branch_id", ""),
-                "parent_branch_id": evidence.get("parent_branch_id"),
-                "research_task_id": evidence.get("research_task_id", ""),
-                "competitor": evidence.get("competitor", ""),
-                "dimension_id": (
-                    evidence.get("dimension_id", "")
-                    or evidence.get("analysis_dimension_id", "")
-                ),
-                "dimension_name": evidence.get("dimension_name", ""),
-            }
-        return {}
-
-    def _compact_snippets(
-        self,
-        snippets: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        compact = []
-        for snippet in snippets[:3]:
-            text = clean_text(snippet.get("text", ""))
-            if not text:
-                continue
-            compact.append(
-                {
-                    "id": snippet.get("id", ""),
-                    "text": text[:220],
-                    "success_criterion_id": snippet.get("success_criterion_id", ""),
-                    "rank": snippet.get("rank", 0),
-                    "confidence": snippet.get("confidence", 0.0),
-                }
-            )
-        return compact
-
-    def _prompt(
-        self,
-        compact_evidence: list[dict[str, Any]],
-        scope_context: dict[str, Any],
-    ) -> str:
-        allowed_fact_types = ", ".join(sorted(FACT_TYPES))
-        scope_json = json.dumps(scope_context, ensure_ascii=False, indent=2)
-        evidence_json = json.dumps(compact_evidence, ensure_ascii=False, indent=2)
-        return f"""Return strict JSON only. Extract atomic KnowledgeFact candidates for this scoped analysis title.
-
-Scope:
-{scope_json}
-
-Allowed fact_type values:
-{allowed_fact_types}
-
-Required JSON shape:
-{{
-  "facts": [
-    {{
-      "competitor": "same competitor as cited evidence",
-      "analysis_dimension_id": "same dimension as cited evidence",
-      "schema_field_id": "optional first schema field",
-      "fact_type": "one allowed value",
-      "subject": "specific public source or entity",
-      "predicate": "exists|publishes_price|requires_quote|uses_billing_model|offers_discount|publishes|describes|signals|documents|reports|indicates",
-      "object": "atomic factual object, <= 240 chars",
-      "qualifiers": {{"source_type": "official_site"}},
-      "normalized_key": "stable dedupe key if obvious, else empty",
-      "statement": "short fact statement grounded in cited evidence",
-      "value": {{"object": "same atomic object or structured value"}},
-      "evidence_ids": ["must cite one or more input evidence ids"],
-      "report_section_id": "same report_section_id when available",
-      "confidence": 0.0
-    }}
-  ]
-}}
-
-Rules:
-- Use only the scoped evidence below.
-- Do not classify or reassign evidence to another topic.
-- Facts must stay inside Scope.analysis_dimension_id and Scope.report_section_id.
-- Do not infer market leadership, superiority, causality, or strategy unless directly stated.
-- Every fact must cite evidence_ids from the input.
-- Prefer 1 to 2 facts per evidence item. Merge obvious duplicates by using the same normalized_key.
-- Keep facts atomic: one subject, one predicate, one factual object.
-- Split pricing evidence into separate atoms for free tier, plan price, quote-only pricing, usage-based billing, and annual discount when those signals are present.
-- Skip vague, low-quality, or unsupported evidence.
-
-Scoped accepted evidence:
-{evidence_json}
-"""
-
-    def _llm_spec_from_env(self) -> str | None:
-        return (
-            os.getenv("RIVALENS_KNOWLEDGE_STRUCTURING_LLM")
-            or os.getenv("KNOWLEDGE_STRUCTURING_LLM")
-        )
-
     def _evidence_analysis_dimension_id(self, evidence: dict[str, Any]) -> str:
         return str(
             evidence.get("analysis_dimension_id")
@@ -404,34 +41,12 @@ Scoped accepted evidence:
             or ""
         )
 
-    def _parse_llm_spec(self, llm_spec: str | None) -> tuple[str, str] | None:
-        if not llm_spec or ":" not in llm_spec:
-            return None
-        provider, model = llm_spec.split(":", 1)
-        provider = provider.strip()
-        model = model.strip()
-        if not provider or not model:
-            return None
-        return provider, model
-
-    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
-        raw_value = os.getenv(env_name)
-        if raw_value in (None, ""):
-            return default
-        try:
-            parsed = int(raw_value)
-        except (TypeError, ValueError):
-            return default
-        return max(minimum, parsed)
-
 
 class KnowledgeStructuringAgent:
     def __init__(
         self,
-        fact_extractor: KnowledgeFactLLMExtractor | None = None,
         snippet_builder: EvidenceSnippetBuilder | None = None,
     ) -> None:
-        self.fact_extractor = fact_extractor or KnowledgeFactLLMExtractor()
         self.snippet_builder = snippet_builder or EvidenceSnippetBuilder()
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
@@ -449,7 +64,7 @@ class KnowledgeStructuringAgent:
             state.get("research_branches", []),
         )
 
-        knowledge_facts, fact_extraction = await self._build_knowledge_facts_with_llm(
+        knowledge_facts, fact_extraction = self._build_knowledge_facts_with_metadata(
             evidence_items,
         )
         knowledge = self._build_competitor_knowledge(evidence_items)
@@ -505,32 +120,22 @@ class KnowledgeStructuringAgent:
                             0,
                         ),
                         "knowledge_fact_source": fact_extraction.get("source", ""),
-                        "llm_configured": bool(fact_extraction.get("llm_configured")),
-                        "llm_prompt": fact_extraction.get("llm_prompt", ""),
-                        "llm_provider": fact_extraction.get("llm_provider", ""),
-                        "llm_model": fact_extraction.get("llm_model", ""),
-                        "llm_input_evidence_count": fact_extraction.get(
-                            "llm_input_evidence_count",
+                        "rule_input_evidence_count": fact_extraction.get(
+                            "rule_input_evidence_count",
                             0,
                         ),
-                        "llm_batch_count": fact_extraction.get("llm_batch_count", 0),
-                        "llm_failed_batch_count": fact_extraction.get(
-                            "llm_failed_batch_count",
+                        "rule_skipped_evidence_count": fact_extraction.get(
+                            "rule_skipped_evidence_count",
                             0,
                         ),
-                        "llm_scope": fact_extraction.get("llm_scope", ""),
-                        "llm_max_tokens": fact_extraction.get("llm_max_tokens", 0),
-                        "llm_max_evidence_items": fact_extraction.get(
-                            "llm_max_evidence_items",
+                        "rule_semantic_noise_count": fact_extraction.get(
+                            "rule_semantic_noise_count",
                             0,
                         ),
-                        "llm_max_excerpt_chars": fact_extraction.get(
-                            "llm_max_excerpt_chars",
+                        "rule_sentence_selected_count": fact_extraction.get(
+                            "rule_sentence_selected_count",
                             0,
                         ),
-                        "llm_fact_count": fact_extraction.get("llm_fact_count", 0),
-                        "llm_fallback_reason": fact_extraction.get("fallback_reason", ""),
-                        "llm_cost": fact_extraction.get("llm_cost", 0.0),
                         "atomization_too_broad_count": fact_extraction.get(
                             "atomization_too_broad_count",
                             0,
@@ -674,236 +279,17 @@ class KnowledgeStructuringAgent:
 
         return knowledge_items
 
-    async def _build_knowledge_facts_with_llm(
+    def _build_knowledge_facts_with_metadata(
         self,
         evidence_items: list[dict[str, Any]],
     ) -> tuple[list[KnowledgeFact], dict[str, Any]]:
-        llm_configured = bool(
-            self.fact_extractor
-            and getattr(self.fact_extractor, "is_configured", lambda: False)()
-        )
-        metadata: dict[str, Any] = {
-            "source": "rule_fallback",
-            "llm_configured": llm_configured,
-            "llm_fact_count": 0,
-            "llm_cost": 0.0,
-            "fallback_reason": "",
-        }
-        if llm_configured:
-            try:
-                extraction_result = await self.fact_extractor.extract(evidence_items)
-                if isinstance(extraction_result, tuple):
-                    llm_facts, llm_metadata = extraction_result
-                else:
-                    llm_facts = extraction_result
-                    llm_metadata = {}
-                metadata.update(llm_metadata or {})
-                metadata["llm_fact_count"] = len(llm_facts)
-                normalized, atomization_stats = self._normalize_llm_facts_with_stats(
-                    llm_facts,
-                    evidence_items,
-                )
-                metadata.update(atomization_stats)
-                if normalized:
-                    metadata["source"] = "llm"
-                    metadata["knowledge_fact_count"] = len(normalized)
-                    return normalized, metadata
-                metadata["fallback_reason"] = "llm_returned_no_valid_facts"
-            except Exception as exc:
-                metadata["fallback_reason"] = f"llm_error:{type(exc).__name__}"
-
-        fallback_facts, atomization_stats = self._build_knowledge_facts_with_stats(
+        facts, stats = self._build_knowledge_facts_with_stats(
             evidence_items,
         )
-        metadata.update(atomization_stats)
-        metadata["knowledge_fact_count"] = len(fallback_facts)
-        return fallback_facts, metadata
-
-    def _normalize_llm_facts(
-        self,
-        llm_facts: list[dict[str, Any]],
-        evidence_items: list[dict[str, Any]],
-    ) -> list[KnowledgeFact]:
-        facts, _stats = self._normalize_llm_facts_with_stats(llm_facts, evidence_items)
-        return facts
-
-    def _normalize_llm_facts_with_stats(
-        self,
-        llm_facts: list[dict[str, Any]],
-        evidence_items: list[dict[str, Any]],
-    ) -> tuple[list[KnowledgeFact], dict[str, int]]:
-        evidence_by_id = {
-            evidence.get("id", ""): evidence
-            for evidence in evidence_items
-            if evidence.get("id")
-        }
-        stats = self._empty_atomization_stats()
-        facts_by_key: dict[str, KnowledgeFact] = {}
-        seen_pricing_atoms: set[tuple[str, str]] = set()
-
-        def add_fact(fact: KnowledgeFact) -> bool:
-            key = fact.get("normalized_key", "")
-            if not key:
-                return False
-            self._mark_seen_pricing_atoms(fact, seen_pricing_atoms)
-            if key in facts_by_key:
-                facts_by_key[key] = self._merge_fact(facts_by_key[key], fact)
-                return False
-            facts_by_key[key] = fact
-            return True
-
-        for raw_fact in llm_facts:
-            fact = self._normalize_llm_fact(raw_fact, evidence_by_id)
-            if not fact:
-                continue
-            replacements, finding = self._atomize_normalized_fact(
-                fact,
-                evidence_by_id,
-            )
-            self._add_atomization_finding(stats, finding)
-            if finding.get("status") == "too_broad" and not replacements:
-                stats["atomization_rejected_count"] += 1
-                continue
-            if replacements:
-                stats["atomization_split_count"] += sum(
-                    1 for replacement in replacements if add_fact(replacement)
-                )
-                continue
-            add_fact(fact)
-
-        for evidence in evidence_items:
-            for pricing_fact in self._pricing_fact_candidates_from_evidence(evidence):
-                pricing_atom_key = self._pricing_atom_seen_key(pricing_fact)
-                if pricing_atom_key in seen_pricing_atoms:
-                    continue
-                if add_fact(pricing_fact):
-                    stats["atomization_split_count"] += 1
-
-        facts = list(facts_by_key.values())
-        for index, fact in enumerate(facts, start=1):
-            fact["id"] = f"fact_{index}"
+        stats["source"] = "rule"
+        stats["knowledge_fact_count"] = len(facts)
+        stats["rule_input_evidence_count"] = len(evidence_items)
         return facts, stats
-
-    def _normalize_llm_fact(
-        self,
-        raw_fact: dict[str, Any],
-        evidence_by_id: dict[str, dict[str, Any]],
-    ) -> KnowledgeFact | None:
-        evidence_ids = [
-            evidence_id
-            for evidence_id in raw_fact.get("evidence_ids", [])
-            if evidence_id in evidence_by_id
-        ]
-        if not evidence_ids:
-            return None
-        primary_evidence = evidence_by_id[evidence_ids[0]]
-        primary_dimension_id = self._evidence_analysis_dimension_id(primary_evidence)
-        primary_report_section_id = str(primary_evidence.get("report_section_id", "") or "")
-        primary_competitor = str(primary_evidence.get("competitor", "") or "")
-        evidence_ids = [
-            evidence_id
-            for evidence_id in evidence_ids
-            if self._same_evidence_scope(
-                primary_evidence,
-                evidence_by_id[evidence_id],
-            )
-        ]
-        if not evidence_ids:
-            return None
-        competitor = (
-            primary_competitor
-            or clean_text(raw_fact.get("competitor", ""))
-        )
-        analysis_dimension_id = primary_dimension_id
-        if not analysis_dimension_id or analysis_dimension_id == "competitor_profile":
-            return None
-
-        fact_type = str(raw_fact.get("fact_type", "") or "").strip()
-        if fact_type not in FACT_TYPES:
-            fact_type = self._fact_type_for_evidence(
-                primary_evidence,
-                analysis_dimension_id,
-                self._evidence_text(primary_evidence),
-            )
-        predicate = clean_text(raw_fact.get("predicate", "")) or self._predicate_for_fact_type(fact_type)
-        subject = clean_text(raw_fact.get("subject", "")) or self._fact_subject(primary_evidence)
-        fact_object = clean_text(raw_fact.get("object", ""))
-        if not fact_object:
-            fact_object = self._fact_object(
-                primary_evidence,
-                self._evidence_text(primary_evidence),
-            )
-        if not fact_object or is_low_quality_text(fact_object):
-            return None
-
-        statement = clean_text(raw_fact.get("statement", ""))
-        if not statement:
-            statement = self._fact_statement(subject, predicate, fact_object)
-        if is_low_quality_text(statement):
-            return None
-
-        schema_field_ids = list(primary_evidence.get("schema_field_ids", []) or [])
-        schema_field_id = (
-            schema_field_ids[0]
-            if schema_field_ids
-            else clean_text(raw_fact.get("schema_field_id", ""))
-        )
-        normalized_key = self._fact_normalized_key(
-            competitor=str(competitor),
-            dimension=analysis_dimension_id,
-            fact_type=fact_type,
-            predicate=predicate,
-            fact_object=fact_object,
-        )
-        confidence = self._bounded_confidence(raw_fact.get("confidence", primary_evidence.get("confidence", 0.5)))
-        qualifiers = dict(raw_fact.get("qualifiers", {}) or {})
-        qualifiers.setdefault("source_type", primary_evidence.get("source_type", ""))
-        qualifiers.setdefault("title", primary_evidence.get("title", ""))
-        qualifiers.setdefault("url", primary_evidence.get("url", ""))
-        qualifiers.setdefault("dimension_name", primary_evidence.get("dimension_name", ""))
-        if fact_type == "pricing_signal":
-            pricing_atom_kind = self._pricing_atom_kind_from_parts(
-                predicate=predicate,
-                subject=subject,
-                fact_object=fact_object,
-                statement=statement,
-            )
-            if pricing_atom_kind:
-                qualifiers.setdefault("pricing_atom_kind", pricing_atom_kind)
-        return {
-            "id": "",
-            "competitor": competitor,
-            "analysis_dimension_id": analysis_dimension_id,
-            "schema_field_id": schema_field_id,
-            "fact_type": fact_type,
-            "subject": subject,
-            "predicate": predicate,
-            "object": fact_object[:240],
-            "qualifiers": qualifiers,
-            "normalized_key": normalized_key,
-            "statement": statement[:500],
-            "value": {
-                **dict(raw_fact.get("value", {}) or {}),
-                "object": fact_object[:240],
-            },
-            "evidence_ids": evidence_ids,
-            "report_section_id": primary_report_section_id,
-            "confidence": confidence,
-        }
-
-    def _same_evidence_scope(
-        self,
-        primary_evidence: dict[str, Any],
-        candidate_evidence: dict[str, Any],
-    ) -> bool:
-        return (
-            str(primary_evidence.get("competitor", "") or "")
-            == str(candidate_evidence.get("competitor", "") or "")
-            and self._evidence_analysis_dimension_id(primary_evidence)
-            == self._evidence_analysis_dimension_id(candidate_evidence)
-            and str(primary_evidence.get("report_section_id", "") or "")
-            == str(candidate_evidence.get("report_section_id", "") or "")
-        )
 
     def _build_knowledge_facts(
         self,
