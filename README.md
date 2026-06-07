@@ -239,13 +239,14 @@ to the missing criteria or source coverage gaps instead of throwing away
 partially useful evidence. `BranchCoverageStateBuilder` then aggregates each root branch
 and its follow-up children into `branch_coverage_states`, recording current open
 gap codes, resolved/blocked gap records, explicit parent/child improvement
-assessments, and the final coverage status on the root branch. `KnowledgeStructuringAgent` first tries
-the configured knowledge-fact LLM extractor, then validates, normalizes, and
-deduplicates the returned candidates into `KnowledgeFact` atoms that cite
-accepted `EvidenceItem` IDs. If the LLM is not configured, fails, or returns no
-valid facts, the agent falls back to the deterministic rule extractor and still
-populates `CompetitorKnowledge`. A local atomization policy keeps facts narrow:
-pricing evidence is split into free-tier, plan-price, quote-only,
+assessments, and the final coverage status on the root branch.
+`ResearchEngineEvidenceCollector` cleans scraped page content before selecting
+an `EvidenceItem.excerpt`, so navigation chrome, JavaScript fallbacks, invalid
+date noise, and AI keyword-match notices do not pollute downstream review.
+`KnowledgeStructuringAgent` then uses deterministic rules to normalize and
+deduplicate accepted evidence into `KnowledgeFact` atoms that cite accepted
+`EvidenceItem` IDs. A local atomization policy keeps facts narrow: pricing
+evidence is split into free-tier, plan-price, quote-only,
 usage-based-billing, and annual-discount atoms when those signals are present.
 `AnalysisAgent` groups facts by competitor, dimension, claim type, subject,
 predicate, and normalized fact key before generating traceable `AnalysisClaim`
@@ -444,33 +445,30 @@ reach the retrievers. If the original task or competitor name is Chinese, for
 example 飞书 or 钉钉, the planned sub-queries use Chinese source terms such as
 官网、定价、文档、评价、新闻 to bias discovery toward Chinese-language sources.
 
-## Knowledge Fact LLM Extraction
+## Knowledge Fact Rule Extraction
 
-`KnowledgeStructuringAgent` can use an LLM to extract structured
-`KnowledgeFact` atoms from accepted evidence before analysis:
+`KnowledgeStructuringAgent` extracts structured `KnowledgeFact` atoms from
+accepted evidence with deterministic rules. The rule path keeps agent ownership
+clear and fast: collection owns source discovery and scraping, evidence review
+owns acceptance, knowledge structuring owns fact normalization and atomization,
+and claim support only validates claims against already-bound facts/evidence.
 
-```env
-RIVALENS_KNOWLEDGE_STRUCTURING_LLM=openai:gpt-4.1-mini
-RIVALENS_KNOWLEDGE_FACT_LLM_MAX_TOKENS=2200
-RIVALENS_KNOWLEDGE_FACT_LLM_MAX_EVIDENCE=4
-RIVALENS_KNOWLEDGE_FACT_LLM_EXCERPT_CHARS=360
-```
+Before `EvidenceItem` records are built, `ResearchEngineEvidenceCollector`
+cleans scraped source content with the existing BeautifulSoup/lxml dependency
+when HTML is present, then removes common page chrome such as navigation links,
+JavaScript fallback text, invalid `NaN-NaN-NaN` date noise, and AI keyword-match
+notices. The original scraped content hash remains in `scraped_content_sha256`
+and `source_cache.content_sha256`; only the EvidenceItem excerpt is cleaned for
+downstream review and analysis.
 
-The LLM setting uses the same `<provider>:<model>` format as other Rivalens LLM
-configuration. LLM fact extraction is enabled only when
-`RIVALENS_KNOWLEDGE_STRUCTURING_LLM` or `KNOWLEDGE_STRUCTURING_LLM` is set, so a
-global writing or strategic model does not accidentally turn it on. The
-extractor batches accepted evidence by competitor, dynamic analysis dimension,
-report section, and branch; each `KnowledgeFact` keeps the cited evidence's
-`analysis_dimension_id` and `report_section_id` instead of reclassifying the
-source. Every LLM fact candidate must cite accepted input evidence IDs; the
-agent rejects candidates without valid citations, fills schema metadata from the
-cited evidence, merges duplicates by `normalized_key`, and falls back to
-deterministic fact extraction when the LLM path is unavailable or invalid.
-If an LLM pricing fact is too broad, the local atomizer splits it using the
-cited evidence before analysis. Agent events record the source, prompt ID,
-provider, model, input count, batch count, failed batch count, fact count,
-atomization counts, fallback reason, and estimated cost.
+Fact extraction is still defensive at the knowledge stage. It skips semantic
+noise, selects the strongest concrete sentence instead of copying the first
+characters of a page, keeps source title and URL in qualifiers, and cites the
+accepted input `EvidenceItem.id`. Pricing evidence is atomized into free-tier,
+plan-price, quote-only, usage-based-billing, and annual-discount facts when the
+evidence supports those signals. Agent events record rule input count, skipped
+evidence count, semantic-noise count, selected-sentence count, fact count, and
+atomization counts.
 
 ## LangSmith Tracing
 

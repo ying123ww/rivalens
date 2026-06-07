@@ -4,75 +4,9 @@ import asyncio
 
 from rivalens.agents.analysis import AnalysisAgent
 from rivalens.agents.claim_support import ClaimSupportReviewer
-from rivalens.agents import knowledge_structuring as knowledge_module
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import ReportWriterAgent
 from rivalens.workflows.competitive_analysis import _route_after_claim_support
-
-
-class FakeFactExtractor:
-    def is_configured(self):
-        return True
-
-    async def extract(self, evidence_items):
-        return (
-            [
-                {
-                    "competitor": "Acme",
-                    "analysis_dimension_id": "pricing_model",
-                    "fact_type": "pricing_signal",
-                    "subject": "Acme pricing page",
-                    "predicate": "publishes",
-                    "object": "public Pro and Enterprise pricing tiers",
-                    "statement": "Acme pricing page publishes public Pro and Enterprise pricing tiers.",
-                    "evidence_ids": ["ev_1"],
-                    "confidence": 0.92,
-                }
-            ],
-            {
-                "llm_prompt": "fake_prompt",
-                "llm_provider": "fake",
-                "llm_model": "fake-model",
-                "llm_cost": 0.0,
-            },
-        )
-
-
-class FakeBroadPricingExtractor:
-    def is_configured(self):
-        return True
-
-    async def extract(self, evidence_items):
-        return (
-            [
-                {
-                    "competitor": "Acme",
-                    "analysis_dimension_id": "pricing_model",
-                    "fact_type": "pricing_signal",
-                    "subject": "Acme pricing page",
-                    "predicate": "publishes",
-                    "object": "multiple pricing signals across free, Pro, Enterprise, usage, and annual billing",
-                    "statement": "Acme pricing page publishes multiple pricing signals.",
-                    "evidence_ids": ["ev_pricing"],
-                    "confidence": 0.92,
-                }
-            ],
-            {
-                "llm_prompt": "fake_prompt",
-                "llm_provider": "fake",
-                "llm_model": "fake-model",
-                "llm_cost": 0.0,
-            },
-        )
-
-
-class CapturingFactExtractor(FakeFactExtractor):
-    def __init__(self):
-        self.evidence_items = []
-
-    async def extract(self, evidence_items):
-        self.evidence_items = evidence_items
-        return await super().extract(evidence_items)
 
 
 def _combined_pricing_evidence():
@@ -95,8 +29,8 @@ def _combined_pricing_evidence():
     ]
 
 
-def test_knowledge_structuring_uses_llm_extractor_when_configured():
-    agent = KnowledgeStructuringAgent(fact_extractor=FakeFactExtractor())
+def test_knowledge_structuring_uses_rule_extractor_metadata():
+    agent = KnowledgeStructuringAgent()
     evidence = [
         {
             "id": "ev_1",
@@ -111,194 +45,99 @@ def test_knowledge_structuring_uses_llm_extractor_when_configured():
         }
     ]
 
-    facts, metadata = asyncio.run(agent._build_knowledge_facts_with_llm(evidence))
+    facts, metadata = agent._build_knowledge_facts_with_metadata(evidence)
 
-    assert metadata["source"] == "llm"
-    assert metadata["llm_fact_count"] == 1
+    assert metadata["source"] == "rule"
+    assert metadata["knowledge_fact_count"] == 1
+    assert metadata["rule_input_evidence_count"] == 1
+    assert metadata["rule_skipped_evidence_count"] == 0
     assert facts[0]["fact_type"] == "pricing_signal"
-    assert facts[0]["subject"] == "Acme pricing page"
+    assert facts[0]["subject"] == "Acme Pricing Model"
     assert facts[0]["evidence_ids"] == ["ev_1"]
     assert facts[0]["normalized_key"]
 
 
-def test_knowledge_fact_llm_extractor_passes_evidence_trace_to_llm(monkeypatch):
-    captured_kwargs = {}
-
-    async def fake_completion(**kwargs):
-        captured_kwargs.update(kwargs)
-        return '{"facts": []}'
-
-    monkeypatch.setattr(knowledge_module, "create_chat_completion", fake_completion)
-    extractor = knowledge_module.KnowledgeFactLLMExtractor(llm_spec="fake:test-model")
-
-    facts, metadata = asyncio.run(
-        extractor.extract(
-            [
-                {
-                    "id": "ev_1",
-                    "competitor": "Acme",
-                    "branch_id": "branch_1",
-                    "parent_branch_id": "root_1",
-                    "collection_task_id": "task_1",
-                    "research_task_id": "research_task_1",
-                    "analysis_dimension_id": "pricing_model",
-                    "dimension_name": "Pricing Model",
-                    "source_type": "pricing_page",
-                    "title": "Acme Pricing",
-                    "excerpt": "Acme pricing page publishes Pro pricing.",
-                    "url": "https://acme.example/pricing",
-                    "confidence": 0.9,
-                }
-            ]
-        )
-    )
-
-    assert facts == []
-    assert metadata["llm_input_evidence_count"] == 1
-    assert captured_kwargs["rivalens_operation"] == "knowledge_fact_extraction"
-    assert captured_kwargs["rivalens_branch_ids"] == ["branch_1"]
-    assert captured_kwargs["rivalens_evidence_count"] == 1
-    assert captured_kwargs["rivalens_trace_context"] == {
-        "id": "task_1",
-        "branch_id": "branch_1",
-        "parent_branch_id": "root_1",
-        "research_task_id": "research_task_1",
-        "competitor": "Acme",
-        "dimension_id": "pricing_model",
-        "dimension_name": "Pricing Model",
-    }
-
-
-def test_knowledge_fact_llm_extractor_scopes_batches_by_dynamic_title(monkeypatch):
-    calls = []
-
-    async def fake_completion(**kwargs):
-        calls.append(kwargs)
-        return '{"facts": []}'
-
-    monkeypatch.setattr(knowledge_module, "create_chat_completion", fake_completion)
-    extractor = knowledge_module.KnowledgeFactLLMExtractor(
-        llm_spec="fake:test-model",
-        max_evidence_items=2,
-    )
-
+def test_rule_extraction_skips_javascript_fallback_noise():
+    agent = KnowledgeStructuringAgent()
     evidence = [
         {
-            "id": "ev_ai_1",
-            "competitor": "Feishu",
-            "branch_id": "collect_feishu_ai",
-            "collection_task_id": "task_ai",
-            "analysis_dimension_id": "ai_capability_application",
-            "report_section_id": "ai_capability_application",
-            "dimension_name": "AI capability application",
-            "source_type": "official_site",
-            "title": "Feishu AI",
-            "excerpt": "Feishu describes AI meeting summary capability.",
-        },
-        {
-            "id": "ev_ai_2",
-            "competitor": "Feishu",
-            "branch_id": "collect_feishu_ai",
-            "collection_task_id": "task_ai",
-            "analysis_dimension_id": "ai_capability_application",
-            "report_section_id": "ai_capability_application",
-            "dimension_name": "AI capability application",
-            "source_type": "docs",
-            "title": "Feishu AI Docs",
-            "excerpt": "Feishu documents AI assistant workflows.",
-        },
-        {
-            "id": "ev_product_1",
-            "competitor": "Feishu",
-            "branch_id": "collect_feishu_product",
-            "collection_task_id": "task_product",
+            "id": "ev_js",
+            "competitor": "Acme",
             "analysis_dimension_id": "core_product_supply",
-            "report_section_id": "core_product_supply",
             "dimension_name": "Core product supply",
             "source_type": "official_site",
-            "title": "Feishu Product",
-            "excerpt": "Feishu describes messenger, docs, and meetings.",
+            "title": "Acme App",
+            "excerpt": "You need to enable JavaScript to run this app.",
+            "url": "https://acme.example/app",
         },
     ]
 
-    facts, metadata = asyncio.run(extractor.extract(evidence))
+    facts, metadata = agent._build_knowledge_facts_with_metadata(evidence)
 
     assert facts == []
-    assert metadata["llm_batch_count"] == 2
-    assert metadata["llm_failed_batch_count"] == 0
-    assert metadata["llm_input_evidence_count"] == 3
-    assert len(calls) == 2
-    assert [call["rivalens_branch_ids"] for call in calls] == [
-        ["collect_feishu_ai"],
-        ["collect_feishu_product"],
-    ]
-    assert [call["rivalens_evidence_count"] for call in calls] == [2, 1]
-    assert calls[0]["rivalens_trace_context"]["dimension_id"] == "ai_capability_application"
-    assert calls[1]["rivalens_trace_context"]["dimension_id"] == "core_product_supply"
-    assert "Do not classify or reassign evidence" in calls[0]["messages"][0]["content"]
-    assert "core_product_supply" not in calls[0]["messages"][0]["content"]
+    assert metadata["rule_skipped_evidence_count"] == 1
+    assert metadata["rule_semantic_noise_count"] == 1
 
 
-def test_llm_fact_normalization_inherits_evidence_dynamic_title_scope():
+def test_rule_extraction_selects_concrete_sentence_after_boilerplate():
+    agent = KnowledgeStructuringAgent()
     evidence = [
         {
             "id": "ev_ai",
-            "competitor": "Feishu",
+            "competitor": "飞书",
             "analysis_dimension_id": "ai_capability_application",
-            "schema_field_ids": ["direction_ai_capability_application"],
-            "report_section_id": "ai_capability_application",
-            "dimension_name": "AI capability application",
+            "dimension_name": "AI 能力应用",
             "source_type": "official_site",
-            "title": "Feishu AI",
-            "excerpt": "Feishu describes AI meeting summary capability.",
+            "title": "飞书智能伙伴",
+            "excerpt": (
+                "登录 注册 下载 免费试用 联系销售。"
+                "以下内容由 AI 匹配目标关键词生成。"
+                "智能伙伴创建平台采用运行额度作为计费单元，首次开通赠送 20,000 运行额度。"
+                "热门推荐 案例与方案 产品功能 本文目录。"
+            ),
             "url": "https://feishu.example/ai",
-            "confidence": 0.9,
-        },
-        {
-            "id": "ev_product",
-            "competitor": "Feishu",
-            "analysis_dimension_id": "core_product_supply",
-            "schema_field_ids": ["direction_core_product_supply"],
-            "report_section_id": "core_product_supply",
-            "dimension_name": "Core product supply",
-            "source_type": "official_site",
-            "title": "Feishu Product",
-            "excerpt": "Feishu describes docs and meetings.",
-            "url": "https://feishu.example/product",
-            "confidence": 0.8,
-        },
-    ]
-    raw_facts = [
-        {
-            "competitor": "Feishu",
-            "analysis_dimension_id": "wrong_dimension",
-            "schema_field_id": "wrong_schema_field",
-            "report_section_id": "wrong_report_section",
-            "fact_type": "feature_presence",
-            "subject": "Feishu AI page",
-            "predicate": "describes",
-            "object": "AI meeting summary capability",
-            "statement": "Feishu AI page describes AI meeting summary capability.",
-            "normalized_key": "wrong|dimension|key",
-            "evidence_ids": ["ev_ai", "ev_product"],
             "confidence": 0.9,
         }
     ]
 
-    facts = KnowledgeStructuringAgent()._normalize_llm_facts(raw_facts, evidence)
+    facts, metadata = agent._build_knowledge_facts_with_metadata(evidence)
 
     assert len(facts) == 1
-    fact = facts[0]
-    assert fact["analysis_dimension_id"] == "ai_capability_application"
-    assert fact["schema_field_id"] == "direction_ai_capability_application"
-    assert fact["report_section_id"] == "ai_capability_application"
-    assert fact["evidence_ids"] == ["ev_ai"]
-    assert "wrong" not in fact["normalized_key"]
+    assert facts[0]["object"] == (
+        "智能伙伴创建平台采用运行额度作为计费单元，首次开通赠送 20,000 运行额度。"
+    )
+    assert "登录" not in facts[0]["object"]
+    assert "AI 匹配目标关键词" not in facts[0]["object"]
+    assert metadata["rule_sentence_selected_count"] == 1
+
+
+def test_rule_extraction_skips_download_directory_noise():
+    agent = KnowledgeStructuringAgent()
+    evidence = [
+        {
+            "id": "ev_download",
+            "competitor": "钉钉",
+            "analysis_dimension_id": "product_experience",
+            "dimension_name": "产品体验",
+            "source_type": "other",
+            "title": "路行钉钉虚拟定位app下载安卓手机版",
+            "excerpt": (
+                "路行钉钉虚拟定位app下载安卓手机版 最新版下载2025 "
+                "当前位置：首页 手机应用 安卓系统 应用类型：辅助工具 请先登录"
+            ),
+            "url": "https://download.example/dingtalk-helper",
+        }
+    ]
+
+    facts, metadata = agent._build_knowledge_facts_with_metadata(evidence)
+
+    assert facts == []
+    assert metadata["rule_skipped_evidence_count"] == 1
+    assert metadata["rule_semantic_noise_count"] == 1
 
 
 def test_knowledge_structuring_enriches_top_evidence_snippets():
-    extractor = CapturingFactExtractor()
-    agent = KnowledgeStructuringAgent(fact_extractor=extractor)
+    agent = KnowledgeStructuringAgent()
     state = {
         "task": {"query": "Compare Acme pricing.", "competitors": ["Acme"]},
         "competitors": ["Acme"],
@@ -354,8 +193,8 @@ def test_knowledge_structuring_enriches_top_evidence_snippets():
     assert snippets[0]["rank"] == 1
     assert "plans with monthly billing" in snippets[0]["text"]
     assert set(snippets[0]["matched_terms"]).intersection({"plans", "billing"})
-    assert extractor.evidence_items[0]["evidence_snippets"] == snippets
     assert result["agent_events"][-1]["output"]["evidence_snippet_count"] >= 1
+    assert result["agent_events"][-1]["output"]["knowledge_fact_source"] == "rule"
 
 
 def test_competitor_profile_evidence_fills_canonical_website():
@@ -501,15 +340,15 @@ def test_knowledge_structuring_keeps_multiple_published_price_atoms():
     assert "旗舰版 pricing is ¥80/人/月" in objects
 
 
-def test_llm_broad_pricing_fact_is_split_before_analysis():
-    agent = KnowledgeStructuringAgent(fact_extractor=FakeBroadPricingExtractor())
+def test_rule_pricing_evidence_reports_atomization_metadata():
+    agent = KnowledgeStructuringAgent()
 
-    facts, metadata = asyncio.run(
-        agent._build_knowledge_facts_with_llm(_combined_pricing_evidence())
+    facts, metadata = agent._build_knowledge_facts_with_metadata(
+        _combined_pricing_evidence()
     )
 
-    assert metadata["source"] == "llm"
-    assert metadata["atomization_too_broad_count"] == 1
+    assert metadata["source"] == "rule"
+    assert metadata["knowledge_fact_count"] == 5
     assert metadata["atomization_split_count"] == 5
     assert sorted(
         (fact.get("qualifiers", {}) or {}).get("pricing_atom_kind", "")
@@ -525,7 +364,7 @@ def test_llm_broad_pricing_fact_is_split_before_analysis():
     )
 
 
-def test_llm_atomic_pricing_fact_is_not_duplicated_by_splitter():
+def test_rule_atomic_pricing_fact_is_not_duplicated_by_splitter():
     evidence = [
         {
             "id": "ev_price",
@@ -539,25 +378,14 @@ def test_llm_atomic_pricing_fact_is_not_duplicated_by_splitter():
             "confidence": 0.9,
         }
     ]
-    raw_facts = [
-        {
-            "competitor": "Acme",
-            "analysis_dimension_id": "pricing_model",
-            "fact_type": "pricing_signal",
-            "subject": "Pro plan",
-            "predicate": "publishes_price",
-            "object": "Pro pricing is $20/user/month",
-            "statement": "Pro plan publishes pricing at $20/user/month.",
-            "evidence_ids": ["ev_price"],
-            "confidence": 0.9,
-        }
-    ]
 
-    facts = KnowledgeStructuringAgent()._normalize_llm_facts(raw_facts, evidence)
+    facts = KnowledgeStructuringAgent()._build_knowledge_facts(evidence)
 
     assert len(facts) == 1
     assert facts[0]["predicate"] == "publishes_price"
-    assert (facts[0].get("qualifiers", {}) or {}).get("pricing_atom_kind") == "published_plan_price"
+    assert (facts[0].get("qualifiers", {}) or {}).get("pricing_atom_kind") == (
+        "published_plan_price"
+    )
 
 
 def test_knowledge_structuring_builds_and_merges_fact_atoms():

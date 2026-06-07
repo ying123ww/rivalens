@@ -304,6 +304,44 @@ def test_evidence_collector_infers_chinese_official_site_title():
     assert source_type == "official_site"
 
 
+def test_evidence_collector_cleans_scraped_source_content_before_excerpt():
+    collector = ResearchEngineEvidenceCollector()
+    items = collector._to_evidence_items(
+        {
+            "id": "collect_feishu_ai",
+            "query": "飞书 智能伙伴 计费",
+            "competitor": "飞书",
+            "branch_id": "collect_feishu_ai",
+            "dimension_id": "ai_capability_application",
+            "dimension_name": "AI 能力应用",
+        },
+        [
+            {
+                "url": "https://www.feishu.cn/content/1cnvbb55",
+                "title": "智能伙伴创建平台计费说明 - 飞书官网",
+                "raw_content": """
+                    <html><body>
+                    <nav>登录 注册 下载 免费试用 联系销售</nav>
+                    <main>
+                    <p>以下内容由 AI 匹配目标关键词生成。</p>
+                    <p>智能伙伴创建平台采用运行额度作为计费单元，首次开通赠送 20,000 运行额度。</p>
+                    <p>热门推荐 案例与方案 产品功能 本文目录</p>
+                    </main>
+                    </body></html>
+                """,
+            }
+        ],
+    )
+
+    excerpt = items[0]["excerpt"]
+
+    assert "智能伙伴创建平台采用运行额度作为计费单元" in excerpt
+    assert "20,000 运行额度" in excerpt
+    assert "登录" not in excerpt
+    assert "AI 匹配目标关键词" not in excerpt
+    assert "热门推荐" not in excerpt
+
+
 def test_source_metrics_builder_counts_independent_sources():
     branch = {
         "id": "collect_acme_pricing_model",

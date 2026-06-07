@@ -21,7 +21,7 @@ from rivalens.schema import (
     EvidenceItem,
     SOURCE_TYPE_PRIORITY,
 )
-from rivalens.text_quality import clean_text
+from rivalens.text_quality import clean_source_text, clean_text
 
 
 def _trace_collection_task(collection_task: dict[str, Any]) -> dict[str, Any]:
@@ -236,7 +236,7 @@ class ResearchEngineEvidenceCollector:
             or source.get("body")
             or ""
         )
-        return " ".join(self._clean_text(content).split())
+        return clean_source_text(content)
 
     def _clean_text(self, text: Any) -> str:
         return clean_text(text)

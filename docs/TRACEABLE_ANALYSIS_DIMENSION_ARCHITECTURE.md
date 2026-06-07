@@ -90,7 +90,7 @@ ReportWriterAgent section id
 
 ### 4. Knowledge 已成为主路径
 
-当前 `KnowledgeStructuringAgent` 优先用已配置的 LLM 从 accepted evidence 抽取 `KnowledgeFact` atoms，再把候选事实压回受控 schema：必须引用有效 `EvidenceItem.id`，必须绑定 `analysis_dimension_id`，并按 `normalized_key` 去重。LLM 未配置、调用失败或没有返回有效事实时，agent 会 fallback 到规则抽取。随后本地 atomization policy 会判断 fact 是否过宽；pricing evidence 命中 free tier、plan price、quote-only、usage-based billing、annual discount 等信号时，会被拆成对应原子 facts。`AnalysisAgent` 优先按 competitor、analysis dimension、claim type、subject、predicate 和 normalized fact key 聚合这些 facts，再生成 `AnalysisClaim`。Claim support 与 writer context 会从已绑定的 fact/evidence 中保留模块名、数字、版本、报告/认证和业务场景等 specificity hints，避免非价格维度被压成“能力体系/相关信号”式概述。只有当 `KnowledgeFact` 不可用时，才 fallback 到 direct evidence 或 `CompetitorKnowledge`。
+当前 `ResearchEngineEvidenceCollector` 会在生成 `EvidenceItem.excerpt` 前清洗 scraped source content，去掉导航壳、JavaScript fallback、无效日期噪声和 AI 关键词匹配提示，同时保留原始 scraped content hash 用于溯源。`KnowledgeStructuringAgent` 使用确定性规则从 accepted evidence 抽取 `KnowledgeFact` atoms：必须引用有效 `EvidenceItem.id`，必须绑定 `analysis_dimension_id`，并按 `normalized_key` 去重。规则抽取会跳过语义噪声，优先选择包含模块、价格、额度、认证、场景等具体信号的事实句。随后本地 atomization policy 会判断 fact 是否过宽；pricing evidence 命中 free tier、plan price、quote-only、usage-based billing、annual discount 等信号时，会被拆成对应原子 facts。`AnalysisAgent` 优先按 competitor、analysis dimension、claim type、subject、predicate 和 normalized fact key 聚合这些 facts，再生成 `AnalysisClaim`。Claim support 与 writer context 会从已绑定的 fact/evidence 中保留模块名、数字、版本、报告/认证和业务场景等 specificity hints，避免非价格维度被压成“能力体系/相关信号”式概述。只有当 `KnowledgeFact` 不可用时，才 fallback 到 direct evidence 或 `CompetitorKnowledge`。
 
 ### 5. Writer 曾经按固定产品小节猜测第三章路由
 
@@ -428,9 +428,9 @@ ReportWriterAgent
 
 ### KnowledgeStructuringAgent
 
-- Turn accepted EvidenceItem records into KnowledgeFact records, using the configured LLM extractor first and deterministic rules as fallback.
+- Turn accepted EvidenceItem records into KnowledgeFact records with deterministic rules.
 - Attach every KnowledgeFact to one analysis dimension and one optional schema field.
-- Reject LLM fact candidates that do not cite accepted evidence IDs, then normalize subject, predicate, object, fact type, confidence, and `normalized_key` before handoff.
+- Skip semantic boilerplate, select concrete fact sentences, then normalize subject, predicate, object, fact type, confidence, and `normalized_key` before handoff.
 - Apply the local atomization policy before handoff; split broad pricing facts into free-tier, plan-price, quote-only, usage-based-billing, and annual-discount atoms when the cited evidence supports them.
 - Populate CompetitorKnowledge from KnowledgeFact, not from broad competitor-level evidence buckets.
 

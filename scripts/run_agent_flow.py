@@ -126,7 +126,6 @@ def _runtime_warnings() -> list[str]:
         os.getenv("FAST_LLM", ""),
         os.getenv("SMART_LLM", ""),
         os.getenv("STRATEGIC_LLM", ""),
-        os.getenv("RIVALENS_KNOWLEDGE_STRUCTURING_LLM", ""),
     ]
     if any(setting.startswith("openai:") for setting in llm_settings) and not os.getenv(
         "OPENAI_API_KEY"

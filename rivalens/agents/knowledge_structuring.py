@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 from rivalens.agents.evidence_snippets import EvidenceSnippetBuilder
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge, KnowledgeFact
-from rivalens.text_quality import clean_text, is_low_quality_text
+from rivalens.text_quality import clean_source_text, clean_text, is_low_quality_text
 
 
 FACT_TYPES = {
@@ -29,17 +29,6 @@ PRICING_ATOM_PREDICATES = {
     "usage_based_billing": "uses_billing_model",
     "annual_discount": "offers_discount",
 }
-PRICING_PREDICATE_ATOM_KINDS = {
-    predicate: atom_kind
-    for atom_kind, predicate in PRICING_ATOM_PREDICATES.items()
-}
-
-    def _evidence_analysis_dimension_id(self, evidence: dict[str, Any]) -> str:
-        return str(
-            evidence.get("analysis_dimension_id")
-            or evidence.get("dimension_id")
-            or ""
-        )
 
 
 class KnowledgeStructuringAgent:
@@ -325,15 +314,11 @@ class KnowledgeStructuringAgent:
             fact["id"] = f"fact_{index}"
         return facts, stats
 
-    def _bounded_confidence(self, value: Any) -> float:
-        try:
-            confidence = float(value)
-        except (TypeError, ValueError):
-            confidence = 0.5
-        return round(max(0.0, min(1.0, confidence)), 2)
-
     def _empty_atomization_stats(self) -> dict[str, int]:
         return {
+            "rule_skipped_evidence_count": 0,
+            "rule_semantic_noise_count": 0,
+            "rule_sentence_selected_count": 0,
             "atomization_too_broad_count": 0,
             "atomization_split_count": 0,
             "atomization_rejected_count": 0,
@@ -344,71 +329,14 @@ class KnowledgeStructuringAgent:
         stats: dict[str, int],
         finding: dict[str, Any],
     ) -> None:
+        if finding.get("status") == "skipped":
+            stats["rule_skipped_evidence_count"] += 1
+        if finding.get("reason") == "semantic_noise":
+            stats["rule_semantic_noise_count"] += 1
+        if finding.get("sentence_selected"):
+            stats["rule_sentence_selected_count"] += 1
         if finding.get("status") == "too_broad":
             stats["atomization_too_broad_count"] += 1
-
-    def _mark_seen_pricing_atoms(
-        self,
-        fact: KnowledgeFact,
-        seen_pricing_atoms: set[tuple[str, str]],
-    ) -> None:
-        atom_kind = self._pricing_atom_kind_for_fact(fact)
-        if not atom_kind:
-            return
-        for evidence_id in fact.get("evidence_ids", []) or []:
-            if evidence_id:
-                seen_pricing_atoms.add((evidence_id, atom_kind))
-
-    def _pricing_atom_seen_key(self, fact: KnowledgeFact) -> tuple[str, str] | None:
-        atom_kind = self._pricing_atom_kind_for_fact(fact)
-        evidence_ids = list(fact.get("evidence_ids", []) or [])
-        evidence_id = evidence_ids[0] if evidence_ids else ""
-        if not atom_kind or not evidence_id:
-            return None
-        return (evidence_id, atom_kind)
-
-    def _pricing_atom_kind_for_fact(self, fact: KnowledgeFact) -> str:
-        qualifiers = fact.get("qualifiers", {}) or {}
-        atom_kind = str(qualifiers.get("pricing_atom_kind", "") or "")
-        if atom_kind in PRICING_ATOM_PREDICATES:
-            return atom_kind
-        return self._pricing_atom_kind_from_parts(
-            predicate=str(fact.get("predicate", "") or ""),
-            subject=str(fact.get("subject", "") or ""),
-            fact_object=str(fact.get("object", "") or ""),
-            statement=str(fact.get("statement", "") or ""),
-        )
-
-    def _pricing_atom_kind_from_parts(
-        self,
-        predicate: str,
-        subject: str,
-        fact_object: str,
-        statement: str,
-    ) -> str:
-        atom_kind = PRICING_PREDICATE_ATOM_KINDS.get(predicate)
-        if atom_kind:
-            return atom_kind
-        combined = " ".join([subject, fact_object, statement])
-        if self._text_has_broad_pricing_phrase(combined):
-            return ""
-        detected = self._detected_pricing_atom_kinds(combined)
-        return detected[0] if len(detected) == 1 else ""
-
-    def _atomize_normalized_fact(
-        self,
-        fact: KnowledgeFact,
-        evidence_by_id: dict[str, dict[str, Any]],
-    ) -> tuple[list[KnowledgeFact], dict[str, Any]]:
-        finding = self._atomization_finding(fact, evidence_by_id)
-        if finding.get("recommended_action") != "split":
-            return [], finding
-
-        replacements: list[KnowledgeFact] = []
-        for evidence_id in fact.get("evidence_ids", []):
-            evidence = evidence_by_id.get(evidence_id, {})
-            replacements.extend(self._pricing_fact_candidates_from_evidence(evidence))
-        return replacements, finding
 
     def _atomization_finding(
         self,
@@ -464,20 +392,6 @@ class KnowledgeStructuringAgent:
         ]
         return any(phrase in text for phrase in broad_phrases)
 
-    def _text_has_broad_pricing_phrase(self, text: str) -> bool:
-        normalized = text.lower()
-        return any(
-            phrase in normalized
-            for phrase in [
-                "multiple pricing signals",
-                "various pricing signals",
-                "pricing signals across",
-                "pricing details across",
-                "多个定价信号",
-                "多种定价",
-            ]
-        )
-
     def _fact_candidates_from_evidence(
         self,
         evidence: dict[str, Any],
@@ -490,18 +404,34 @@ class KnowledgeStructuringAgent:
         evidence: dict[str, Any],
     ) -> tuple[list[KnowledgeFact], dict[str, Any]]:
         analysis_dimension_id = self._evidence_analysis_dimension_id(evidence)
-        if not analysis_dimension_id or analysis_dimension_id == "competitor_profile":
-            return [], {"status": "skipped"}
+        if not analysis_dimension_id:
+            return [], {"status": "skipped", "reason": "missing_analysis_dimension"}
+        if analysis_dimension_id == "competitor_profile":
+            return [], {"status": "skipped", "reason": "competitor_profile"}
 
-        text = self._evidence_text(evidence)
+        raw_text = self._evidence_text(evidence)
+        text = self._clean_evidence_text(raw_text)
         if not text or is_low_quality_text(text):
-            return [], {"status": "skipped"}
+            reason = (
+                "semantic_noise"
+                if self._semantic_boilerplate_reason(raw_text)
+                else "low_quality_text"
+            )
+            return [], {"status": "skipped", "reason": reason}
+
+        semantic_noise_reason = self._semantic_boilerplate_reason(text)
+        if semantic_noise_reason:
+            return [], {
+                "status": "skipped",
+                "reason": "semantic_noise",
+                "noise_reason": semantic_noise_reason,
+            }
 
         evidence_id = evidence.get("id", "")
         schema_field_ids = list(evidence.get("schema_field_ids", []) or [])
         fact_type = self._fact_type_for_evidence(evidence, analysis_dimension_id, text)
         if fact_type == "pricing_signal":
-            pricing_facts = self._pricing_fact_candidates_from_evidence(evidence)
+            pricing_facts = self._pricing_fact_candidates_from_evidence(evidence, text)
             if pricing_facts:
                 detected_kinds = [
                     (fact.get("qualifiers", {}) or {}).get("pricing_atom_kind", "")
@@ -517,7 +447,13 @@ class KnowledgeStructuringAgent:
 
         predicate = self._predicate_for_fact_type(fact_type)
         subject = self._fact_subject(evidence)
-        fact_object = self._fact_object(evidence, text)
+        fact_object, sentence_selected = self._fact_object_with_metadata(
+            evidence,
+            text,
+            fact_type,
+        )
+        if not fact_object:
+            return [], {"status": "skipped", "reason": "semantic_noise"}
         normalized_key = self._fact_normalized_key(
             competitor=str(evidence.get("competitor", "")),
             dimension=analysis_dimension_id,
@@ -562,15 +498,22 @@ class KnowledgeStructuringAgent:
             {evidence_id: evidence} if evidence_id else {},
         )
         if finding.get("status") == "too_broad":
+            finding["sentence_selected"] = sentence_selected
             return [], finding
-        return [generic_fact], {"status": "atomic"}
+        return [generic_fact], {
+            "status": "atomic",
+            "sentence_selected": sentence_selected,
+        }
 
     def _pricing_fact_candidates_from_evidence(
         self,
         evidence: dict[str, Any],
+        text: str | None = None,
     ) -> list[KnowledgeFact]:
         analysis_dimension_id = self._evidence_analysis_dimension_id(evidence)
-        text = self._evidence_text(evidence)
+        text = text if text is not None else self._clean_evidence_text(
+            self._evidence_text(evidence)
+        )
         if not analysis_dimension_id or not text:
             return []
         kinds = self._detected_pricing_atom_kinds(text)
@@ -599,7 +542,14 @@ class KnowledgeStructuringAgent:
         if (
             re.search(r"\benterprise\b", normalized)
             and re.search(r"\b(quote|quote-only|contact sales|custom pricing)\b", normalized)
-        ) or any(term in text for term in ["企业版询价", "联系销售", "定制报价"]):
+        ) or any(term in text for term in ["企业版询价", "定制报价"]):
+            kinds.append("quote_only")
+        elif re.search(
+            r"(企业版|企业|定制|报价|价格|定价|套餐|plan|enterprise).{0,24}联系销售"
+            r"|联系销售.{0,24}(企业版|企业|定制|报价|价格|定价|套餐|plan|enterprise)",
+            text,
+            flags=re.IGNORECASE,
+        ):
             kinds.append("quote_only")
         if re.search(
             r"\b(usage-based|usage based|metered|pay as you go|pay-as-you-go)\b",
@@ -764,6 +714,297 @@ class KnowledgeStructuringAgent:
             or ""
         )
 
+    def _clean_evidence_text(self, text: Any) -> str:
+        return clean_source_text(text)
+
+    def _semantic_boilerplate_reason(self, text: Any) -> str:
+        value = self._clean_evidence_text(text)
+        if not value:
+            return "empty_after_cleaning"
+        lower = value.lower()
+        compact = re.sub(r"\s+", "", lower)
+        if (
+            "youneedtoenablejavascripttorunthisapp" in compact
+            or "pleaseenablejavascript" in compact
+        ):
+            return "javascript_fallback"
+        if re.fullmatch(r"(?:nan[-/\s]*){2,}nan", lower):
+            return "invalid_date_noise"
+        download_directory_reason = self._download_directory_noise_reason(value)
+        if download_directory_reason:
+            return download_directory_reason
+
+        nav_hits = self._navigation_noise_hits(value)
+        page_list_hits = self._page_list_noise_hits(value)
+        if not self._has_concrete_signal(value):
+            if nav_hits >= 4:
+                return "navigation_chrome"
+            if page_list_hits >= 3:
+                return "page_index"
+            if nav_hits >= 2 and page_list_hits >= 2:
+                return "navigation_index"
+        return ""
+
+    def _fact_sentences(self, text: str) -> list[str]:
+        value = self._clean_evidence_text(text)
+        if not value:
+            return []
+        raw_segments = re.split(r"(?<=[.!?。！？；;])\s*|\s+[|•]\s+|\s+-\s+", value)
+        sentences: list[str] = []
+        for segment in raw_segments:
+            segment = " ".join(segment.split()).strip(" -:：|")
+            if not segment:
+                continue
+            if len(segment) > 320:
+                sentences.extend(self._split_long_fact_segment(segment))
+                continue
+            sentences.append(segment)
+        return [sentence for sentence in sentences if len(sentence) >= 8]
+
+    def _split_long_fact_segment(self, segment: str) -> list[str]:
+        parts = re.split(r"(?<=[,，、])\s*", segment)
+        chunks: list[str] = []
+        current = ""
+        for part in parts:
+            part = part.strip(" ,，、")
+            if not part:
+                continue
+            next_value = f"{current}，{part}" if current else part
+            if len(next_value) <= 240:
+                current = next_value
+                continue
+            if current:
+                chunks.append(current)
+            current = part
+        if current:
+            chunks.append(current)
+        return chunks or [segment[:240]]
+
+    def _score_fact_sentence(
+        self,
+        evidence: dict[str, Any],
+        sentence: str,
+        fact_type: str,
+    ) -> int:
+        if self._sentence_boilerplate_reason(sentence):
+            return -100
+        score = 0
+        sentence_lower = sentence.lower()
+        dimension_name = clean_text(evidence.get("dimension_name", ""))
+        title = clean_text(evidence.get("title", ""))
+        if 24 <= len(sentence) <= 220:
+            score += 4
+        elif len(sentence) < 16:
+            score -= 3
+        elif len(sentence) > 280:
+            score -= 2
+        if self._has_concrete_signal(sentence):
+            score += 4
+        if re.search(r"[$¥€£]\s?\d|\d+(?:[.,]\d+)?\s*(?:%|元|人|用户|月|年)", sentence):
+            score += 3
+        if any(
+            keyword in sentence_lower
+            for keyword in [
+                "supports",
+                "offers",
+                "provides",
+                "includes",
+                "integrates",
+                "certified",
+                "pricing",
+                "plan",
+                "billing",
+            ]
+        ):
+            score += 2
+        if any(
+            keyword in sentence
+            for keyword in [
+                "支持",
+                "提供",
+                "采用",
+                "包括",
+                "集成",
+                "认证",
+                "定价",
+                "价格",
+                "版本",
+                "套餐",
+                "计费",
+            ]
+        ):
+            score += 2
+        if fact_type != "public_evidence_signal" and fact_type.replace("_", " ") in sentence_lower:
+            score += 1
+        for keyword in self._key_terms(dimension_name)[:4]:
+            if keyword and keyword in self._key_terms(sentence):
+                score += 1
+        if title and not is_low_quality_text(title):
+            title_head = self._concise_title(title).lower()
+            if title_head and title_head in sentence_lower:
+                score += 1
+        score -= min(4, self._navigation_noise_hits(sentence))
+        score -= min(3, self._page_list_noise_hits(sentence))
+        return score
+
+    def _sentence_boilerplate_reason(self, sentence: str) -> str:
+        value = " ".join(str(sentence or "").split())
+        if not value:
+            return "empty"
+        lower = value.lower()
+        if "you need to enable javascript" in lower:
+            return "javascript_fallback"
+        if "以下内容由" in value and "AI" in value and "目标关键词" in value:
+            return "ai_keyword_notice"
+        if re.fullmatch(r"(?:nan[-/\s]*){2,}nan", lower):
+            return "invalid_date_noise"
+        if not self._has_concrete_signal(value):
+            download_directory_reason = self._download_directory_noise_reason(value)
+            if download_directory_reason:
+                return download_directory_reason
+            if self._navigation_noise_hits(value) >= 3:
+                return "navigation_chrome"
+            if self._page_list_noise_hits(value) >= 3:
+                return "page_index"
+        return ""
+
+    def _has_concrete_signal(self, text: str) -> bool:
+        value = str(text or "")
+        lower = value.lower()
+        if re.search(r"[$¥€£]\s?\d|\d+(?:[.,]\d+)?\s*(?:%|元|人|用户|月|年|gb|tb)", value):
+            return True
+        if re.search(r"\b(api|sdk|sso|iso\s?\d+|soc\s?2|gdpr|hipaa|enterprise|pro)\b", lower):
+            return True
+        if any(
+            term in value
+            for term in [
+                "支持",
+                "提供",
+                "采用",
+                "包括",
+                "集成",
+                "认证",
+                "定价",
+                "价格",
+                "版本",
+                "套餐",
+                "计费",
+                "额度",
+                "权限",
+                "项目",
+                "文档",
+                "会议",
+                "安全",
+            ]
+        ):
+            return True
+        return any(
+            term in lower
+            for term in [
+                "supports",
+                "offers",
+                "provides",
+                "includes",
+                "integrates",
+                "certified",
+                "pricing",
+                "billing",
+                "workflow",
+                "automation",
+                "security",
+                "compliance",
+            ]
+        )
+
+    def _navigation_noise_hits(self, text: str) -> int:
+        lower = str(text or "").lower()
+        chinese_terms = [
+            "登录",
+            "注册",
+            "下载",
+            "免费试用",
+            "联系我们",
+            "联系销售",
+            "立即咨询",
+            "开始使用",
+            "立即体验",
+        ]
+        english_terms = [
+            "login",
+            "log in",
+            "sign up",
+            "download",
+            "free trial",
+            "contact us",
+            "contact sales",
+            "get started",
+        ]
+        return sum(term in text for term in chinese_terms) + sum(
+            term in lower for term in english_terms
+        )
+
+    def _page_list_noise_hits(self, text: str) -> int:
+        lower = str(text or "").lower()
+        chinese_terms = [
+            "热门推荐",
+            "案例与方案",
+            "产品功能",
+            "本文目录",
+            "目录",
+            "相关推荐",
+            "相关产品",
+        ]
+        english_terms = [
+            "table of contents",
+            "related articles",
+            "recommended",
+            "popular",
+            "resources",
+            "product features",
+        ]
+        return sum(term in text for term in chinese_terms) + sum(
+            term in lower for term in english_terms
+        )
+
+    def _download_directory_noise_reason(self, text: str) -> str:
+        value = str(text or "")
+        lower = value.lower()
+        directory_markers = [
+            "app下载",
+            "最新版下载",
+            "资源下载",
+            "下载价格",
+            "仅限svip下载",
+            "升级svip",
+            "请先登录",
+            "手机应用",
+            "安卓系统",
+            "应用类型",
+            "辅助工具",
+            "当前位置",
+            "app内打开",
+            "下载客户端",
+        ]
+        if not any(marker in lower or marker in value for marker in directory_markers):
+            return ""
+        business_markers = [
+            "注册用户数",
+            "企业组织数",
+            "营收",
+            "同比增长",
+            "战略级",
+            "安全合规",
+            "自主可控",
+            "定价",
+            "计费",
+            "认证",
+            "api",
+            "sdk",
+        ]
+        if any(marker in lower or marker in value for marker in business_markers):
+            return ""
+        return "download_directory_noise"
+
     def _fact_type_for_evidence(
         self,
         evidence: dict[str, Any],
@@ -815,19 +1056,88 @@ class KnowledgeStructuringAgent:
 
     def _fact_subject(self, evidence: dict[str, Any]) -> str:
         competitor = str(evidence.get("competitor", "") or "the competitor")
+        dimension_name = clean_text(
+            evidence.get("dimension_name") or evidence.get("analysis_dimension_id", "")
+        )
+        if dimension_name and not is_low_quality_text(dimension_name):
+            return f"{competitor} {dimension_name}".strip()
         title = clean_text(evidence.get("title", ""))
         if title and not is_low_quality_text(title):
-            return f"{competitor} source: {title[:120]}"
-        dimension_name = evidence.get("dimension_name") or evidence.get("analysis_dimension_id", "")
-        return f"{competitor} {dimension_name}".strip()
+            title_subject = self._concise_title(title)
+            if title_subject:
+                if competitor.lower() in title_subject.lower():
+                    return title_subject[:120]
+                return f"{competitor} {title_subject[:100]}".strip()
+        return competitor.strip() or "the competitor"
 
     def _fact_object(self, evidence: dict[str, Any], text: str) -> str:
-        title = clean_text(evidence.get("title", ""))
-        if title and title.lower() not in text.lower() and not is_low_quality_text(title):
-            combined = f"{title}: {text}"
-        else:
-            combined = text
-        return " ".join(combined.split())[:240]
+        fact_type = self._fact_type_for_evidence(
+            evidence,
+            self._evidence_analysis_dimension_id(evidence),
+            text,
+        )
+        fact_object, _sentence_selected = self._fact_object_with_metadata(
+            evidence,
+            text,
+            fact_type,
+        )
+        return fact_object
+
+    def _fact_object_with_metadata(
+        self,
+        evidence: dict[str, Any],
+        text: str,
+        fact_type: str,
+    ) -> tuple[str, bool]:
+        cleaned_text = self._clean_evidence_text(text)
+        sentences = self._fact_sentences(cleaned_text)
+        scored = [
+            (self._score_fact_sentence(evidence, sentence, fact_type), sentence)
+            for sentence in sentences
+        ]
+        scored = [(score, sentence) for score, sentence in scored if score > -100]
+        if scored:
+            score, selected = max(scored, key=lambda item: (item[0], len(item[1])))
+            if score >= -2:
+                selected = self._trim_fact_boilerplate(selected)
+                if not selected:
+                    return "", False
+                sentence_selected = len(sentences) > 1 or len(selected) < len(cleaned_text) - 20
+                return selected, sentence_selected
+
+        fallback = self._trim_fact_boilerplate(cleaned_text)
+        if self._sentence_boilerplate_reason(fallback):
+            return "", False
+        return fallback, False
+
+    def _concise_title(self, title: Any) -> str:
+        value = " ".join(clean_text(title).split())
+        value = re.split(r"\s*[|｜]\s*", value)[0]
+        value = re.split(r"\s+-\s+", value)[0]
+        value = value.strip(" -_：:|")
+        return value[:120]
+
+    def _trim_fact_boilerplate(self, text: str) -> str:
+        value = " ".join(str(text or "").split()).strip()
+        if not value:
+            return ""
+        if self._download_directory_noise_reason(value):
+            return ""
+
+        if len(value) > 120 and (
+            self._navigation_noise_hits(value) or self._page_list_noise_hits(value)
+        ):
+            marker = re.search(
+                r"[\u4e00-\u9fffA-Za-z0-9 xX-]{0,32}"
+                r"(?:支持|提供|采用|包括|集成|认证|定价|计费|突破|超过|同比增长|"
+                r"战略级|安全合规|自主可控|supports|offers|provides|includes|"
+                r"integrates|certified|pricing|billing)",
+                value,
+                flags=re.IGNORECASE,
+            )
+            if marker and marker.start() > 0:
+                value = value[marker.start() :].strip(" ,，。；;:-")
+        return value[:240]
 
     def _fact_statement(self, subject: str, predicate: str, fact_object: str) -> str:
         return f"{subject} {predicate} {fact_object}".strip()[:500]
@@ -1115,7 +1425,11 @@ class KnowledgeStructuringAgent:
         return " ".join(str(text).split())[:220]
 
     def _evidence_analysis_dimension_id(self, evidence: dict[str, Any]) -> str:
-        return str(evidence.get("analysis_dimension_id") or "")
+        return str(
+            evidence.get("analysis_dimension_id")
+            or evidence.get("dimension_id")
+            or ""
+        )
 
     def _average_confidence(self, items: list[dict[str, Any]]) -> float:
         confidences = [float(item.get("confidence", 0.5)) for item in items]
