@@ -243,6 +243,7 @@ class ClaimSupportReviewer:
             knowledge_facts,
         )
         pricing_detail_issue = self._pricing_detail_issue(
+            claim,
             claim_text,
             context_text,
         )
@@ -522,9 +523,33 @@ class ClaimSupportReviewer:
 
     def _pricing_detail_issue(
         self,
+        claim: dict[str, Any],
         claim_text: str,
         context_text: str,
     ) -> list[str]:
+        pricing_context = " ".join(
+            [
+                str(claim.get("claim_type", "") or ""),
+                str(claim.get("analysis_dimension_id", "") or ""),
+            ]
+        ).lower()
+        if not any(
+            term in pricing_context
+            for term in (
+                "pricing",
+                "price",
+                "billing",
+                "business_model",
+                "monetization",
+                "commercial",
+                "定价",
+                "价格",
+                "收费",
+                "计费",
+                "商业模式",
+            )
+        ):
+            return []
         lowered_claim = claim_text.lower()
         if not any(
             term in lowered_claim
@@ -574,12 +599,27 @@ class ClaimSupportReviewer:
         context_hints = extract_specificity_hints(context_text)
         if len(context_hints) < 2:
             return []
+        if self._has_sufficient_specificity_hints(claim_text, context_hints):
+            return []
         missing_hints = missing_specificity_hints(claim_text, context_hints)
         if len(missing_hints) < 2:
             return []
         if not is_generic_specificity_claim(claim_text):
             return []
         return missing_hints
+
+    def _has_sufficient_specificity_hints(
+        self,
+        claim_text: str,
+        context_hints: list[str],
+    ) -> bool:
+        normalized_claim = re.sub(r"\s+", "", str(claim_text or "")).lower()
+        present_count = sum(
+            1
+            for hint in context_hints
+            if re.sub(r"\s+", "", str(hint or "")).lower() in normalized_claim
+        )
+        return present_count >= 2
 
     def _generic_pricing_claim(self, claim_text: str) -> bool:
         lowered = claim_text.lower()

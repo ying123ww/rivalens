@@ -168,6 +168,28 @@ def _message_debug_info(output: Any) -> dict[str, Any]:
     return debug_info
 
 
+def _content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                elif item.get("type") == "text" and isinstance(item.get("content"), str):
+                    parts.append(item["content"])
+            elif hasattr(item, "text") and isinstance(item.text, str):
+                parts.append(item.text)
+        return "".join(parts)
+    if content is None:
+        return ""
+    return str(content)
+
+
 class GenericLLMProvider:
 
     def __init__(self, llm, chat_log: str | None = None,  verbose: bool = True):
@@ -377,7 +399,7 @@ class GenericLLMProvider:
             )
 
             self.last_response_debug = _message_debug_info(output)
-            res = output.content
+            res = _content_to_text(output.content)
 
         else:
             self.last_response_debug = {"stream": True}
@@ -397,7 +419,7 @@ class GenericLLMProvider:
 
         # Streaming the response using the chain astream method from langchain
         async for chunk in self.llm.astream(messages, **kwargs):
-            content = chunk.content
+            content = _content_to_text(chunk.content)
             if not content:
                 continue
             response += content

@@ -830,6 +830,19 @@ class KnowledgeFact(TypedDict, total=False):
     confidence: float
 
 
+class KnowledgeFactPackage(TypedDict, total=False):
+    id: str
+    competitor: str
+    analysis_dimension_id: str
+    report_section_id: str
+    knowledge_fact_ids: list[str]
+    evidence_ids: list[str]
+    fact_type_hints: list[str]
+    normalized_key: str
+    fact_count: int
+    confidence: float
+
+
 class AgentEvent(TypedDict, total=False):
     agent: str
     action: str
@@ -1024,6 +1037,19 @@ class KnowledgeFactPayload(StrictPayloadModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
+class KnowledgeFactPackagePayload(StrictPayloadModel):
+    id: str
+    competitor: str = ""
+    analysis_dimension_id: str = ""
+    report_section_id: str = ""
+    knowledge_fact_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    fact_type_hints: list[str] = Field(default_factory=list)
+    normalized_key: str = ""
+    fact_count: int = Field(default=0, ge=0)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+
+
 class AnalysisClaimPayload(StrictPayloadModel):
     id: str
     analysis_dimension_id: str = ""
@@ -1063,6 +1089,7 @@ class SchemaMessagePayload(StrictPayloadModel):
     knowledge_count: int = Field(ge=0)
     competitor_knowledge: list[CompetitorKnowledgePayload] = Field(default_factory=list)
     knowledge_facts: list[KnowledgeFactPayload] = Field(default_factory=list)
+    knowledge_fact_packages: list[KnowledgeFactPackagePayload] = Field(default_factory=list)
 
 
 class AnalysisMessagePayload(StrictPayloadModel):
@@ -1289,6 +1316,7 @@ class CompetitorAnalysisState(TypedDict, total=False):
     evidence_items: list[EvidenceItem]
     direction_results: list[DirectionResult]
     knowledge_facts: list[KnowledgeFact]
+    knowledge_fact_packages: list[KnowledgeFactPackage]
     competitor_knowledge: list[CompetitorKnowledge]
     analysis_claims: list[AnalysisClaim]
     claim_support_reviews: list[ClaimSupportReview]

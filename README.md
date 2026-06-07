@@ -548,6 +548,27 @@ These limits are separate from `MAX_SEARCH_RESULTS_PER_QUERY` and
 `MAX_ITERATIONS`, which control how many search results and sub-queries each
 individual collection branch uses.
 
+## Rivalens Analysis LLM Claim Organization
+
+`AnalysisAgent` is rule-based by default. `KnowledgeStructuringAgent` emits
+`KnowledgeFact` packages by competitor + analysis dimension. To let an LLM
+organize claim candidates from those packages, configure:
+
+```env
+RIVALENS_ANALYSIS_LLM=openai:gpt-4.1-mini
+RIVALENS_ANALYSIS_LLM_CONCURRENCY=4
+RIVALENS_ANALYSIS_LLM_MAX_TOKENS=900
+RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
+```
+
+- `RIVALENS_ANALYSIS_LLM` or `ANALYSIS_LLM` enables optional LLM claim
+  organization in `AnalysisAgent`. It runs one request per competitor +
+  analysis-dimension KnowledgeFact package with
+  `RIVALENS_ANALYSIS_LLM_CONCURRENCY` as the semaphore limit. The LLM may choose
+  which local `knowledge_fact_ids` support each claim, but `evidence_ids`, risk
+  level, normalized keys, and report routing are still bound locally. Any failed
+  package or invalid fact ID falls back to rule-generated claims.
+
 `PlanningAgent`, `KnowledgeStructuringAgent`, `AnalysisAgent`, and
 `ReportWriterAgent` do not run their own research/report modes by default.
 `ReportWriterAgent` does not collect new evidence, but it adapts Rivalens claims,
@@ -561,7 +582,11 @@ The summary chapter uses fixed SWOT and TOWS matrix skeletons; the LLM fills the
 cells but cannot change the matrix axes, row labels, or column labels. Dynamic
 analysis subsections are also checked before acceptance: if a competitor has
 supported citation-backed claims in the section, the generated subsection must
-include at least one citation from that competitor's claims. The
+use a competitor-by-dimension Markdown matrix whose first column is `对比维度`
+and whose remaining columns are competitor names, with citation refs inside the
+corresponding competitor cells. The writer rejects old long-table subsection
+layouts such as `竞品/对象 / 结论 / 引用` and falls back to a deterministic
+matrix renderer. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and

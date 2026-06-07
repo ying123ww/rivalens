@@ -71,6 +71,32 @@ def test_clean_summary_segment_rejects_variable_swot_layout():
     assert ReportWriterAgent()._clean_summary_segment(variable_summary) == ""
 
 
+def test_clean_summary_segment_rejects_mixed_gap_fillers():
+    mixed_summary = """
+## 第四章：总结
+
+### SWOT 因素矩阵
+
+|  | 正向因素 | 负向因素 |
+| --- | --- | --- |
+| 内部 | **S 优势**<br>1. 飞书项目支持 50 天免费试用。[1]<br>2. 公开证据不足 | **W 劣势**<br>1. 公开证据不足。 |
+| 外部 | **O 机会**<br>1. AI 协同仍有结构性机会。[2] | **T 威胁**<br>1. 跨界 SaaS 竞争可能分流客户。[3] |
+
+### TOWS 战略矩阵
+
+|  | O 机会 | T 威胁 |
+| --- | --- | --- |
+| S 优势 | **SO 增长型**<br>1. 依托飞书项目扩展 AI 项目管理方案。[1][2] | **ST 多点型**<br>1. 用项目管理深度绑定核心客户。[1][3] |
+| W 劣势 | **WO 扭转型**<br>1. 公开证据不足，无法推演。 | **WT 防御型**<br>1. 公开证据不足，无法推演。 |
+
+### 总结论述
+
+格式不应被接受。
+"""
+
+    assert ReportWriterAgent()._clean_summary_segment(mixed_summary) == ""
+
+
 def test_fallback_summary_uses_fixed_matrix_contract():
     summary = ReportWriterAgent()._fallback_summary_chapter(
         claims=[{"evidence_ids": ["ev_1"]}],
@@ -132,9 +158,174 @@ def test_dynamic_section_body_accepts_refs_for_each_claim_competitor():
         claims,
         refs,
     )
+    assert writer._dynamic_section_body_has_competitor_dimension_matrix(
+        body,
+        {
+            "number": "3.1",
+            "id": "ai_capability",
+            "title": "AI 能力",
+            "source_dimension_ids": ["ai_capability"],
+            "competitors": ["飞书", "钉钉"],
+        },
+        claims,
+    )
 
 
-def test_dynamic_section_body_rejects_asymmetric_gap_cell_for_supported_competitor():
+def test_dynamic_section_body_rejects_long_claim_table_layout():
+    writer = ReportWriterAgent()
+    claims = [
+        {
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu"],
+        },
+        {
+            "competitors": ["钉钉"],
+            "evidence_ids": ["ev_dingtalk"],
+        },
+    ]
+    body = """
+| 动态维度 | 竞品/对象 | 结论 | 引用 |
+| --- | --- | --- | --- |
+| AI 能力 | 飞书 | 飞书有可追溯 AI 能力证据。 | [1] |
+| AI 能力 | 钉钉 | 钉钉有可追溯 AI 能力证据。 | [2] |
+""".strip()
+
+    assert not writer._dynamic_section_body_has_competitor_dimension_matrix(
+        body,
+        {
+            "number": "3.1",
+            "id": "ai_capability",
+            "title": "AI 能力",
+            "source_dimension_ids": ["ai_capability"],
+            "competitors": ["飞书", "钉钉"],
+        },
+        claims,
+    )
+
+
+def test_dynamic_section_fallback_uses_competitor_columns_and_dimension_rows():
+    writer = ReportWriterAgent()
+    section = {
+        "number": "3.1",
+        "id": "ai_capability",
+        "title": "AI 能力",
+        "guiding_question": "比较 AI 能力。",
+        "source_dimension_ids": ["ai_capability"],
+        "competitors": ["飞书", "钉钉"],
+    }
+    claims = [
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "飞书 Aily 智能体用于企业员工工作助手。",
+            "claim_type": "capability_signal",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "钉钉 AI PaaS 面向生态伙伴开放。",
+            "claim_type": "capability_signal",
+            "competitors": ["钉钉"],
+            "evidence_ids": ["ev_dingtalk"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "飞书商业版 ¥60/人/月。",
+            "claim_type": "pricing_strategy",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu_price"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "钉钉企业版 ¥18 人/月。",
+            "claim_type": "pricing_strategy",
+            "competitors": ["钉钉"],
+            "evidence_ids": ["ev_dingtalk_price"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "飞书落地永辉客户案例。",
+            "claim_type": "market_position_signal",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu_case"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "钉钉服务零售客户案例。",
+            "claim_type": "market_position_signal",
+            "competitors": ["钉钉"],
+            "evidence_ids": ["ev_dingtalk_case"],
+        },
+    ]
+
+    body = "\n".join(
+        writer._dynamic_analysis_section_lines(
+            section,
+            claims,
+            [],
+            {
+                "ev_feishu": "[1]",
+                "ev_dingtalk": "[2]",
+                "ev_feishu_price": "[3]",
+                "ev_dingtalk_price": "[4]",
+                "ev_feishu_case": "[5]",
+                "ev_dingtalk_case": "[6]",
+            },
+        )
+    )
+
+    assert "| 对比维度 | 飞书 | 钉钉 |" in body
+    assert "| AI 智能体与大模型能力 | 飞书 Aily 智能体用于企业员工工作助手。 [1] | 钉钉 AI PaaS 面向生态伙伴开放。 [2] |" in body
+    assert "| 付费套餐与价格点 | 飞书商业版 ¥60/人/月。 [3] | 钉钉企业版 ¥18 人/月。 [4] |" in body
+    assert "| 客户案例与行业落地 | 飞书落地永辉客户案例。 [5] | 钉钉服务零售客户案例。 [6] |" in body
+    assert "| 动态维度 | 竞品/对象 | 结论 | 引用 |" not in body
+
+
+def test_dynamic_section_body_rejects_single_row_when_claims_have_multiple_aspects():
+    writer = ReportWriterAgent()
+    claims = [
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "飞书 Aily 智能体用于企业员工工作助手。",
+            "claim_type": "capability_signal",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "钉钉 AI PaaS 面向生态伙伴开放。",
+            "claim_type": "capability_signal",
+            "competitors": ["钉钉"],
+            "evidence_ids": ["ev_dingtalk"],
+        },
+        {
+            "analysis_dimension_id": "ai_capability",
+            "claim": "飞书商业版 ¥60/人/月。",
+            "claim_type": "pricing_strategy",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu_price"],
+        },
+    ]
+    body = """
+| 对比维度 | 飞书 | 钉钉 |
+| --- | --- | --- |
+| AI 能力 | 飞书有 AI 能力和定价证据。[1][3] | 钉钉有 AI 能力证据。[2] |
+""".strip()
+
+    assert not writer._dynamic_section_body_has_competitor_dimension_matrix(
+        body,
+        {
+            "number": "3.1",
+            "id": "ai_capability",
+            "title": "AI 能力",
+            "source_dimension_ids": ["ai_capability"],
+            "competitors": ["飞书", "钉钉"],
+        },
+        claims,
+    )
+
+
+def test_dynamic_section_body_allows_asymmetric_gap_cells_when_competitors_supported():
     writer = ReportWriterAgent()
     claims = [
         {
@@ -152,6 +343,35 @@ def test_dynamic_section_body_rejects_asymmetric_gap_cell_for_supported_competit
 | --- | --- | --- |
 | 公开可查标杆落地案例 | 飞书有标杆案例公开证据。[1] | 公开证据不足 |
 | 核心差异化特色能力 | 公开证据不足 | 钉钉有 AI 办公能力公开证据。[2] |
+
+公开资料显示，飞书与钉钉均有可追溯证据。[1][2]
+""".strip()
+
+    assert writer._dynamic_section_body_covers_claim_competitors(
+        body,
+        claims,
+        refs,
+    )
+
+
+def test_dynamic_section_body_rejects_gap_only_column_for_supported_competitor():
+    writer = ReportWriterAgent()
+    claims = [
+        {
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_feishu"],
+        },
+        {
+            "competitors": ["钉钉"],
+            "evidence_ids": ["ev_dingtalk"],
+        },
+    ]
+    refs = {"ev_feishu": "[1]", "ev_dingtalk": "[2]"}
+    body = """
+| 对比维度 | 飞书 | 钉钉 |
+| --- | --- | --- |
+| 公开可查标杆落地案例 | 飞书有标杆案例公开证据。[1] | 公开证据不足 |
+| 核心差异化特色能力 | 飞书有特色能力公开证据。[1] | 公开证据不足 |
 
 公开资料显示，飞书与钉钉均有可追溯证据。[1][2]
 """.strip()

@@ -1,13 +1,19 @@
 """Structure collected evidence into the active competitor knowledge schema."""
 
 from collections import defaultdict
+import hashlib
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from rivalens.agents.evidence_snippets import EvidenceSnippetBuilder
 from rivalens.agents.messages import create_agent_message, latest_message_for
-from rivalens.schema import CompetitorAnalysisState, CompetitorKnowledge, KnowledgeFact
+from rivalens.schema import (
+    CompetitorAnalysisState,
+    CompetitorKnowledge,
+    KnowledgeFact,
+    KnowledgeFactPackage,
+)
 from rivalens.text_quality import clean_source_text, clean_text, is_low_quality_text
 
 
@@ -59,6 +65,9 @@ class KnowledgeStructuringAgent:
         knowledge_facts, fact_extraction = self._build_knowledge_facts_with_metadata(
             evidence_items,
         )
+        knowledge_fact_packages = self._build_knowledge_fact_packages(
+            knowledge_facts,
+        )
         knowledge = self._build_competitor_knowledge(evidence_items)
         competitors = self._enrich_competitors(
             state.get("competitors") or task.get("competitors", []),
@@ -73,6 +82,7 @@ class KnowledgeStructuringAgent:
                 "knowledge_count": len(knowledge),
                 "competitor_knowledge": knowledge,
                 "knowledge_facts": knowledge_facts,
+                "knowledge_fact_packages": knowledge_fact_packages,
             },
             evidence_ids=[
                 evidence_id
@@ -85,6 +95,7 @@ class KnowledgeStructuringAgent:
             "evidence_items": state.get("evidence_items", []),
             "competitors": competitors,
             "knowledge_facts": knowledge_facts,
+            "knowledge_fact_packages": knowledge_fact_packages,
             "competitor_knowledge": knowledge,
             "messages": state.get("messages", []) + [message],
             "agent_events": state.get("agent_events", [])
@@ -103,6 +114,7 @@ class KnowledgeStructuringAgent:
                     "output": {
                         "knowledge_count": len(knowledge),
                         "knowledge_fact_count": len(knowledge_facts),
+                        "knowledge_fact_package_count": len(knowledge_fact_packages),
                         "evidence_snippet_enriched_count": snippet_stats.get(
                             "evidence_snippet_enriched_count",
                             0,
@@ -289,6 +301,66 @@ class KnowledgeStructuringAgent:
     ) -> list[KnowledgeFact]:
         facts, _stats = self._build_knowledge_facts_with_stats(evidence_items)
         return facts
+
+    def _build_knowledge_fact_packages(
+        self,
+        knowledge_facts: list[KnowledgeFact],
+    ) -> list[KnowledgeFactPackage]:
+        grouped: dict[tuple[str, str], list[KnowledgeFact]] = defaultdict(list)
+        for fact in knowledge_facts:
+            if not self._usable_package_fact(fact):
+                continue
+            key = (
+                str(fact.get("competitor", "") or "the target competitor"),
+                str(fact.get("analysis_dimension_id", "")),
+            )
+            grouped[key].append(fact)
+
+        packages: list[KnowledgeFactPackage] = []
+        for index, ((competitor, analysis_dimension_id), facts) in enumerate(
+            grouped.items(),
+            start=1,
+        ):
+            knowledge_fact_ids = self._dedupe(
+                fact.get("id", "")
+                for fact in facts
+                if fact.get("id")
+            )
+            evidence_ids = self._dedupe(
+                evidence_id
+                for fact in facts
+                for evidence_id in fact.get("evidence_ids", [])
+                if evidence_id
+            )
+            packages.append(
+                {
+                    "id": f"fact_package_{index}",
+                    "competitor": competitor,
+                    "analysis_dimension_id": analysis_dimension_id,
+                    "report_section_id": next(
+                        (
+                            str(fact.get("report_section_id", ""))
+                            for fact in facts
+                            if fact.get("report_section_id")
+                        ),
+                        "",
+                    ),
+                    "knowledge_fact_ids": knowledge_fact_ids,
+                    "evidence_ids": evidence_ids,
+                    "fact_type_hints": self._dedupe(
+                        fact.get("fact_type", "")
+                        for fact in facts
+                        if fact.get("fact_type")
+                    ),
+                    "normalized_key": self._package_normalized_key(
+                        competitor,
+                        analysis_dimension_id,
+                    ),
+                    "fact_count": len(knowledge_fact_ids),
+                    "confidence": self._average_confidence(facts),
+                }
+            )
+        return packages
 
     def _build_knowledge_facts_with_stats(
         self,
@@ -1024,7 +1096,7 @@ class KnowledgeStructuringAgent:
         predicate: str,
         fact_object: str,
     ) -> str:
-        object_signature = "_".join(self._key_terms(fact_object)[:8]) or "signal"
+        object_signature = self._fact_object_signature(fact_type, fact_object)
         parts = [
             self._slug(competitor or "unknown"),
             self._slug(dimension or "unknown"),
@@ -1033,6 +1105,14 @@ class KnowledgeStructuringAgent:
             object_signature,
         ]
         return "|".join(parts)
+
+    def _fact_object_signature(self, fact_type: str, fact_object: str) -> str:
+        normalized = " ".join(clean_text(fact_object).lower().split())
+        if not normalized:
+            return "signal"
+        prefix = "_".join(self._key_terms(normalized)[:8]) or "signal"
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:10]
+        return f"{prefix}_{digest}"
 
     def _key_terms(self, text: str) -> list[str]:
         stopwords = {
@@ -1304,6 +1384,38 @@ class KnowledgeStructuringAgent:
             or evidence.get("dimension_id")
             or ""
         )
+
+    def _usable_package_fact(self, fact: dict[str, Any]) -> bool:
+        if not fact.get("id"):
+            return False
+        if not fact.get("analysis_dimension_id"):
+            return False
+        if not [evidence_id for evidence_id in fact.get("evidence_ids", []) if evidence_id]:
+            return False
+        statement = clean_text(fact.get("statement", ""))
+        return bool(statement) and not is_low_quality_text(statement)
+
+    def _package_normalized_key(
+        self,
+        competitor: str,
+        analysis_dimension_id: str,
+    ) -> str:
+        return "|".join(
+            [
+                self._normalize_key_part(competitor or "unknown"),
+                self._normalize_key_part(analysis_dimension_id or "unknown"),
+                "knowledge_fact_package",
+            ]
+        )
+
+    def _normalize_key_part(self, value: str) -> str:
+        return (
+            re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "_", str(value).lower()).strip("_")
+            or "unknown"
+        )
+
+    def _dedupe(self, values: Any) -> list[Any]:
+        return list(dict.fromkeys(value for value in values if value))
 
     def _average_confidence(self, items: list[dict[str, Any]]) -> float:
         confidences = [float(item.get("confidence", 0.5)) for item in items]

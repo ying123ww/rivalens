@@ -90,7 +90,7 @@ ReportWriterAgent section id
 
 ### 4. Knowledge 已成为主路径
 
-当前 `ResearchEngineEvidenceCollector` 会在生成 `EvidenceItem.excerpt` 前清洗 scraped source content，去掉导航壳、JavaScript fallback、无效日期噪声和 AI 关键词匹配提示，同时保留原始 scraped content hash 用于溯源。`KnowledgeStructuringAgent` 使用确定性规则从 accepted evidence 抽取 `KnowledgeFact` atoms：必须引用有效 `EvidenceItem.id`，必须绑定 `analysis_dimension_id`，并按 `normalized_key` 去重。规则抽取会跳过语义噪声，保留清洗后的上下文窗口，而不是提前把非 pricing 证据压成单句 claim。随后本地 atomization policy 会判断 fact 是否过宽；pricing evidence 命中 free tier、plan price、quote-only、usage-based billing、annual discount 等信号时，会被拆成对应原子 facts。`AnalysisAgent` 优先按 competitor、analysis dimension、claim type、subject、predicate 和 normalized fact key 聚合这些 facts，再生成 `AnalysisClaim`。Claim support 与 writer context 会从已绑定的 fact/evidence 中保留模块名、数字、版本、报告/认证和业务场景等 specificity hints，避免非价格维度被压成“能力体系/相关信号”式概述。只有当 `KnowledgeFact` 不可用时，才 fallback 到 direct evidence 或 `CompetitorKnowledge`。
+当前 `ResearchEngineEvidenceCollector` 会在生成 `EvidenceItem.excerpt` 前清洗 scraped source content，去掉导航壳、JavaScript fallback、无效日期噪声和 AI 关键词匹配提示，同时保留原始 scraped content hash 用于溯源。`KnowledgeStructuringAgent` 使用确定性规则从 accepted evidence 抽取 `KnowledgeFact` atoms：必须引用有效 `EvidenceItem.id`，必须绑定 `analysis_dimension_id`，并按 `normalized_key` 去重。规则抽取会跳过语义噪声，保留清洗后的上下文窗口，而不是提前把非 pricing 证据压成单句 claim；`normalized_key` 使用完整事实对象的规范化指纹，避免只有前缀关键词相似的 generic facts 被误合并。随后本地 atomization policy 会判断 fact 是否过宽；pricing evidence 命中 free tier、plan price、quote-only、usage-based billing、annual discount 等信号时，会被拆成对应原子 facts。`KnowledgeStructuringAgent` 还会按 competitor + analysis dimension 输出 `KnowledgeFactPackage`，作为 Analysis 的可消费输入包，但不判断这些 facts 应形成什么 claim。`AnalysisAgent` 优先消费这些 packages；如果启用 analysis LLM，它会并发组织 package 内 facts，返回 claim candidates 和 `knowledge_fact_ids`，但不能直接改 `evidence_ids`、章节路由或 normalized key，本地 validator 只接受真实存在的 fact ID 并自动回填 evidence IDs，单个 package 失败或输出非法 ID 时回退到规则 claim。Claim support 与 writer context 会从已绑定的 fact/evidence 中保留模块名、数字、版本、报告/认证和业务场景等 specificity hints，避免非价格维度被压成“能力体系/相关信号”式概述。只有当 `KnowledgeFact` 不可用时，才 fallback 到 direct evidence 或 `CompetitorKnowledge`。
 
 ### 5. Writer 曾经按固定产品小节猜测第三章路由
 
@@ -271,6 +271,30 @@ EvidenceItem 应显式绑定分析维度。
 accepted evidence 能沉淀出什么结构化事实？
 ```
 
+### KnowledgeFactPackage
+
+KnowledgeFactPackage 是 KnowledgeStructuringAgent 对事实层的轻量打包结果。它只表达事实消费边界，不表达 claim 结论。
+
+```python
+{
+    "id": "fact_package_1",
+    "competitor": "Acme",
+    "analysis_dimension_id": "baseline_trust_security_compliance",
+    "knowledge_fact_ids": ["fact_1", "fact_2"],
+    "evidence_ids": ["ev_1", "ev_2"],
+    "fact_type_hints": ["trust_compliance_signal"],
+    "normalized_key": "acme|baseline_trust_security_compliance|knowledge_fact_package",
+    "fact_count": 2,
+    "confidence": 0.81,
+}
+```
+
+它回答：
+
+```text
+哪些 KnowledgeFact 属于同一个 competitor + analysis dimension 输入包？
+```
+
 ### AnalysisClaim
 
 AnalysisClaim 应主要从 KnowledgeFact 生成，并保留证据绑定。
@@ -432,12 +456,17 @@ ReportWriterAgent
 - Attach every KnowledgeFact to one analysis dimension and one optional schema field.
 - Skip semantic boilerplate, keep a cleaned context window, then normalize subject, predicate, object, fact type, confidence, and `normalized_key` before handoff.
 - Apply the local atomization policy before handoff; split broad pricing facts into free-tier, plan-price, quote-only, usage-based-billing, and annual-discount atoms when the cited evidence supports them.
+- Emit KnowledgeFactPackage records by competitor + analysis dimension as AnalysisAgent input packages.
 - Populate CompetitorKnowledge from KnowledgeFact, not from broad competitor-level evidence buckets.
 
 ### AnalysisAgent
 
 - Generate claims from KnowledgeFact first.
 - Group KnowledgeFact records by competitor, analysis dimension, claim type, subject, predicate, and normalized fact key.
+- Consume KnowledgeFactPackage records from KnowledgeStructuringAgent, with raw KnowledgeFact grouping only as backward-compatible fallback.
+- Optionally run concurrent LLM claim organization per KnowledgeFactPackage.
+- Require LLM-organized claims to cite local `knowledge_fact_ids`; validate those IDs locally and derive `evidence_ids`, risk, normalized keys, and section routing from the accepted facts.
+- Keep per-package fallback to rule claims when analysis LLM output fails validation, cites invalid fact IDs, or the provider errors.
 - Fall back to direct evidence-derived claims only when KnowledgeFact is unavailable, and record that source explicitly.
 - Preserve `analysis_dimension_id`, `knowledge_fact_ids`, and `evidence_ids`.
 - Attach `report_section_id` from the dimension mapping when producing or normalizing claims.
@@ -453,6 +482,7 @@ ReportWriterAgent
 
 - Generate chapter three from a dynamic analysis dimension overview and task-specific dynamic report sections.
 - Select section claims by exact `report_section_id`, then validate against `analysis_dimension_id`.
+- Render each dynamic subsection as a competitor-by-dimension matrix: the first column is `对比维度`, the remaining columns are competitor names, and each competitor cell carries the claim wording plus citation refs.
 - Do not infer report sections from aliases, `dimension`, or `dimension_id`.
 - Preserve citations by resolving `claim.evidence_ids -> EvidenceItem.url`.
 
@@ -480,6 +510,7 @@ ReportWriterAgent
 
 - Generate chapter three from a dynamic analysis dimension overview and a task-level `ReportSectionPlan`.
 - Generate section contents from claims mapped by `report_section_id`.
+- Require subsection content to use the same two-dimensional matrix contract as the fallback writer instead of a long table keyed by competitor/object, conclusion, and citation.
 - Use `AnalysisDimension.report_targets` or `ReportSectionMapping` as the only primary routing source.
 - Add an "unmapped claims" section only for migration diagnostics, not as normal output.
 

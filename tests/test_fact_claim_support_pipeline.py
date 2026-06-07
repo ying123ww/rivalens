@@ -2,11 +2,60 @@
 
 import asyncio
 
-from rivalens.agents.analysis import AnalysisAgent
+from rivalens.agents import analysis as analysis_module
+from rivalens.agents.analysis import AnalysisAgent, AnalysisClaimLLMWriter
 from rivalens.agents.claim_support import ClaimSupportReviewer
 from rivalens.agents.knowledge_structuring import KnowledgeStructuringAgent
 from rivalens.agents.writing import ReportWriterAgent
 from rivalens.workflows.competitive_analysis import _route_after_claim_support
+
+
+class FakeConcurrentClaimWriter:
+    provider = "fake"
+    model = "fake-analysis"
+
+    def __init__(
+        self,
+        fail_dimension_ids: set[str] | None = None,
+        invalid_dimension_ids: set[str] | None = None,
+    ) -> None:
+        self.fail_dimension_ids = fail_dimension_ids or set()
+        self.invalid_dimension_ids = invalid_dimension_ids or set()
+        self.active_count = 0
+        self.max_active_count = 0
+        self.calls: list[str] = []
+
+    def is_configured(self) -> bool:
+        return True
+
+    async def organize_claims(self, *, facts, dimension, competitor, rule_claims):
+        self.active_count += 1
+        self.max_active_count = max(self.max_active_count, self.active_count)
+        dimension_id = dimension["id"]
+        self.calls.append(dimension_id)
+        try:
+            await asyncio.sleep(0.01)
+            if dimension_id in self.fail_dimension_ids:
+                raise RuntimeError("fake analysis LLM failure")
+            fact_ids = [fact["id"] for fact in facts]
+            if dimension_id in self.invalid_dimension_ids:
+                fact_ids = [fact_ids[0], "missing_fact"]
+            return {
+                "claims": [
+                    {
+                        "claim": f"LLM organized claim for {dimension_id}",
+                        "knowledge_fact_ids": fact_ids,
+                        "confidence": 0.83,
+                        "reasoning": "fake supported organization",
+                    }
+                ],
+                "metadata": {
+                    "llm_cost": 0.01,
+                    "llm_prompt_chars": 123,
+                },
+            }
+        finally:
+            self.active_count -= 1
 
 
 def _combined_pricing_evidence():
@@ -26,6 +75,101 @@ def _combined_pricing_evidence():
             "url": "https://acme.example/pricing",
             "confidence": 0.9,
         }
+    ]
+
+
+def _analysis_llm_facts() -> list[dict]:
+    return [
+        {
+            "id": "fact_1",
+            "competitor": "Acme",
+            "analysis_dimension_id": "pricing_model",
+            "fact_type": "pricing_signal",
+            "subject": "Acme Pricing Model",
+            "predicate": "publishes_price",
+            "normalized_key": "acme|pricing_model|pricing_signal|pro_price",
+            "object": "Pro pricing is $20/user/month",
+            "statement": "Pro plan publishes pricing at $20/user/month.",
+            "evidence_ids": ["ev_1"],
+            "confidence": 0.9,
+        },
+        {
+            "id": "fact_2",
+            "competitor": "Acme",
+            "analysis_dimension_id": "core_product_supply",
+            "fact_type": "feature_presence",
+            "subject": "Acme Core Product",
+            "predicate": "describes",
+            "normalized_key": "acme|core_product_supply|feature|workflow",
+            "object": "Acme describes workflow automation and team collaboration.",
+            "statement": "Acme describes workflow automation and team collaboration.",
+            "evidence_ids": ["ev_2"],
+            "confidence": 0.8,
+        },
+        {
+            "id": "fact_4",
+            "competitor": "Acme",
+            "analysis_dimension_id": "pricing_model",
+            "fact_type": "pricing_signal",
+            "subject": "Acme Pricing Model",
+            "predicate": "offers_discount",
+            "normalized_key": "acme|pricing_model|pricing_signal|annual_discount",
+            "object": "Annual billing gets 20% off.",
+            "statement": "Acme pricing source says annual billing gets 20% off.",
+            "evidence_ids": ["ev_4"],
+            "confidence": 0.88,
+        },
+        {
+            "id": "fact_3",
+            "competitor": "Acme",
+            "analysis_dimension_id": "trust_compliance",
+            "fact_type": "trust_compliance_signal",
+            "subject": "Acme Trust",
+            "predicate": "documents",
+            "normalized_key": "acme|trust_compliance|trust|soc2",
+            "object": "Acme documents SOC 2 controls for enterprise customers.",
+            "statement": "Acme documents SOC 2 controls for enterprise customers.",
+            "evidence_ids": ["ev_3"],
+            "confidence": 0.82,
+        },
+    ]
+
+
+def _analysis_llm_packages() -> list[dict]:
+    return [
+        {
+            "id": "fact_package_1",
+            "competitor": "Acme",
+            "analysis_dimension_id": "pricing_model",
+            "knowledge_fact_ids": ["fact_1", "fact_4"],
+            "evidence_ids": ["ev_1", "ev_4"],
+            "fact_type_hints": ["pricing_signal"],
+            "normalized_key": "acme|pricing_model|knowledge_fact_package",
+            "fact_count": 2,
+            "confidence": 0.89,
+        },
+        {
+            "id": "fact_package_2",
+            "competitor": "Acme",
+            "analysis_dimension_id": "core_product_supply",
+            "knowledge_fact_ids": ["fact_2"],
+            "evidence_ids": ["ev_2"],
+            "fact_type_hints": ["feature_presence"],
+            "normalized_key": "acme|core_product_supply|knowledge_fact_package",
+            "fact_count": 1,
+            "confidence": 0.8,
+        },
+        {
+            "id": "fact_package_3",
+            "competitor": "Acme",
+            "analysis_dimension_id": "trust_compliance",
+            "knowledge_fact_ids": ["fact_3"],
+            "evidence_ids": ["ev_3"],
+            "fact_type_hints": ["trust_compliance_signal"],
+            "normalized_key": "acme|trust_compliance|knowledge_fact_package",
+            "fact_count": 1,
+            "confidence": 0.82,
+        },
     ]
 
 
@@ -55,6 +199,21 @@ def test_knowledge_structuring_uses_rule_extractor_metadata():
     assert facts[0]["subject"] == "Acme Pricing Model"
     assert facts[0]["evidence_ids"] == ["ev_1"]
     assert facts[0]["normalized_key"]
+
+
+def test_knowledge_structuring_builds_fact_packages_by_competitor_dimension():
+    agent = KnowledgeStructuringAgent()
+    packages = agent._build_knowledge_fact_packages(_analysis_llm_facts())
+
+    assert [package["analysis_dimension_id"] for package in packages] == [
+        "pricing_model",
+        "core_product_supply",
+        "trust_compliance",
+    ]
+    assert packages[0]["knowledge_fact_ids"] == ["fact_1", "fact_4"]
+    assert packages[0]["evidence_ids"] == ["ev_1", "ev_4"]
+    assert packages[0]["fact_type_hints"] == ["pricing_signal"]
+    assert packages[0]["fact_count"] == 2
 
 
 def test_rule_extraction_skips_javascript_fallback_noise():
@@ -428,6 +587,49 @@ def test_knowledge_structuring_builds_and_merges_fact_atoms():
     assert fact["evidence_ids"] == ["ev_1", "ev_2"]
 
 
+def test_knowledge_structuring_does_not_merge_similar_generic_fact_prefixes():
+    agent = KnowledgeStructuringAgent()
+    evidence = [
+        {
+            "id": "ev_1",
+            "competitor": "Acme",
+            "analysis_dimension_id": "core_product_supply",
+            "dimension_name": "Core Product Supply",
+            "source_type": "official_site",
+            "title": "Acme workflow automation",
+            "excerpt": (
+                "Acme supports workflow automation project planning task routing "
+                "team dashboards for sales operations."
+            ),
+            "url": "https://acme.example/sales-workflows",
+            "confidence": 0.8,
+        },
+        {
+            "id": "ev_2",
+            "competitor": "Acme",
+            "analysis_dimension_id": "core_product_supply",
+            "dimension_name": "Core Product Supply",
+            "source_type": "official_site",
+            "title": "Acme workflow automation",
+            "excerpt": (
+                "Acme supports workflow automation project planning task routing "
+                "approval controls for finance operations."
+            ),
+            "url": "https://acme.example/finance-workflows",
+            "confidence": 0.82,
+        },
+    ]
+
+    facts = agent._build_knowledge_facts(evidence)
+
+    assert len(facts) == 2
+    assert {tuple(fact["evidence_ids"]) for fact in facts} == {
+        ("ev_1",),
+        ("ev_2",),
+    }
+    assert len({fact["normalized_key"] for fact in facts}) == 2
+
+
 def test_analysis_groups_fact_atoms_into_one_traceable_claim():
     agent = AnalysisAgent()
     facts = [
@@ -474,6 +676,150 @@ def test_analysis_groups_fact_atoms_into_one_traceable_claim():
     assert claim["knowledge_fact_ids"] == ["fact_1", "fact_2"]
     assert claim["evidence_ids"] == ["ev_1", "ev_2"]
     assert "public evidence" in claim["claim"]
+
+
+def test_analysis_claim_llm_organizer_passes_trace_and_parses_claims(monkeypatch):
+    captured_kwargs = {}
+
+    async def fake_completion(**kwargs):
+        captured_kwargs.update(kwargs)
+        return (
+            '{"claims": [{"claim": "Acme combines public Pro pricing with annual discounts.", '
+            '"knowledge_fact_ids": ["fact_1", "fact_4"], '
+            '"confidence": 0.82, "reasoning": "same pricing theme"}]}'
+        )
+
+    monkeypatch.setattr(analysis_module, "create_chat_completion", fake_completion)
+    writer = AnalysisClaimLLMWriter(llm_spec="fake:test-model")
+
+    result = asyncio.run(
+        writer.organize_claims(
+            facts=[_analysis_llm_facts()[0], _analysis_llm_facts()[2]],
+            dimension={"id": "pricing_model", "name": "Pricing Model"},
+            competitor="Acme",
+            rule_claims=[
+                {
+                    "claim": "rule claim",
+                    "knowledge_fact_ids": ["fact_1"],
+                    "claim_type": "pricing_strategy",
+                }
+            ],
+        )
+    )
+
+    assert result["claims"][0]["claim"] == (
+        "Acme combines public Pro pricing with annual discounts."
+    )
+    assert result["claims"][0]["knowledge_fact_ids"] == ["fact_1", "fact_4"]
+    assert captured_kwargs["rivalens_operation"] == "analysis_claim_organization"
+    assert captured_kwargs["rivalens_trace_context"] == {
+        "competitor": "Acme",
+        "dimension_id": "pricing_model",
+        "dimension_name": "Pricing Model",
+        "fact_count": 2,
+        "rule_claim_count": 1,
+    }
+    assert captured_kwargs["rivalens_evidence_count"] == 2
+
+
+def test_analysis_uses_concurrent_llm_claim_organizer_with_limit():
+    writer = FakeConcurrentClaimWriter()
+    agent = AnalysisAgent(claim_writer=writer, max_concurrent_llm_claims=2)
+    state = {
+        "analysis_dimensions": [
+            {"id": "pricing_model", "name": "Pricing Model"},
+            {"id": "core_product_supply", "name": "Core Product Supply"},
+            {"id": "trust_compliance", "name": "Trust Compliance"},
+        ],
+        "knowledge_facts": _analysis_llm_facts(),
+        "knowledge_fact_packages": _analysis_llm_packages(),
+    }
+
+    result = asyncio.run(agent.run(state))
+    claims = result["analysis_claims"]
+    event_output = result["agent_events"][-1]["output"]
+
+    assert len(claims) == 3
+    assert all(
+        claim["claim_source"] == "knowledge_fact_dimension_llm"
+        for claim in claims
+    )
+    assert [claim["knowledge_fact_ids"] for claim in claims] == [
+        ["fact_1", "fact_4"],
+        ["fact_2"],
+        ["fact_3"],
+    ]
+    assert [claim["evidence_ids"] for claim in claims] == [
+        ["ev_1", "ev_4"],
+        ["ev_2"],
+        ["ev_3"],
+    ]
+    assert writer.max_active_count == 2
+    assert event_output["analysis_llm_configured"] is True
+    assert event_output["analysis_llm_mode"] == "dimension_claim_organizer"
+    assert event_output["analysis_llm_concurrency"] == 2
+    assert event_output["analysis_llm_group_count"] == 3
+    assert event_output["analysis_llm_fact_group_count"] == 4
+    assert event_output["knowledge_fact_package_source"] == "knowledge_structuring"
+    assert event_output["analysis_llm_success_count"] == 3
+    assert event_output["analysis_llm_failed_count"] == 0
+    assert event_output["analysis_llm_generated_claim_count"] == 3
+    assert event_output["analysis_llm_cost"] == 0.03
+
+
+def test_analysis_llm_claim_failure_falls_back_per_package():
+    writer = FakeConcurrentClaimWriter(fail_dimension_ids={"core_product_supply"})
+    agent = AnalysisAgent(claim_writer=writer, max_concurrent_llm_claims=3)
+    state = {
+        "analysis_dimensions": [
+            {"id": "pricing_model", "name": "Pricing Model"},
+            {"id": "core_product_supply", "name": "Core Product Supply"},
+            {"id": "trust_compliance", "name": "Trust Compliance"},
+        ],
+        "knowledge_facts": _analysis_llm_facts(),
+        "knowledge_fact_packages": _analysis_llm_packages(),
+    }
+
+    result = asyncio.run(agent.run(state))
+    claims = result["analysis_claims"]
+    event_output = result["agent_events"][-1]["output"]
+
+    assert claims[0]["claim_source"] == "knowledge_fact_dimension_llm"
+    assert claims[0]["knowledge_fact_ids"] == ["fact_1", "fact_4"]
+    assert claims[0]["evidence_ids"] == ["ev_1", "ev_4"]
+    assert claims[1]["claim_source"] == "knowledge_fact_group"
+    assert claims[1]["knowledge_fact_ids"] == ["fact_2"]
+    assert claims[1]["evidence_ids"] == ["ev_2"]
+    assert "public evidence" in claims[1]["claim"]
+    assert claims[2]["claim_source"] == "knowledge_fact_dimension_llm"
+    assert event_output["analysis_llm_success_count"] == 2
+    assert event_output["analysis_llm_failed_count"] == 1
+    assert event_output["analysis_llm_fallback_count"] == 1
+
+
+def test_analysis_llm_claim_with_invalid_fact_id_falls_back_locally():
+    writer = FakeConcurrentClaimWriter(invalid_dimension_ids={"core_product_supply"})
+    agent = AnalysisAgent(claim_writer=writer, max_concurrent_llm_claims=3)
+    state = {
+        "analysis_dimensions": [
+            {"id": "pricing_model", "name": "Pricing Model"},
+            {"id": "core_product_supply", "name": "Core Product Supply"},
+            {"id": "trust_compliance", "name": "Trust Compliance"},
+        ],
+        "knowledge_facts": _analysis_llm_facts(),
+        "knowledge_fact_packages": _analysis_llm_packages(),
+    }
+
+    result = asyncio.run(agent.run(state))
+    claims = result["analysis_claims"]
+    event_output = result["agent_events"][-1]["output"]
+
+    assert claims[1]["claim_source"] == "knowledge_fact_group"
+    assert claims[1]["knowledge_fact_ids"] == ["fact_2"]
+    assert claims[1]["evidence_ids"] == ["ev_2"]
+    assert "missing_fact" not in claims[1]["knowledge_fact_ids"]
+    assert event_output["analysis_llm_invalid_fact_id_count"] == 1
+    assert event_output["analysis_llm_fallback_count"] == 1
 
 
 def test_analysis_keeps_distinct_pricing_atoms_as_distinct_claims():
@@ -825,6 +1171,117 @@ def test_claim_support_flags_generic_non_pricing_claim_when_details_exist():
     assert "飞书People" in review["suggested_revision"]
     assert "飞书项目" in review["suggested_revision"]
     assert review["required_follow_up_tasks"] == []
+
+
+def test_claim_support_accepts_revised_claim_with_sufficient_specific_details():
+    reviewer = ClaimSupportReviewer()
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_feature_revised",
+                "analysis_dimension_id": "ai_capability_application",
+                "claim_type": "capability_signal",
+                "claim_risk_level": "medium",
+                "knowledge_fact_ids": ["fact_feature"],
+                "claim": (
+                    "飞书 AI capability: public evidence indicates concrete "
+                    "enterprise collaboration modules; concrete details include "
+                    "飞书People and 飞书项目."
+                ),
+                "competitors": ["飞书"],
+                "evidence_ids": ["ev_feature"],
+                "confidence": 0.82,
+            }
+        ],
+        "knowledge_facts": [
+            {
+                "id": "fact_feature",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "object": (
+                    "飞书People supports talent management, 飞书项目 supports ITR管理, "
+                    "and 安全白皮书 3.0 cites ISO 27001 certification."
+                ),
+                "statement": (
+                    "飞书 publishes concrete modules including 飞书People, 飞书项目, "
+                    "ITR管理, 安全白皮书 3.0, and ISO 27001."
+                ),
+                "evidence_ids": ["ev_feature"],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_feature",
+                "competitor": "飞书",
+                "analysis_dimension_id": "ai_capability_application",
+                "title": "飞书 People and Project capability pages",
+                "excerpt": (
+                    "飞书People covers talent management. 飞书项目 supports ITR管理. "
+                    "安全白皮书 3.0 cites ISO 27001."
+                ),
+                "url": "https://example.com/feishu/features",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "supported"
+    assert review["recommended_action"] == "accept"
+
+
+def test_claim_support_ignores_pricing_noise_outside_pricing_claims():
+    reviewer = ClaimSupportReviewer()
+    excerpt = (
+        "用户口碑报道提到钉钉和飞书继续贴身竞争。页面侧栏还出现"
+        "特斯拉Robotaxi定价20万、租车一小时20元等无关新闻标题。"
+    )
+    state = {
+        "analysis_claims": [
+            {
+                "id": "claim_reputation",
+                "analysis_dimension_id": "user_reputation",
+                "claim_type": "public_evidence_signal",
+                "claim_risk_level": "medium",
+                "knowledge_fact_ids": ["fact_reputation"],
+                "claim": (
+                    "钉钉 user_reputation: public evidence indicates "
+                    "用户口碑报道提到钉钉和飞书继续贴身竞争。"
+                ),
+                "competitors": ["钉钉"],
+                "evidence_ids": ["ev_reputation"],
+                "confidence": 0.78,
+            }
+        ],
+        "knowledge_facts": [
+            {
+                "id": "fact_reputation",
+                "competitor": "钉钉",
+                "analysis_dimension_id": "user_reputation",
+                "object": excerpt,
+                "statement": excerpt,
+                "evidence_ids": ["ev_reputation"],
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_reputation",
+                "competitor": "钉钉",
+                "analysis_dimension_id": "user_reputation",
+                "title": "抢客户、战表格、押AI：钉钉和飞书继续贴身肉搏",
+                "excerpt": excerpt,
+                "url": "https://example.com/reputation",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "supported"
+    assert review["recommended_action"] == "accept"
+    assert "Pricing claim" not in review["reviewer_notes"]
 
 
 def test_writer_compact_claim_includes_non_pricing_specificity_hints():

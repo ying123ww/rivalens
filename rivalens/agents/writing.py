@@ -16,6 +16,7 @@ from rivalens.research.utils.enum import ReportSource, ReportType, Tone
 
 
 SECTION_CLAIM_LIMIT = 12
+SECTION_MATRIX_ROW_LIMIT = 6
 DYNAMIC_ANALYSIS_SECTION_LIMIT = 8
 SUMMARY_CLAIM_LIMIT = 30
 OPENING_CONTEXT_CHAR_LIMIT = 6000
@@ -251,7 +252,9 @@ class ReportWriterAgent:
 - 基于 Context 中已采到的 analysis_claims、analysis_dimensions、evidence_items 和用户问题，动态归纳最有证据支撑的分析维度。
 - 必须先输出“### 分析维度总览”表格，推荐列：章节、动态维度、证据覆盖、主要竞品、主要引用。
 - 随后按总览顺序输出小节，标题格式为“### 3.x 动态维度名称”。
-- 每个小节必须包含一个正式对比表格和一段分析文字。
+- 每个小节必须包含一个二维对比表格和一段分析文字。
+- 小节表格必须采用“竞品横向、维度纵向”的 Markdown 矩阵：第一列为“对比维度”，后续列为各竞品名称；不要使用“竞品/对象、结论、引用”这种长表格式。
+- 每个竞品单元格写该竞品在该维度下的证据支持结论，并在同一单元格保留 citation_ref，例如 [1]。
 - 表格或段落中要保留相关 citation_ref，例如 [1]。
 - 只要 Context 中存在与该小节问题相关、可追溯的 claim 或 evidence，就可以引用；不要因为来源类型不是某类优先来源而弃用。
 - 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
@@ -268,7 +271,7 @@ class ReportWriterAgent:
 | 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
 | 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
 
-只替换每个格子里的编号内容；每个象限 3-5 条，绑定 citation_ref。证据不足可以少于 3 条，但必须在该象限格子中写“公开证据不足”，不要为了凑条数重复占位。
+只替换每个格子里的编号内容；每个象限最多 3-5 条，绑定 citation_ref。证据不足可以少于 3 条；如果已经有带 citation_ref 的条目，不要再追加“公开证据不足”占位。只有整个象限没有任何可引用证据时，才在该象限格子中写“公开证据不足”。
 
 各象限追问（必须在展开回答中覆盖，而非只列关键词）：
 
@@ -313,7 +316,7 @@ class ReportWriterAgent:
 不应写为：
 > ~~发挥免费优势，抓住中小企业市场机会。~~（空泛，不可验证）
 
-每条绑定 citation_ref。证据不足写”公开证据不足，无法推演”。
+每条绑定 citation_ref。证据不足可以少于 2 条；如果已经有带 citation_ref 的推演，不要再追加“公开证据不足，无法推演”占位。只有整个格子没有任何可引用证据时，才写”公开证据不足，无法推演”。
 
 ### 总结论述
 - 基于 TOWS 矩阵，输出一段综合结论。说明核心竞争差异、竞品下一步最可能的战略动作，以及被分析对象相对竞品的关键机会窗口或风险敞口。
@@ -443,6 +446,11 @@ class ReportWriterAgent:
                 section,
                 SECTION_CLAIM_LIMIT,
             )
+            section_evidence = [
+                evidence
+                for evidence in evidence_items
+                if self._matches_dynamic_section(evidence, section)
+            ]
             section_context = self._build_dynamic_section_context(
                 state,
                 section,
@@ -460,12 +468,19 @@ class ReportWriterAgent:
                     generation=generation,
                 )
                 section_body = self._clean_dynamic_section_body(generated)
-                if section_body and not self._dynamic_section_body_covers_claim_competitors(
-                    section_body,
-                    section_claims,
-                    citation_refs_by_evidence_id,
-                ):
-                    section_body = ""
+                if section_body:
+                    if not self._dynamic_section_body_has_competitor_dimension_matrix(
+                        section_body,
+                        section,
+                        section_claims,
+                    ):
+                        section_body = ""
+                    elif not self._dynamic_section_body_covers_claim_competitors(
+                        section_body,
+                        section_claims,
+                        citation_refs_by_evidence_id,
+                    ):
+                        section_body = ""
 
             if not section_body:
                 if section_claims:
@@ -473,7 +488,8 @@ class ReportWriterAgent:
                 section_lines = self._dynamic_analysis_section_lines(
                     section,
                     section_claims,
-                    [],
+                    section_evidence,
+                    citation_refs_by_evidence_id,
                 )
                 lines.extend(["", *section_lines])
             else:
@@ -583,14 +599,22 @@ class ReportWriterAgent:
 请只基于 Context 输出“{section['number']} {section['title']}”小节正文，不要输出章节标题。
 
 小节必须包含：
-1. 一个正式对比表格。
+1. 一个二维对比表格，固定采用“竞品横向、维度纵向”：第一列为“对比维度”，后续列为各竞品名称；不要输出“竞品/对象、结论、引用”这种长表。
 2. 一段对应的分析文字。
 3. 表格或段落中保留相关 citation_ref，例如 [1]。
 4. 只要 Context 中存在与本动态维度相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
 5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
 6. 如果 claim 带有 specificity_hints，表格中的竞品单元格或紧随其后的分析文字至少使用其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要把这些细节压成“多种能力”“能力体系”“产品矩阵”“相关信号”等概述性描述。
-7. 对比表行必须是双方都适用的共同口径；如果某条证据只描述单一竞品的特色，不要把它做成强行横向对齐的行并让另一侧写“公开证据不足”，应在各竞品单元格分别概括其已引用 claim。
-8. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
+7. 对比表行必须拆成本小节下的 3-6 个共同对比口径；如果本小节只有极少 claim，才允许少于 3 行。不要只输出一行“{section['title']}”大而全汇总。
+8. 每个竞品单元格分别概括该竞品在该口径下已有引用 claim。不要把每条 claim 拆成“竞品/对象、结论、引用”的纵向列表。
+9. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
+
+表格示例格式：
+| 对比维度 | 竞品 A | 竞品 B |
+| --- | --- | --- |
+| 定位与品牌主张 | 竞品 A 的可追溯定位结论。[1] | 竞品 B 的可追溯定位结论。[2] |
+| 产品模块与功能覆盖 | 竞品 A 的可追溯能力结论。[3] | 竞品 B 的可追溯能力结论。[4] |
+| 客户案例与行业落地 | 竞品 A 的可追溯落地结论。[5] | 竞品 B 的可追溯落地结论。[6] |
 
 动态维度：{section['title']}
 维度说明：{section['guiding_question']}
@@ -610,7 +634,7 @@ class ReportWriterAgent:
 | 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
 | 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
 
-每个象限 3-5 条，绑定 citation_ref。证据不足可以少于 3 条，但必须在该象限格子中写“公开证据不足”，不要为了凑条数重复占位。需覆盖以下追问：
+每个象限最多 3-5 条，绑定 citation_ref。证据不足可以少于 3 条；如果已经有带 citation_ref 的条目，不要再追加“公开证据不足”占位。只有整个象限没有任何可引用证据时，才在该象限格子中写“公开证据不足”。需覆盖以下追问：
 - S: 核心优势是什么？差距多大？能维持多久？
 - W: 哪些劣势影响最大？是否被机会放大？
 - O: 哪些是结构性机会？竞品是否忽视？
@@ -626,8 +650,8 @@ class ReportWriterAgent:
 | S 优势 | **SO 增长型**<br>1. ...<br>2. ... | **ST 多点型**<br>1. ...<br>2. ... |
 | W 劣势 | **WO 扭转型**<br>1. ...<br>2. ... | **WT 防御型**<br>1. ...<br>2. ... |
 
-每个格子 1-2 条具体战略推演（可观察的动作，不是空泛结论），绑定 citation_ref。
-证据不足写"公开证据不足，无法推演"。
+每个格子最多 1-2 条具体战略推演（可观察的动作，不是空泛结论），绑定 citation_ref。
+如果已有带 citation_ref 的推演，不要再追加"公开证据不足，无法推演"占位；只有整个格子没有任何可引用证据时才写"公开证据不足，无法推演"。
 
 ### 总结论述
 - 输出一段综合结论，说明核心竞争差异、竞品下一步最可能的战略动作及关键机会窗口。
@@ -652,6 +676,8 @@ class ReportWriterAgent:
         segment = self._truncate_before_any_heading(segment, ("## 附录",)).strip()
         if not self._has_fixed_summary_matrices(segment):
             return ""
+        if self._has_mixed_summary_gap_placeholder(segment):
+            return ""
         return segment
 
     def _has_fixed_summary_matrices(self, report: str) -> bool:
@@ -667,6 +693,27 @@ class ReportWriterAgent:
             and any(line.startswith("| W 劣势 | **WO 扭转型**<br>") for line in lines)
         )
 
+    def _has_mixed_summary_gap_placeholder(self, report: str) -> bool:
+        import re
+
+        citation_pattern = re.compile(r"\[\d+\]")
+        gap_phrases = (
+            "公开证据不足",
+            "公开资料不足",
+            "有效证据不足",
+            "证据不足",
+        )
+        for line in (report or "").splitlines():
+            stripped = line.strip()
+            if not self._is_markdown_table_row(stripped):
+                continue
+            for cell in self._markdown_row_cells(stripped):
+                if citation_pattern.search(cell) and any(
+                    phrase in cell for phrase in gap_phrases
+                ):
+                    return True
+        return False
+
     def _clean_dynamic_section_body(self, report: str) -> str:
         body = self._strip_leading_markdown_heading(report)
         if not body:
@@ -674,6 +721,60 @@ class ReportWriterAgent:
         if any(line.lstrip().startswith("#") for line in body.splitlines()):
             return ""
         return body
+
+    def _dynamic_section_body_has_competitor_dimension_matrix(
+        self,
+        body: str,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+    ) -> bool:
+        expected_competitors = [
+            competitor
+            for competitor in self._section_matrix_competitors(
+                section,
+                section_claims,
+                [],
+            )
+            if competitor != "综合"
+        ]
+        lines = [line.strip() for line in body.splitlines()]
+        for index, line in enumerate(lines[:-1]):
+            if not self._is_markdown_table_row(line):
+                continue
+            separator = lines[index + 1]
+            if not self._is_markdown_table_separator(separator):
+                continue
+
+            header_cells = self._markdown_row_cells(line)
+            if len(header_cells) < 2:
+                continue
+            first_header = header_cells[0]
+            if not any(
+                marker in first_header
+                for marker in ("维度", "对比", "分析项", "比较项")
+            ):
+                continue
+            header_text = " ".join(header_cells[1:])
+            if expected_competitors and not all(
+                competitor in header_text for competitor in expected_competitors
+            ):
+                continue
+            data_rows = [
+                row
+                for row in lines[index + 2 :]
+                if self._is_markdown_table_row(row)
+                and len(self._markdown_row_cells(row)) >= len(header_cells)
+            ]
+            if data_rows:
+                expected_rows = self._section_matrix_rows(
+                    section,
+                    section_claims,
+                    [],
+                )
+                if len(expected_rows) > 1 and len(data_rows) < 2:
+                    continue
+                return True
+        return False
 
     def _dynamic_section_body_covers_claim_competitors(
         self,
@@ -739,15 +840,21 @@ class ReportWriterAgent:
             if not competitor_columns:
                 continue
 
+            gap_only_columns = set(competitor_columns)
             for row in lines[index + 2 :]:
                 if not self._is_markdown_table_row(row):
                     break
                 cells = self._markdown_row_cells(row)
-                for column_index, competitor in competitor_columns.items():
-                    if column_index < len(cells) and self._is_gap_placeholder(
-                        cells[column_index],
-                    ):
-                        return True
+                for column_index in list(gap_only_columns):
+                    if column_index >= len(cells):
+                        continue
+                    if self._is_gap_placeholder(cells[column_index]):
+                        continue
+                    gap_only_columns.remove(column_index)
+                if not gap_only_columns:
+                    return False
+            if gap_only_columns:
+                return True
         return False
 
     def _is_gap_placeholder(self, text: str) -> bool:
@@ -845,6 +952,8 @@ class ReportWriterAgent:
                 "Do not infer new claims from raw evidence.",
                 "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
                 "For every competitor represented in analysis_claims, include at least one citation_ref from that competitor's claims.",
+                "Write the subsection table as a matrix: first column 对比维度, following columns competitor names.",
+                "Do not use a long table with columns like 竞品/对象, 结论, 引用.",
                 "Do not write 公开证据不足 for a competitor that has citation-backed claims in analysis_claims.",
                 "If claims are missing, write 公开证据不足.",
             ],
@@ -1049,7 +1158,7 @@ class ReportWriterAgent:
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
     ) -> str:
-        evidence_ids = ", ".join(self._ordered_evidence_ids(claims, evidence_items)) or "无"
+        evidence_ids = " ".join(self._ordered_evidence_ids(claims, evidence_items)[:3]) or "无"
         return "\n".join(
             [
                 "## 第四章：总结",
@@ -1059,7 +1168,7 @@ class ReportWriterAgent:
                 "|  | 正向因素 | 负向因素 |",
                 "| --- | --- | --- |",
                 f"| 内部 | **S 优势**<br>1. 基于已接受证据的综合判断。{evidence_ids} | **W 劣势**<br>1. 未覆盖或证据不足的维度需继续补充。 |",
-                f"| 外部 | **O 机会**<br>1. 可围绕证据充分的差异化维度进一步定位。 | **T 威胁**<br>1. 竞品已有公开信号可能形成竞争压力。{evidence_ids} |",
+                f"| 外部 | **O 机会**<br>1. 可围绕证据充分的差异化维度进一步定位。{evidence_ids} | **T 威胁**<br>1. 竞品已有公开信号可能形成竞争压力。{evidence_ids} |",
                 "",
                 "### TOWS 战略矩阵",
                 "",
@@ -2096,6 +2205,7 @@ class ReportWriterAgent:
                         section,
                         section_claims,
                         section_evidence,
+                        citation_refs_by_evidence_id,
                     ),
                 ]
             )
@@ -2105,9 +2215,9 @@ class ReportWriterAgent:
                     "",
                     "### 3.1 证据覆盖概览",
                     "",
-                    "| 动态维度 | 竞品/对象 | 结论 | 引用 |",
-                    "| --- | --- | --- | --- |",
-                    "| 公开证据不足 | 综合 | 当前缺少可追溯 claim，无法生成动态分析维度。 | 无 |",
+                    "| 对比维度 | 综合 |",
+                    "| --- | --- |",
+                    "| 证据覆盖 | 当前缺少可追溯 claim，无法生成动态分析维度。 |",
                     "",
                     "分析：该报告保留公开证据不足状态，需要补充采集或人工校验后再生成动态维度。",
                 ]
@@ -2119,90 +2229,491 @@ class ReportWriterAgent:
         section: dict[str, Any],
         section_claims: list[dict[str, Any]],
         section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str] | None = None,
     ) -> list[str]:
-        report_evidence_ids = {
-            evidence.get("id", "")
-            for evidence in section_evidence
-            if evidence.get("id")
-        }
-        report_evidence_ids.update(
-            evidence_id
-            for claim in section_claims
-            for evidence_id in claim.get("evidence_ids", [])
-            if evidence_id
+        citation_refs_by_evidence_id = citation_refs_by_evidence_id or {}
+        rows = self._section_matrix_rows(
+            section,
+            section_claims,
+            section_evidence,
+        )
+        competitors = self._section_matrix_competitors(
+            section,
+            section_claims,
+            section_evidence,
         )
         lines = [
             f"### {section['number']} {section['title']}",
             "",
-            "| 动态维度 | 竞品/对象 | 结论 | 引用 |",
-            "| --- | --- | --- | --- |",
+            self._markdown_table_row(["对比维度", *competitors]),
+            self._markdown_table_row(["---", *(["---"] * len(competitors))]),
         ]
-        if section_claims:
-            for claim in section_claims:
-                support_label = (
-                    "（证据较弱，需复核）"
-                    if claim.get("support_status") == "weak"
-                    else ""
-                )
-                lines.append(
-                    self._markdown_table_row(
-                        [
-                            section["title"],
-                            ", ".join(claim.get("competitors", [])) or "综合",
-                            f"{claim.get('claim', '') or '公开证据不足'}{support_label}",
-                            ", ".join(
-                                evidence_id
-                                for evidence_id in claim.get("evidence_ids", [])
-                                if evidence_id in report_evidence_ids
-                            )
-                            or "无",
-                        ]
-                    )
-                )
-            lines.append("")
-            lines.append(
-                "分析："
-                + " ".join(
-                    claim.get("claim", "")
-                    for claim in section_claims[:3]
-                    if claim.get("claim")
-                )
-            )
-        elif section_evidence:
-            for evidence in section_evidence[:3]:
-                evidence_text = (
-                    evidence.get("excerpt")
-                    or evidence.get("title")
-                    or "公开证据显示该维度存在可复核信息。"
-                )
-                lines.append(
-                    self._markdown_table_row(
-                        [
-                            section["title"],
-                            evidence.get("competitor", "") or "综合",
-                            evidence_text,
-                            evidence.get("id", "") or "无",
-                        ]
-                    )
-                )
-            lines.append("")
-            lines.append(
-                "分析：该小节仅引用已采集证据中的可观察信息，仍需结合更多公开来源复核竞争差异。"
-            )
-        else:
+        for dimension_id, row_key, row_label in rows:
             lines.append(
                 self._markdown_table_row(
                     [
-                        section["title"],
-                        "综合",
-                        "公开证据不足",
-                        "无",
+                        row_label,
+                        *[
+                            self._section_matrix_cell(
+                                dimension_id,
+                                row_key,
+                                competitor,
+                                section_claims,
+                                section_evidence,
+                                citation_refs_by_evidence_id,
+                            )
+                            for competitor in competitors
+                        ],
                     ]
                 )
             )
-            lines.append("")
-            lines.append("分析：该动态维度目前缺少足够的公开证据，需要补充采集或人工校验。")
+        lines.append("")
+        lines.append(
+            self._section_matrix_analysis(
+                section_claims,
+                section_evidence,
+                citation_refs_by_evidence_id,
+            )
+        )
         return lines
+
+    def _section_matrix_rows(
+        self,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+    ) -> list[tuple[str, str, str]]:
+        source_dimension_id = next(
+            (
+                str(dimension_id)
+                for dimension_id in section.get("source_dimension_ids", [])
+                if dimension_id
+            ),
+            str(section.get("id", "") or "dynamic_analysis"),
+        )
+        evidence_by_id = {
+            evidence.get("id", ""): evidence
+            for evidence in section_evidence
+            if evidence.get("id")
+        }
+        rows: list[tuple[str, str, str]] = []
+        seen_rows: set[tuple[str, str]] = set()
+        for item in [*section_claims, *section_evidence]:
+            dimension_id = self._item_dimension_id(item) or source_dimension_id
+            row_key, row_label = self._section_matrix_row_key_label(
+                section,
+                item,
+                evidence_by_id,
+            )
+            row_id = (dimension_id, row_key)
+            if row_id in seen_rows:
+                continue
+            seen_rows.add(row_id)
+            rows.append((dimension_id, row_key, row_label))
+            if len(rows) >= SECTION_MATRIX_ROW_LIMIT:
+                break
+
+        if rows:
+            return rows
+        return [
+            (
+                source_dimension_id,
+                "section_overview",
+                str(section.get("title", "") or "证据覆盖概览"),
+            )
+        ]
+
+    def _section_matrix_row_key_label(
+        self,
+        section: dict[str, Any],
+        item: dict[str, Any],
+        evidence_by_id: dict[str, dict[str, Any]] | None = None,
+    ) -> tuple[str, str]:
+        text = self._matrix_item_text(item, evidence_by_id).lower()
+        type_key = str(
+            item.get("claim_type")
+            or item.get("fact_type")
+            or item.get("source_type")
+            or ""
+        )
+        dimension_id = (
+            self._item_dimension_id(item)
+            or next(
+                (
+                    str(dimension_id)
+                    for dimension_id in section.get("source_dimension_ids", [])
+                    if dimension_id
+                ),
+                "",
+            )
+        )
+
+        def contains(keywords: tuple[str, ...]) -> bool:
+            return any(keyword in text for keyword in keywords)
+
+        pricing_context = type_key in {
+            "pricing_strategy",
+            "pricing_signal",
+        } or dimension_id in {
+            "business_model_pricing",
+            "ai_capability_application",
+        }
+        if pricing_context:
+            if contains(("免费版", "free tier", "¥ 0", "0 人/月")):
+                return "pricing_free_tier", "免费层与基础权益"
+            if contains(("调用", "额度", "算粒", "次数", "计费", "配额")):
+                return "pricing_quota", "用量额度与计费单位"
+            if type_key in {"pricing_strategy", "pricing_signal"} or contains(
+                ("企业版", "商业版", "旗舰版", "¥", "元/", "/年", "/月", "万元")
+            ):
+                return "pricing_paid_plan", "付费套餐与价格点"
+
+        if dimension_id == "growth_channels":
+            if contains(("渠道", "生态", "合作伙伴", "合作渠道", "开发者")):
+                return "channel_ecosystem", "渠道与生态获客"
+            if contains(
+                (
+                    "获客",
+                    "挖角",
+                    "商业化",
+                    "arr",
+                    "年度可重复",
+                    "营收",
+                    "注册用户",
+                    "用户数",
+                    "同比",
+                    "增长",
+                    "top50",
+                    "no.1",
+                    "gartner",
+                    "榜",
+                )
+            ):
+                return "growth_market", "商业化与规模增长"
+
+        type_rows = {
+            "customer_segment_signal": ("target_segments", "目标用户与细分场景"),
+            "target_user_signal": ("target_segments", "目标用户与细分场景"),
+            "trust_compliance_signal": ("trust_security", "安全合规与权限"),
+            "integration_signal": ("ecosystem", "生态伙伴与集成"),
+            "ecosystem_signal": ("ecosystem", "生态伙伴与集成"),
+        }
+        if type_key in {"market_position_signal", "market_signal"}:
+            if contains(("客户", "案例", "签约", "落地", "合作", "行业", "永辉", "东华")):
+                return "customer_case", "客户案例与行业落地"
+            return "market_position", "定位与品牌主张"
+        if type_key in {"capability_signal", "feature_presence"}:
+            if contains(("ai", "智能体", "agent", "大模型", "aily", "悟空", "mcp")):
+                return "ai_capability", "AI 智能体与大模型能力"
+            return "product_modules", "产品模块与功能覆盖"
+        if type_key in type_rows:
+            return type_rows[type_key]
+
+        keyword_rows = [
+            (
+                "market_position",
+                "定位与品牌主张",
+                ("定位", "主张", "战略", "卡位", "品牌", "组织操作系统", "公司开在"),
+            ),
+            (
+                "customer_case",
+                "客户案例与行业落地",
+                ("客户", "案例", "签约", "落地", "合作", "行业", "永辉", "东华"),
+            ),
+            (
+                "growth_market",
+                "市场规模与增长信号",
+                ("增长", "规模", "用户", "排名", "no.1", "榜", "市场", "渗透率", "增速", "dau", "下载"),
+            ),
+            (
+                "ai_capability",
+                "AI 智能体与大模型能力",
+                ("ai", "智能体", "agent", "大模型", "aily", "悟空", "mcp"),
+            ),
+            (
+                "product_modules",
+                "产品模块与功能覆盖",
+                ("文档", "会议", "项目", "合同", "审批", "表格", "低代码", "开放平台", "文件", "ding", "应用", "云文档", "paas"),
+            ),
+            (
+                "experience",
+                "体验与易用性信号",
+                ("体验", "满意", "设计", "交互", "效率", "上手", "功能排布", "专注"),
+            ),
+            (
+                "trust_security",
+                "安全合规与权限",
+                ("安全", "合规", "隐私", "审计", "权限", "风控", "白皮书"),
+            ),
+            (
+                "ecosystem",
+                "生态伙伴与集成",
+                ("生态", "伙伴", "插件", "集成", "合作渠道", "开发者"),
+            ),
+            (
+                "reputation",
+                "用户口碑与评价",
+                ("评价", "评论", "口碑", "评分", "app store", "google play", "g2"),
+            ),
+            (
+                "operations",
+                "运营履约与服务交付",
+                ("履约", "服务", "开通", "交付", "购买方式", "客户服务", "工单"),
+            ),
+        ]
+        for row_key, row_label, keywords in keyword_rows:
+            if contains(keywords):
+                return row_key, row_label
+
+        source_rows = {
+            "review": ("reputation", "用户口碑与评价"),
+            "social": ("reputation", "用户口碑与评价"),
+            "benchmark": ("benchmark", "第三方评测与基准"),
+            "news": ("market_news", "新闻与市场动态"),
+            "official_site": ("official_product", "官方产品资料"),
+        }
+        if type_key in source_rows:
+            return source_rows[type_key]
+        return "public_evidence", "公开证据信号"
+
+    def _matrix_item_text(
+        self,
+        item: dict[str, Any],
+        evidence_by_id: dict[str, dict[str, Any]] | None = None,
+    ) -> str:
+        parts = [
+            str(item.get("claim", "") or ""),
+            str(item.get("statement", "") or ""),
+            str(item.get("subject", "") or ""),
+            str(item.get("predicate", "") or ""),
+            str(item.get("object", "") or ""),
+            str(item.get("title", "") or ""),
+            str(item.get("excerpt", "") or ""),
+            str(item.get("source_type", "") or ""),
+            str(item.get("claim_type", "") or ""),
+            str(item.get("fact_type", "") or ""),
+        ]
+        if evidence_by_id:
+            for evidence_id in item.get("evidence_ids", []) or []:
+                evidence = evidence_by_id.get(evidence_id, {})
+                parts.extend(
+                    [
+                        str(evidence.get("title", "") or ""),
+                        str(evidence.get("excerpt", "") or ""),
+                        str(evidence.get("source_type", "") or ""),
+                    ]
+                )
+        return " ".join(part for part in parts if part)
+
+    def _section_matrix_competitors(
+        self,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+    ) -> list[str]:
+        competitors: list[str] = []
+
+        def add_competitor(value: Any) -> None:
+            competitor = str(value or "").strip()
+            if not competitor or competitor == "综合":
+                return
+            if competitor not in competitors:
+                competitors.append(competitor)
+
+        for competitor in section.get("competitors", []) or []:
+            add_competitor(competitor)
+        for claim in section_claims:
+            for competitor in claim.get("competitors", []) or []:
+                add_competitor(competitor)
+        for evidence in section_evidence:
+            add_competitor(evidence.get("competitor", ""))
+
+        return competitors or ["综合"]
+
+    def _section_matrix_cell(
+        self,
+        dimension_id: str,
+        row_key: str,
+        competitor: str,
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        evidence_by_id = {
+            evidence.get("id", ""): evidence
+            for evidence in section_evidence
+            if evidence.get("id")
+        }
+        matched_claims = [
+            claim
+            for claim in section_claims
+            if self._matrix_item_matches_dimension(claim, dimension_id)
+            and self._matrix_item_matches_row(claim, row_key, evidence_by_id)
+            and self._matrix_claim_matches_competitor(claim, competitor)
+        ]
+        if matched_claims:
+            entries = []
+            for claim in matched_claims[:2]:
+                claim_text = self._truncate_text(
+                    self._presentable_claim_text(claim),
+                    220,
+                )
+                if claim.get("support_status") == "weak":
+                    claim_text += "（证据较弱，需复核）"
+                entries.append(
+                    self._text_with_evidence_refs(
+                        claim_text,
+                        claim.get("evidence_ids", []),
+                        citation_refs_by_evidence_id,
+                    )
+                )
+            return "<br>".join(entries)
+
+        matched_evidence = [
+            evidence
+            for evidence in section_evidence
+            if self._matrix_item_matches_dimension(evidence, dimension_id)
+            and self._matrix_item_matches_row(evidence, row_key, evidence_by_id)
+            and self._matrix_evidence_matches_competitor(evidence, competitor)
+        ]
+        if matched_evidence:
+            entries = []
+            for evidence in matched_evidence[:2]:
+                evidence_text = self._truncate_text(
+                    str(
+                        evidence.get("excerpt")
+                        or evidence.get("title")
+                        or "公开证据显示该维度存在可复核信息。"
+                    ),
+                    180,
+                )
+                entries.append(
+                    self._text_with_evidence_refs(
+                        evidence_text,
+                        [evidence.get("id", "")],
+                        citation_refs_by_evidence_id,
+                    )
+                )
+            return "<br>".join(entries)
+
+        return "公开证据不足"
+
+    def _matrix_item_matches_row(
+        self,
+        item: dict[str, Any],
+        row_key: str,
+        evidence_by_id: dict[str, dict[str, Any]],
+    ) -> bool:
+        item_row_key, _ = self._section_matrix_row_key_label(
+            {},
+            item,
+            evidence_by_id,
+        )
+        return item_row_key == row_key
+
+    def _matrix_item_matches_dimension(
+        self,
+        item: dict[str, Any],
+        dimension_id: str,
+    ) -> bool:
+        item_dimension_id = self._item_dimension_id(item)
+        if item_dimension_id:
+            return item_dimension_id == dimension_id
+        return dimension_id == "evidence_supported_findings"
+
+    def _matrix_claim_matches_competitor(
+        self,
+        claim: dict[str, Any],
+        competitor: str,
+    ) -> bool:
+        competitors = [
+            str(value or "").strip()
+            for value in claim.get("competitors", []) or []
+            if str(value or "").strip()
+        ]
+        if competitor == "综合":
+            return not competitors or "综合" in competitors
+        return competitor in competitors
+
+    def _matrix_evidence_matches_competitor(
+        self,
+        evidence: dict[str, Any],
+        competitor: str,
+    ) -> bool:
+        evidence_competitor = str(evidence.get("competitor", "") or "").strip()
+        if competitor == "综合":
+            return not evidence_competitor or evidence_competitor == "综合"
+        return evidence_competitor == competitor
+
+    def _section_matrix_analysis(
+        self,
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        if section_claims:
+            claim_summaries = [
+                self._text_with_evidence_refs(
+                    self._truncate_text(self._presentable_claim_text(claim), 180),
+                    claim.get("evidence_ids", []),
+                    citation_refs_by_evidence_id,
+                )
+                for claim in section_claims[:3]
+                if claim.get("claim")
+            ]
+            if claim_summaries:
+                return "分析：" + "；".join(claim_summaries)
+        if section_evidence:
+            return "分析：该小节仅引用已采集证据中的可观察信息，仍需结合更多公开来源复核竞争差异。"
+        return "分析：该动态维度目前缺少足够的公开证据，需要补充采集或人工校验。"
+
+    def _presentable_claim_text(self, claim: dict[str, Any]) -> str:
+        import re
+
+        text = " ".join(str(claim.get("claim", "") or "").split())
+        if not text:
+            return "公开证据不足"
+        text = re.sub(
+            r"^[^:：]{1,80}[:：]\s*public evidence\s+"
+            r"(?:reports|indicates|signals|describes|publishes)\s*",
+            "公开证据显示，",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"^(公开证据显示，)?[^:：]{1,80}[:：]\s*",
+            lambda match: match.group(1) or "",
+            text,
+        )
+        text = re.sub(
+            r"\bpublic evidence\s+(?:reports|indicates|signals|describes|publishes)\b",
+            "公开证据显示",
+            text,
+            flags=re.IGNORECASE,
+        )
+        replacements = {
+            "free tier available.": "提供免费版本。",
+            "free tier available": "提供免费版本",
+        }
+        for source, replacement in replacements.items():
+            text = text.replace(source, replacement)
+        return text.strip(" ：:") or "公开证据不足"
+
+    def _text_with_evidence_refs(
+        self,
+        text: str,
+        evidence_ids: list[str],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        refs = self._citation_refs_for_evidence_ids(
+            evidence_ids,
+            citation_refs_by_evidence_id,
+        )
+        if not refs and not citation_refs_by_evidence_id:
+            refs = [evidence_id for evidence_id in evidence_ids if evidence_id]
+        if refs and not self._line_has_any_ref(text, refs):
+            return f"{text} {''.join(refs)}"
+        return text or "公开证据不足"
 
     def _claims_for_dynamic_section(
         self,

@@ -76,7 +76,6 @@ def is_generic_specificity_claim(text: str) -> bool:
         "feature portfolio",
         "ecosystem layout",
         "public evidence contains",
-        "public evidence indicates",
         "相关信号",
         "多个信号",
         "多种信号",
@@ -93,8 +92,6 @@ def is_generic_specificity_claim(text: str) -> bool:
         "产品组合",
         "场景覆盖",
         "体系化",
-        "公开资料显示",
-        "公开证据显示",
         "公开证据包含",
     )
     return any(phrase in normalized for phrase in generic_phrases)
