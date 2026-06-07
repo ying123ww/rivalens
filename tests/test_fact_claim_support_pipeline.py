@@ -79,7 +79,7 @@ def test_rule_extraction_skips_javascript_fallback_noise():
     assert metadata["rule_semantic_noise_count"] == 1
 
 
-def test_rule_extraction_selects_concrete_sentence_after_boilerplate():
+def test_rule_extraction_keeps_cleaned_context_after_boilerplate():
     agent = KnowledgeStructuringAgent()
     evidence = [
         {
@@ -93,6 +93,7 @@ def test_rule_extraction_selects_concrete_sentence_after_boilerplate():
                 "登录 注册 下载 免费试用 联系销售。"
                 "以下内容由 AI 匹配目标关键词生成。"
                 "智能伙伴创建平台采用运行额度作为计费单元，首次开通赠送 20,000 运行额度。"
+                "运行额度由基础运行和模型调用两部分组成，每次 AI 应用运行调用固定消耗 1 个运行额度。"
                 "热门推荐 案例与方案 产品功能 本文目录。"
             ),
             "url": "https://feishu.example/ai",
@@ -103,12 +104,12 @@ def test_rule_extraction_selects_concrete_sentence_after_boilerplate():
     facts, metadata = agent._build_knowledge_facts_with_metadata(evidence)
 
     assert len(facts) == 1
-    assert facts[0]["object"] == (
-        "智能伙伴创建平台采用运行额度作为计费单元，首次开通赠送 20,000 运行额度。"
-    )
+    assert "智能伙伴创建平台采用运行额度作为计费单元" in facts[0]["object"]
+    assert "每次 AI 应用运行调用固定消耗 1 个运行额度" in facts[0]["object"]
     assert "登录" not in facts[0]["object"]
     assert "AI 匹配目标关键词" not in facts[0]["object"]
-    assert metadata["rule_sentence_selected_count"] == 1
+    assert "热门推荐" not in facts[0]["object"]
+    assert metadata["rule_context_trimmed_count"] == 1
 
 
 def test_rule_extraction_skips_download_directory_noise():

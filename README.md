@@ -462,13 +462,13 @@ and `source_cache.content_sha256`; only the EvidenceItem excerpt is cleaned for
 downstream review and analysis.
 
 Fact extraction is still defensive at the knowledge stage. It skips semantic
-noise, selects the strongest concrete sentence instead of copying the first
-characters of a page, keeps source title and URL in qualifiers, and cites the
-accepted input `EvidenceItem.id`. Pricing evidence is atomized into free-tier,
-plan-price, quote-only, usage-based-billing, and annual-discount facts when the
-evidence supports those signals. Agent events record rule input count, skipped
-evidence count, semantic-noise count, selected-sentence count, fact count, and
-atomization counts.
+noise, keeps a cleaned context window rather than trying to write a precise
+claim, keeps source title and URL in qualifiers, and cites the accepted input
+`EvidenceItem.id`. Pricing evidence is atomized into free-tier, plan-price,
+quote-only, usage-based-billing, and annual-discount facts when the evidence
+supports those signals. Agent events record rule input count, skipped evidence
+count, semantic-noise count, context-trimmed count, fact count, and atomization
+counts.
 
 ## LangSmith Tracing
 

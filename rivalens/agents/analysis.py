@@ -477,7 +477,7 @@ class AnalysisAgent:
         text = clean_text(fact.get("object") or fact.get("statement", ""))
         if not text or is_low_quality_text(text):
             return ""
-        return " ".join(text.split())[:180]
+        return " ".join(text.split())[:320]
 
     def _claim_normalized_key(
         self,

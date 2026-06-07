@@ -22,6 +22,9 @@ FACT_TYPES = {
 }
 
 
+GENERIC_FACT_OBJECT_CHARS = 520
+
+
 PRICING_ATOM_PREDICATES = {
     "free_tier": "exists",
     "published_plan_price": "publishes_price",
@@ -121,8 +124,8 @@ class KnowledgeStructuringAgent:
                             "rule_semantic_noise_count",
                             0,
                         ),
-                        "rule_sentence_selected_count": fact_extraction.get(
-                            "rule_sentence_selected_count",
+                        "rule_context_trimmed_count": fact_extraction.get(
+                            "rule_context_trimmed_count",
                             0,
                         ),
                         "atomization_too_broad_count": fact_extraction.get(
@@ -318,7 +321,7 @@ class KnowledgeStructuringAgent:
         return {
             "rule_skipped_evidence_count": 0,
             "rule_semantic_noise_count": 0,
-            "rule_sentence_selected_count": 0,
+            "rule_context_trimmed_count": 0,
             "atomization_too_broad_count": 0,
             "atomization_split_count": 0,
             "atomization_rejected_count": 0,
@@ -333,8 +336,8 @@ class KnowledgeStructuringAgent:
             stats["rule_skipped_evidence_count"] += 1
         if finding.get("reason") == "semantic_noise":
             stats["rule_semantic_noise_count"] += 1
-        if finding.get("sentence_selected"):
-            stats["rule_sentence_selected_count"] += 1
+        if finding.get("context_trimmed"):
+            stats["rule_context_trimmed_count"] += 1
         if finding.get("status") == "too_broad":
             stats["atomization_too_broad_count"] += 1
 
@@ -447,11 +450,7 @@ class KnowledgeStructuringAgent:
 
         predicate = self._predicate_for_fact_type(fact_type)
         subject = self._fact_subject(evidence)
-        fact_object, sentence_selected = self._fact_object_with_metadata(
-            evidence,
-            text,
-            fact_type,
-        )
+        fact_object, context_trimmed = self._fact_object_with_metadata(text)
         if not fact_object:
             return [], {"status": "skipped", "reason": "semantic_noise"}
         normalized_key = self._fact_normalized_key(
@@ -498,11 +497,11 @@ class KnowledgeStructuringAgent:
             {evidence_id: evidence} if evidence_id else {},
         )
         if finding.get("status") == "too_broad":
-            finding["sentence_selected"] = sentence_selected
+            finding["context_trimmed"] = context_trimmed
             return [], finding
         return [generic_fact], {
             "status": "atomic",
-            "sentence_selected": sentence_selected,
+            "context_trimmed": context_trimmed,
         }
 
     def _pricing_fact_candidates_from_evidence(
@@ -745,129 +744,6 @@ class KnowledgeStructuringAgent:
                 return "navigation_index"
         return ""
 
-    def _fact_sentences(self, text: str) -> list[str]:
-        value = self._clean_evidence_text(text)
-        if not value:
-            return []
-        raw_segments = re.split(r"(?<=[.!?。！？；;])\s*|\s+[|•]\s+|\s+-\s+", value)
-        sentences: list[str] = []
-        for segment in raw_segments:
-            segment = " ".join(segment.split()).strip(" -:：|")
-            if not segment:
-                continue
-            if len(segment) > 320:
-                sentences.extend(self._split_long_fact_segment(segment))
-                continue
-            sentences.append(segment)
-        return [sentence for sentence in sentences if len(sentence) >= 8]
-
-    def _split_long_fact_segment(self, segment: str) -> list[str]:
-        parts = re.split(r"(?<=[,，、])\s*", segment)
-        chunks: list[str] = []
-        current = ""
-        for part in parts:
-            part = part.strip(" ,，、")
-            if not part:
-                continue
-            next_value = f"{current}，{part}" if current else part
-            if len(next_value) <= 240:
-                current = next_value
-                continue
-            if current:
-                chunks.append(current)
-            current = part
-        if current:
-            chunks.append(current)
-        return chunks or [segment[:240]]
-
-    def _score_fact_sentence(
-        self,
-        evidence: dict[str, Any],
-        sentence: str,
-        fact_type: str,
-    ) -> int:
-        if self._sentence_boilerplate_reason(sentence):
-            return -100
-        score = 0
-        sentence_lower = sentence.lower()
-        dimension_name = clean_text(evidence.get("dimension_name", ""))
-        title = clean_text(evidence.get("title", ""))
-        if 24 <= len(sentence) <= 220:
-            score += 4
-        elif len(sentence) < 16:
-            score -= 3
-        elif len(sentence) > 280:
-            score -= 2
-        if self._has_concrete_signal(sentence):
-            score += 4
-        if re.search(r"[$¥€£]\s?\d|\d+(?:[.,]\d+)?\s*(?:%|元|人|用户|月|年)", sentence):
-            score += 3
-        if any(
-            keyword in sentence_lower
-            for keyword in [
-                "supports",
-                "offers",
-                "provides",
-                "includes",
-                "integrates",
-                "certified",
-                "pricing",
-                "plan",
-                "billing",
-            ]
-        ):
-            score += 2
-        if any(
-            keyword in sentence
-            for keyword in [
-                "支持",
-                "提供",
-                "采用",
-                "包括",
-                "集成",
-                "认证",
-                "定价",
-                "价格",
-                "版本",
-                "套餐",
-                "计费",
-            ]
-        ):
-            score += 2
-        if fact_type != "public_evidence_signal" and fact_type.replace("_", " ") in sentence_lower:
-            score += 1
-        for keyword in self._key_terms(dimension_name)[:4]:
-            if keyword and keyword in self._key_terms(sentence):
-                score += 1
-        if title and not is_low_quality_text(title):
-            title_head = self._concise_title(title).lower()
-            if title_head and title_head in sentence_lower:
-                score += 1
-        score -= min(4, self._navigation_noise_hits(sentence))
-        score -= min(3, self._page_list_noise_hits(sentence))
-        return score
-
-    def _sentence_boilerplate_reason(self, sentence: str) -> str:
-        value = " ".join(str(sentence or "").split())
-        if not value:
-            return "empty"
-        lower = value.lower()
-        if "you need to enable javascript" in lower:
-            return "javascript_fallback"
-        if "以下内容由" in value and "AI" in value and "目标关键词" in value:
-            return "ai_keyword_notice"
-        if re.fullmatch(r"(?:nan[-/\s]*){2,}nan", lower):
-            return "invalid_date_noise"
-        if not self._has_concrete_signal(value):
-            download_directory_reason = self._download_directory_noise_reason(value)
-            if download_directory_reason:
-                return download_directory_reason
-            if self._navigation_noise_hits(value) >= 3:
-                return "navigation_chrome"
-            if self._page_list_noise_hits(value) >= 3:
-                return "page_index"
-        return ""
-
     def _has_concrete_signal(self, text: str) -> bool:
         value = str(text or "")
         lower = value.lower()
@@ -1071,44 +947,19 @@ class KnowledgeStructuringAgent:
         return competitor.strip() or "the competitor"
 
     def _fact_object(self, evidence: dict[str, Any], text: str) -> str:
-        fact_type = self._fact_type_for_evidence(
-            evidence,
-            self._evidence_analysis_dimension_id(evidence),
-            text,
-        )
-        fact_object, _sentence_selected = self._fact_object_with_metadata(
-            evidence,
-            text,
-            fact_type,
-        )
+        fact_object, _context_trimmed = self._fact_object_with_metadata(text)
         return fact_object
 
     def _fact_object_with_metadata(
         self,
-        evidence: dict[str, Any],
         text: str,
-        fact_type: str,
     ) -> tuple[str, bool]:
         cleaned_text = self._clean_evidence_text(text)
-        sentences = self._fact_sentences(cleaned_text)
-        scored = [
-            (self._score_fact_sentence(evidence, sentence, fact_type), sentence)
-            for sentence in sentences
-        ]
-        scored = [(score, sentence) for score, sentence in scored if score > -100]
-        if scored:
-            score, selected = max(scored, key=lambda item: (item[0], len(item[1])))
-            if score >= -2:
-                selected = self._trim_fact_boilerplate(selected)
-                if not selected:
-                    return "", False
-                sentence_selected = len(sentences) > 1 or len(selected) < len(cleaned_text) - 20
-                return selected, sentence_selected
-
-        fallback = self._trim_fact_boilerplate(cleaned_text)
-        if self._sentence_boilerplate_reason(fallback):
+        fact_context = self._trim_fact_boilerplate(cleaned_text)
+        if not fact_context:
             return "", False
-        return fallback, False
+        context_trimmed = len(fact_context) < len(" ".join(cleaned_text.split()))
+        return fact_context, context_trimmed
 
     def _concise_title(self, title: Any) -> str:
         value = " ".join(clean_text(title).split())
@@ -1129,18 +980,41 @@ class KnowledgeStructuringAgent:
         ):
             marker = re.search(
                 r"[\u4e00-\u9fffA-Za-z0-9 xX-]{0,32}"
-                r"(?:支持|提供|采用|包括|集成|认证|定价|计费|突破|超过|同比增长|"
-                r"战略级|安全合规|自主可控|supports|offers|provides|includes|"
-                r"integrates|certified|pricing|billing)",
+                r"(?:支持|提供|采用|包括|包含|集成|认证|定价|计费|突破|超过|"
+                r"同比增长|宣布|发布|定位|覆盖|提升|打造|实现|面向|围绕|"
+                r"适用范围|随着|战略级|安全合规|自主可控|supports|offers|"
+                r"provides|includes|integrates|certified|pricing|billing)",
                 value,
                 flags=re.IGNORECASE,
             )
             if marker and marker.start() > 0:
                 value = value[marker.start() :].strip(" ,，。；;:-")
-        return value[:240]
+        value = self._trim_trailing_boilerplate(value)
+        return value[:GENERIC_FACT_OBJECT_CHARS]
+
+    def _trim_trailing_boilerplate(self, text: str) -> str:
+        value = str(text or "")
+        trailing_markers = [
+            "热门推荐",
+            "案例与方案",
+            "本文目录",
+            "相关推荐",
+            "相关产品",
+            "table of contents",
+            "related articles",
+            "recommended",
+        ]
+        marker_positions = [
+            value.lower().find(marker.lower())
+            for marker in trailing_markers
+            if value.lower().find(marker.lower()) > 40
+        ]
+        if marker_positions:
+            value = value[: min(marker_positions)].strip(" ,，。；;:-")
+        return value
 
     def _fact_statement(self, subject: str, predicate: str, fact_object: str) -> str:
-        return f"{subject} {predicate} {fact_object}".strip()[:500]
+        return f"{subject} {predicate} {fact_object}".strip()[:700]
 
     def _fact_normalized_key(
         self,
