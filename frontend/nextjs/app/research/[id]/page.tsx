@@ -557,6 +557,17 @@ export default function ResearchPage({ params }: { params: { id: string } }) {
     toastOptions,
     children: (
       <div className="relative">
+        {/* Back to Home button — always visible when viewing historical research */}
+        <button
+          onClick={handleNewResearch}
+          className="absolute top-16 left-4 z-30 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-300 bg-gray-900/80 hover:bg-gray-800 hover:text-white rounded-lg border border-gray-700/50 hover:border-gray-600/70 backdrop-blur-sm shadow-lg transition-all duration-200"
+          title="Back to Home"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          Home
+        </button>
         <ResearchSidebar
           history={history}
           onSelectResearch={handleSelectResearch}

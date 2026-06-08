@@ -37,6 +37,20 @@ export const preprocessOrderedData = (data: Data[]) => {
       groupedData.push({ type: 'langgraphButton', link });
     } else if (type === 'chat') {
       groupedData.push({ type: 'chat', content: content });
+    } else if (type === 'path') {
+      // Explicitly handle path messages so file-download data
+      // is never shadowed by report-block cleanup side effects.
+      if (currentReportGroup) {
+        currentReportGroup = null;
+      }
+      if (currentAccordionGroup) {
+        currentAccordionGroup = null;
+      }
+      if (currentSourceGroup) {
+        groupedData.push(currentSourceGroup);
+        currentSourceGroup = null;
+      }
+      groupedData.push(item);
     } else {
       if (currentReportGroup) {
         currentReportGroup = null;

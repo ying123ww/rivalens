@@ -830,7 +830,7 @@ class CoverageReviewer:
                 return max(1, int(raw_count))
             except (TypeError, ValueError):
                 pass
-        return 4
+        return 2
 
     def fallback_target_source_types(self, branch: ResearchBranch) -> list[str]:
         source_hints = [
