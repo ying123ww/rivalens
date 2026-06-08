@@ -45,6 +45,7 @@ from server.auth import (
     InvalidTokenError,
     LoginRequest,
     RegisterRequest,
+    UpdateCurrentUserRequest,
     UserPublic,
     create_access_token,
     decode_access_token,
@@ -491,6 +492,20 @@ def login_user(request: LoginRequest):
 @app.get("/api/auth/me", response_model=UserPublic)
 def get_current_user(user: Dict[str, Any] = Depends(_require_current_user)):
     return to_public_user(user)
+
+
+@app.patch("/api/auth/me", response_model=UserPublic)
+def update_current_user(
+    request: UpdateCurrentUserRequest,
+    user: Dict[str, Any] = Depends(_require_current_user),
+):
+    updated_user = user_store.update_user_profile(
+        user["id"],
+        display_name=request.display_name,
+    )
+    if updated_user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return to_public_user(updated_user)
 
 
 # ── Session API ──────────────────────────────────────────────────

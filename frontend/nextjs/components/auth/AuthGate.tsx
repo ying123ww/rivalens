@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import type { AuthUser } from "./AuthProvider";
 import { useAuth } from "./AuthProvider";
 
 type AuthMode = "login" | "register";
@@ -12,6 +13,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const { user, loading, refreshUser, logout } = useAuth();
   const pathname = usePathname();
   const isMonitoring = pathname === "/monitoring";
+  const [profileOpen, setProfileOpen] = useState(false);
 
   if (loading) {
     return <AuthLoading />;
@@ -24,33 +26,180 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <div className="fixed left-14 top-1.5 z-[120] flex max-w-[calc(100vw-4.5rem)] items-center gap-3 rounded-lg border border-gray-700 bg-gray-900/80 px-3 py-2 shadow-lg shadow-black/20 backdrop-blur-md sm:left-20 sm:top-3.5 sm:max-w-none">
-        <div className="hidden min-w-0 text-left sm:block">
-          <p className="truncate text-xs font-semibold text-gray-100">
-            {user.display_name}
-          </p>
-          <p className="truncate text-[11px] text-gray-400">{user.email}</p>
-        </div>
+      <div className="fixed left-14 top-1.5 z-[120] flex max-w-[calc(100vw-4.5rem)] items-start gap-3 sm:left-20 sm:top-3.5 sm:max-w-none">
         <Link
           href="/monitoring"
           aria-current={isMonitoring ? "page" : undefined}
-          className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+          className={`rounded-lg border px-4 py-3 text-xs font-semibold shadow-lg shadow-black/20 backdrop-blur-md transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 ${
             isMonitoring
-              ? "border-teal-500/60 bg-teal-500/10 text-teal-100"
-              : "border-gray-700 text-gray-300 hover:border-gray-500 hover:text-gray-100"
+              ? "border-teal-500/60 bg-teal-500/15 text-teal-100"
+              : "border-gray-700 bg-gray-900/80 text-gray-300 hover:border-gray-500 hover:text-gray-100"
           }`}
         >
           Monitoring
         </Link>
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="rounded-md border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
-          退出
-        </button>
+        <div className="relative flex items-center gap-3 rounded-lg border border-gray-700 bg-gray-900/80 px-3 py-2 shadow-lg shadow-black/20 backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => setProfileOpen((open) => !open)}
+            className="hidden min-w-0 text-left focus:outline-none focus:ring-2 focus:ring-teal-500 sm:block"
+            aria-expanded={profileOpen}
+          >
+            <p className="truncate text-xs font-semibold text-gray-100">
+              {user.display_name}
+            </p>
+            <p className="truncate text-[11px] text-gray-400">{user.email}</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setProfileOpen((open) => !open)}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+              profileOpen
+                ? "border-teal-500/60 bg-teal-500/10 text-teal-100"
+                : "border-gray-700 text-gray-300 hover:border-gray-500 hover:text-gray-100"
+            }`}
+          >
+            资料
+          </button>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="rounded-md border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            退出
+          </button>
+          {profileOpen && (
+            <ProfileEditor
+              user={user}
+              onClose={() => setProfileOpen(false)}
+              onSaved={refreshUser}
+            />
+          )}
+        </div>
       </div>
     </>
+  );
+}
+
+function ProfileEditor({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user: AuthUser;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(user.display_name);
+  }, [user.display_name]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setSaved(false);
+
+    const nextDisplayName = displayName.trim();
+    if (!nextDisplayName) {
+      setError("显示名不能为空");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: nextDisplayName }),
+      });
+      const body = (await response.json()) as {
+        detail?: string | Array<{ msg?: string }>;
+      };
+
+      if (!response.ok) {
+        const detail = Array.isArray(body.detail)
+          ? body.detail[0]?.msg
+          : body.detail;
+        throw new Error(detail || "资料保存失败");
+      }
+
+      await onSaved();
+      setSaved(true);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error ? caughtError.message : "资料保存失败",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="absolute left-0 top-[calc(100%+0.5rem)] w-[min(20rem,calc(100vw-5rem))] rounded-lg border border-gray-700 bg-gray-950 p-4 shadow-2xl shadow-black/40">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-100">个人资料</h2>
+          <p className="mt-1 text-xs text-gray-500">更新工作台显示名称</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-gray-800 px-2 py-1 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+        >
+          关闭
+        </button>
+      </div>
+
+      <form className="space-y-4" onSubmit={submit}>
+        <label className="block">
+          <span className="mb-2 block text-xs font-medium text-gray-400">
+            显示名
+          </span>
+          <input
+            required
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            maxLength={80}
+            className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-600 hover:border-gray-600 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-2 block text-xs font-medium text-gray-400">
+            邮箱
+          </span>
+          <input
+            readOnly
+            value={user.email}
+            className="w-full cursor-not-allowed rounded-md border border-gray-800 bg-gray-900/50 px-3 py-2 text-sm text-gray-500 outline-none"
+          />
+        </label>
+
+        {error && (
+          <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            {error}
+          </p>
+        )}
+        {saved && !error && (
+          <p className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs text-teal-100">
+            已保存
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full rounded-md bg-teal-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {submitting ? "保存中..." : "保存资料"}
+        </button>
+      </form>
+    </div>
   );
 }
 

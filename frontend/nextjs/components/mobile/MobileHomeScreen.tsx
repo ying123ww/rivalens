@@ -136,7 +136,7 @@ export default function MobileHomeScreen({
       <div className="pt-10 px-6 text-center mb-8">
         <div className="flex justify-center mb-3">
           <img
-            src="/img/agents/defaultAgentAvatar.JPG"
+            src="/img/messi.JPG"
             alt="Rivalens"
             width={60}
             height={60}

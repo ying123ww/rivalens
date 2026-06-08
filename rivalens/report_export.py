@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import urllib.parse
@@ -197,6 +198,7 @@ async def _write_pdf(path: Path, report: str, css_path: str | None = None) -> st
         writer.close()
         return path.as_posix()
     except Exception:
+        logging.getLogger(__name__).exception("Failed to generate PDF at %s", path)
         return ""
 
 
@@ -217,9 +219,8 @@ async def _write_docx(path: Path, report: str) -> str:
         doc.save(path)
         return path.as_posix()
     except Exception:
+        logging.getLogger(__name__).exception("Failed to generate DOCX at %s", path)
         return ""
-
-
 async def generate_report_files(
     report: str,
     filename: str,

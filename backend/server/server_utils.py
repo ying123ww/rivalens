@@ -708,6 +708,7 @@ async def handle_chat_command(websocket, data: str):
         })
 
 async def send_file_paths(websocket, file_paths: Dict[str, str]):
+    logger.info("Sending file paths to client: %s", {k: v for k, v in file_paths.items()})
     await websocket.send_json({"type": "path", "output": file_paths})
 
 

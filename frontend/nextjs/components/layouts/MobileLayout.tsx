@@ -73,7 +73,7 @@ export default function MobileLayout({
           <div className="flex items-center">
             <a href="/" className="flex items-center">
               <img
-                src="/img/agents/defaultAgentAvatar.JPG"
+                src="/img/messi.JPG"
                 alt="Rivalens"
                 width={30}
                 height={30}
@@ -289,7 +289,7 @@ export default function MobileLayout({
       {/* Footer */}
       <footer className="mt-auto py-3 px-4 text-center border-t border-gray-800/40 bg-gray-900/80 backdrop-blur-sm">
         <div className="flex items-center justify-center gap-5 mb-3">
-          <a href="https://github.com/rivalens/rivalens" target="_blank" className="text-gray-400 hover:text-teal-400 transition-colors">
+          <a href="https://github.com/ying123ww/rivalens" target="_blank" className="text-gray-400 hover:text-teal-400 transition-colors">
             <svg 
               xmlns="http://www.w3.org/2000/svg" 
               viewBox="0 0 24 24" 
@@ -304,7 +304,7 @@ export default function MobileLayout({
               <polyline points="9 22 9 12 15 12 15 22" />
             </svg>
           </a>
-          <a href="https://github.com/rivalens/rivalens" target="_blank" className="text-gray-400 hover:text-gray-300 transition-colors">
+          <a href="https://github.com/ying123ww/rivalens" target="_blank" className="text-gray-400 hover:text-gray-300 transition-colors">
             <img
               src="/img/github.svg"
               alt="GitHub"

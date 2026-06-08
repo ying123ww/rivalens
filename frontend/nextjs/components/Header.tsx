@@ -22,7 +22,7 @@ const Header = ({ loading, isStopped, showResult, onStop, onNewResearch, isCopil
           {/* Logo/Home link */}
           <a href="/">
             <img
-              src="/img/agents/defaultAgentAvatar.JPG"
+              src="/img/messi.JPG"
               alt="logo"
               width={60}
               height={60}

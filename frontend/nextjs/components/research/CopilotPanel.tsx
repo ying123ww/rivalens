@@ -81,7 +81,7 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({
         <div className="flex items-center">
           <a href="/" className="mr-3">
             <img
-              src="/img/agents/defaultAgentAvatar.JPG"
+              src="/img/messi.JPG"
               alt="logo"
               width={32}
               height={32}

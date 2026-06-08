@@ -761,7 +761,7 @@ export default function Home() {
         .join("\n");
     };
     
-    const newLogs = groupedData.reduce((acc: any[], data) => {
+    const newLogs = groupedData.reduce((acc: any[], data, index) => {
       // Process accordion blocks (grouped data)
       if (data.type === 'accordionBlock') {
         const logs = data.items.map((item: any, subIndex: any) => ({
@@ -771,14 +771,14 @@ export default function Home() {
           key: `${item.type}-${item.content}-${subIndex}`,
         }));
         return [...acc, ...logs];
-      } 
+      }
       // Process status reports
       else if (statusReports.includes(data.content)) {
         return [...acc, {
           header: data.content,
           text: logText(data),
           metadata: data.metadata,
-          key: `${data.type}-${data.content}`,
+          key: `${data.type}-${data.content}-${index}`,
         }];
       }
       return acc;

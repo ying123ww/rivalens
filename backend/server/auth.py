@@ -77,6 +77,12 @@ class LoginRequest(BaseModel):
         return value
 
 
+class UpdateCurrentUserRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: str = Field(min_length=1, max_length=80)
+
+
 class UserPublic(BaseModel):
     id: str
     email: str
