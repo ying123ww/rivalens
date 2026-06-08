@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, ReactNode, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { useAuth } from "./AuthProvider";
 
@@ -8,6 +10,8 @@ type AuthMode = "login" | "register";
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { user, loading, refreshUser, logout } = useAuth();
+  const pathname = usePathname();
+  const isMonitoring = pathname === "/monitoring";
 
   if (loading) {
     return <AuthLoading />;
@@ -27,6 +31,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
           </p>
           <p className="truncate text-[11px] text-gray-400">{user.email}</p>
         </div>
+        <Link
+          href="/monitoring"
+          aria-current={isMonitoring ? "page" : undefined}
+          className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+            isMonitoring
+              ? "border-teal-500/60 bg-teal-500/10 text-teal-100"
+              : "border-gray-700 text-gray-300 hover:border-gray-500 hover:text-gray-100"
+          }`}
+        >
+          Monitoring
+        </Link>
         <button
           type="button"
           onClick={() => void logout()}

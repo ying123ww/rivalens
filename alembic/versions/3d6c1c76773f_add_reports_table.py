@@ -8,8 +8,6 @@ Create Date: 2026-06-04 16:45:34.759231
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision: str = '3d6c1c76773f'
 down_revision: Union[str, Sequence[str], None] = 'd6bafc275efb'
@@ -18,30 +16,31 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table('reports',
-    sa.Column('report_id', sa.String(length=280), nullable=False),
-    sa.Column('user_id', sa.Uuid(), nullable=True),
-    sa.Column('run_id', sa.String(length=160), nullable=True),
-    sa.Column('question', sa.Text(), nullable=False),
-    sa.Column('answer', sa.Text(), nullable=False),
-    sa.Column('status', sa.String(length=32), nullable=False),
-    sa.Column('report_type', sa.String(length=64), nullable=True),
-    sa.Column('report_source', sa.String(length=64), nullable=True),
-    sa.Column('tone', sa.String(length=32), nullable=True),
-    sa.Column('timestamp', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('docx_path', sa.Text(), nullable=True),
-    sa.Column('pdf_path', sa.Text(), nullable=True),
-    sa.Column('markdown_path', sa.Text(), nullable=True),
-    sa.Column('html_path', sa.Text(), nullable=True),
-    sa.Column('data', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
-    sa.Column('error', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['run_id'], ['analysis_runs.run_id'], ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
-    sa.PrimaryKeyConstraint('report_id')
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reports (
+            report_id VARCHAR(280) PRIMARY KEY,
+            user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+            run_id VARCHAR(160) NULL REFERENCES analysis_runs(run_id) ON DELETE SET NULL,
+            question TEXT NOT NULL DEFAULT '',
+            answer TEXT NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'running',
+            report_type VARCHAR(64) NULL,
+            report_source VARCHAR(64) NULL,
+            tone VARCHAR(32) NULL,
+            timestamp TIMESTAMPTZ NULL,
+            docx_path TEXT NULL,
+            pdf_path TEXT NULL,
+            markdown_path TEXT NULL,
+            html_path TEXT NULL,
+            data JSONB NOT NULL DEFAULT '{}'::jsonb,
+            error TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
     )
 
 
 def downgrade() -> None:
-    op.drop_table('reports')
+    op.execute("DROP TABLE IF EXISTS reports")

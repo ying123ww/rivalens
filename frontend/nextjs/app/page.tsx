@@ -738,7 +738,17 @@ export default function Home() {
       "run_cancelled",
       "error",
     ];
+    const runningTaskMessage = "分析任务进行中......";
+    const formatLogLine = (item: any) => {
+      if (item.content === "run_started") {
+        return runningTaskMessage;
+      }
+      return `${item.content || "log"}: ${item.output || ""}`;
+    };
     const logText = (data: any) => {
+      if (data.content === "run_started") {
+        return runningTaskMessage;
+      }
       if (data.content !== "log_batch") {
         return data.output;
       }
@@ -747,7 +757,7 @@ export default function Home() {
         return data.output;
       }
       return latest
-        .map((item: any) => `${item.content || "log"}: ${item.output || ""}`)
+        .map(formatLogLine)
         .join("\n");
     };
     

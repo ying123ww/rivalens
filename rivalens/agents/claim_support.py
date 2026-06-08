@@ -41,6 +41,7 @@ class ClaimSupportReviewer:
         }
         reviews: list[ClaimSupportReview] = []
         supported_count = 0
+        supported_with_limitations_count = 0
         weak_count = 0
         contradicted_count = 0
         unverifiable_count = 0
@@ -95,11 +96,13 @@ class ClaimSupportReviewer:
             )
             if status == "supported":
                 supported_count += 1
+            elif status == "supported_with_limitations":
+                supported_with_limitations_count += 1
             elif status == "unverifiable":
                 unverifiable_count += 1
             elif status == "contradicted":
                 contradicted_count += 1
-            elif status in {"weak", "contradicted"}:
+            elif status == "weak":
                 weak_count += 1
 
             if recommended_action == "accept":
@@ -135,6 +138,7 @@ class ClaimSupportReviewer:
             payload={
                 "review_count": len(reviews),
                 "supported_count": supported_count,
+                "supported_with_limitations_count": supported_with_limitations_count,
                 "weak_count": weak_count,
                 "contradicted_count": contradicted_count,
                 "unverifiable_count": unverifiable_count,
@@ -167,6 +171,7 @@ class ClaimSupportReviewer:
                     "output": {
                         "review_count": len(reviews),
                         "supported_count": supported_count,
+                        "supported_with_limitations_count": supported_with_limitations_count,
                         "weak_count": weak_count,
                         "contradicted_count": contradicted_count,
                         "unverifiable_count": unverifiable_count,
@@ -293,11 +298,11 @@ class ClaimSupportReviewer:
                     round(max(0.0, min(1.0, base_score * 0.68)), 2),
                 )
             return (
-                "weak",
+                "supported_with_limitations",
                 "revise",
                 unsupported or claim_tokens[:4],
                 suggested_revision,
-                "Claim is bound to evidence but not to structured KnowledgeFact records.",
+                "Claim is bound to evidence but must be tightened because it is not linked to structured KnowledgeFact records.",
                 round(max(0.0, min(1.0, base_score * 0.82)), 2),
             )
 
