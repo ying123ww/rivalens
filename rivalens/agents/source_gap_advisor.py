@@ -60,17 +60,17 @@ class LLMSourceGapAdvisor:
         self.temperature = temperature
         self.max_tokens = max_tokens or self._env_int(
             "RIVALENS_SOURCE_GAP_LLM_MAX_TOKENS",
-            2200,
+            8192,
             minimum=900,
         )
         self.max_evidence_items = max_evidence_items or self._env_int(
             "RIVALENS_SOURCE_GAP_LLM_MAX_EVIDENCE",
-            6,
+            12,
             minimum=1,
         )
         self.max_excerpt_chars = max_excerpt_chars or self._env_int(
             "RIVALENS_SOURCE_GAP_LLM_EXCERPT_CHARS",
-            360,
+            800,
             minimum=120,
         )
 

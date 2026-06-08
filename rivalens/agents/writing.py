@@ -240,7 +240,7 @@ class ReportWriterAgent:
 ### 竞品信息卡片
 - 为每个竞品输出一个简短信息卡片。
 - 卡片字段优先使用 competitors 中的 name、product、website、category、notes、evidence_ids。
-- 官网字段使用 competitors.website；若为空，写“公开资料不足”。不要在写报告阶段自行猜测或替换官网。
+- 官网字段使用 competitors.website；若为空，写"公开资料不足"。不要在写报告阶段自行猜测或替换官网。
 - 如果字段由公开证据推导，必须展示对应 citation_ref，例如 [1]；不要无证据扩写。
 
 ### 竞品分类表格
@@ -250,56 +250,39 @@ class ReportWriterAgent:
 ## 第三章：竞品分析
 - 不要使用预设产品维度模板。
 - 基于 Context 中已采到的 analysis_claims、analysis_dimensions、evidence_items 和用户问题，动态归纳最有证据支撑的分析维度。
-- 必须先输出“### 分析维度总览”表格，推荐列：章节、动态维度、证据覆盖、主要竞品、主要引用。
-- 随后按总览顺序输出小节，标题格式为“### 3.x 动态维度名称”。
+- 必须先输出"### 分析维度总览"表格，推荐列：章节、动态维度、证据覆盖、主要竞品、主要引用。
+- 随后按总览顺序输出小节，标题格式为"### 3.x 动态维度名称"。
 - 每个小节必须包含一个二维对比表格和一段分析文字。
-- 小节表格必须采用“竞品横向、维度纵向”的 Markdown 矩阵：第一列为“对比维度”，后续列为各竞品名称；不要使用“竞品/对象、结论、引用”这种长表格式。
+- 小节表格必须采用"竞品横向、维度纵向"的 Markdown 矩阵：第一列为"对比维度"，后续列为各竞品名称；不要使用"竞品/对象、结论、引用"这种长表格式。
 - 每个竞品单元格写该竞品在该维度下的证据支持结论，并在同一单元格保留 citation_ref，例如 [1]。
 - 表格或段落中要保留相关 citation_ref，例如 [1]。
 - 只要 Context 中存在与该小节问题相关、可追溯的 claim 或 evidence，就可以引用；不要因为来源类型不是某类优先来源而弃用。
-- 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
+- 对间接公开证据生成的结论要保持保守表述，例如"公开资料显示""间接证据显示""尚不足以确认完整细节"。
 - 如果某个分析维度在 Context 中没有任何可追溯的 claim 或 evidence，直接跳过该维度，不生成该小节，也不要写任何占位文字。
 
 ## 第四章：总结
 
 ### SWOT 因素矩阵
 
-必须严格输出下面这个固定 2×2 SWOT 因素矩阵；不要改表头、不要改行名、不要新增列：
+基于 Context 中的 analysis_claims 和 evidence_items 对主要竞品做综合分析，输出固定 2×2 SWOT 因素矩阵；不要改表头、不要改行名、不要新增列：
 
 |  | 正向因素 | 负向因素 |
 | --- | --- | --- |
 | 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
 | 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
 
-只替换每个格子里的编号内容；每个象限最多 3-5 条，绑定 citation_ref。证据不足可以少于 3 条；如果已经有带 citation_ref 的条目，不要再追加“公开证据不足”占位。只有整个象限没有任何可引用证据时，才在该象限格子中写“公开证据不足”。
+每个象限必须覆盖双方竞品，在条目中明确提及竞品名。每个象限最多 3-5 条，每条绑定 citation_ref。
 
-各象限追问（必须在展开回答中覆盖，而非只列关键词）：
+S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
+- **W 劣势来源**：竞品间功能/定价/覆盖面的横向差距（用竞品 A 的 S 反推竞品 B 的 W）；用户反馈或评测中指出的不足；公开报道中提及的产品/运营短板；履约或服务体系的缺口
+- **T 威胁来源**：竞品正在推进的战略动作或产品迭代；行业政策、合规要求或监管变化；技术路线替代或架构变化的风险；市场格局或客户偏好迁移的信号
+- W 和 T 的每一条都必须使用 citation_ref 绑定证据原文——即使证据原文没有出现"劣势""威胁"字样，只要能从证据中合理推导即可。例如：从"竞品 A 已支持 X 功能 [1]"推导竞品 B 在 X 功能上的缺口，引用 [1]
 
-**S 优势** — 基于 evidence_items 回答：
-1. 该竞品目前可观察的核心优势是什么？与同类竞品的差距有多大？
-2. 这些优势能维持多久？竞品做出有力反应需要多长时间？
-3. 是否有证据表明该优势正在减弱或被追赶？
-
-**W 劣势** — 基于 evidence_items 回答：
-1. 哪些劣势对该竞品影响最大？是功能缺口、定价问题还是运营短板？
-2. 该劣势是否正在被市场机会放大？
-3. 补充该劣势需要多大投入和多长时间？（可从公开信息推断）
-
-**O 机会** — 基于 analysis_claims 和 competitor_knowledge 回答：
-1. 对该竞品所在赛道，哪些是真正的结构性机会？会持续多久？
-2. 该竞品在利用这些机会上有什么优势或劣势？
-3. 有哪些机会是该竞品目前明显忽视或覆盖不足的？
-
-**T 威胁** — 基于 analysis_claims 和 evidence_items 回答：
-1. 哪些威胁对该竞品是致命的？
-2. 面对这些威胁，该竞品可能会怎么做？其他竞品在做什么？
-3. 如果无法规避，该竞品最可能的应对路径是什么？
-
-**信息不足的维度绝对不可用编造，不足的地方留白。**
+证据不足时某个象限可少于 3 条。只有整个象限在双方竞品上均无任何可引用证据时，才写"公开证据不足"。如果其中一个竞品有证据可写而另一竞品不足，优先写出有证据的竞品条目；不要在已有一条带 citation_ref 条目后再追加"公开证据不足"。
 
 ### TOWS 战略矩阵
 
-基于 SWOT 因子交叉配对，输出竞品战略推演矩阵：
+基于上述 SWOT 因子交叉配对，输出竞品战略推演矩阵：
 
 必须严格输出下面这个固定 TOWS 战略矩阵；不要改表头、不要改行名、不要新增列：
 
@@ -308,18 +291,20 @@ class ReportWriterAgent:
 | S 优势 | **SO 增长型**<br>1. ...<br>2. ... | **ST 多点型**<br>1. ...<br>2. ... |
 | W 劣势 | **WO 扭转型**<br>1. ...<br>2. ... | **WT 防御型**<br>1. ...<br>2. ... |
 
-只替换每个格子里的编号内容；每个格子输出 1-2 条具体战略推演，必须是可观察/可验证的动作，不能写空泛结论。
+每个格子输出 1-2 条具体战略推演（可观察/可验证的动作，不是空泛结论），绑定 citation_ref（可直接复用对应 SWOT 条目的引用）。
 
 示例（仅供参考格式与颗粒度）：
-假设 Context 中 S: “产品免费额度显著高于同类 [3]”，O: “中小企业对低成本工具的需求在增长 [5]”，则 SO 格应写为：
+假设 Context 中 S: "产品免费额度显著高于同类 [3]"，O: "中小企业对低成本工具的需求在增长 [5]"，则 SO 格应写为：
 > **SO 增长型**: 该竞品可能以当前免费额度为钩子，推出面向中小企业的付费升级方案，以低成本获客路径抢占增量市场。[3][5]
 不应写为：
 > ~~发挥免费优势，抓住中小企业市场机会。~~（空泛，不可验证）
 
-每条绑定 citation_ref。证据不足可以少于 2 条；如果已经有带 citation_ref 的推演，不要再追加“公开证据不足，无法推演”占位。只有整个格子没有任何可引用证据时，才写”公开证据不足，无法推演”。
+即使对应 SWOT 象限条目较少，仍应尽力推演。只有同格子的两个 SWOT 来源象限均为"公开证据不足"时，才写"公开证据不足，无法推演"。
+不允许一个格子里既有推演又有"公开证据不足"占位——要么全写推演，要么全写不足。
 
 ### 总结论述
-- 基于 TOWS 矩阵，输出一段综合结论。说明核心竞争差异、竞品下一步最可能的战略动作，以及被分析对象相对竞品的关键机会窗口或风险敞口。
+- 基于 TOWS 矩阵，输出 2-3 段综合结论。说明核心竞争差异、双方竞品各自下一步最可能的战略动作，以及各自相对对方的关键机会窗口和风险敞口。
+- 如果某个竞品证据偏少，在结论中如实说明，但仍基于已有证据给出可验证的判断。
 
 不要输出附录。附录将由系统基于 EvidenceItem 自动追加。
 所有重要判断必须绑定 citation_ref。不要使用 Context 之外的信息。不要把原始 evidence ID 当作正文引用输出。
@@ -358,6 +343,12 @@ class ReportWriterAgent:
             generation=generation,
         )
         opening = self._clean_opening_segment(opening)
+        if opening and not self._opening_has_expected_competitor_citations(
+            opening,
+            state,
+            citation_refs_by_evidence_id,
+        ):
+            opening = ""
         if not opening:
             generation["fallback_used"] = True
             opening = self._fallback_opening_chapters(
@@ -584,29 +575,29 @@ class ReportWriterAgent:
 
     def _dynamic_overview_prompt(self) -> str:
         return """
-请只基于 Context 输出第三章开头的“### 分析维度总览” Markdown 表格，不要输出任何其他章节。
+请只基于 Context 输出第三章开头的"### 分析维度总览" Markdown 表格，不要输出任何其他章节。
 
 要求：
-1. 第一行必须是“### 分析维度总览”。
+1. 第一行必须是"### 分析维度总览"。
 2. 由你根据 dynamic_analysis_sections、analysis_claims 和用户问题组织清单文字，不要套用预设产品维度模板。
 3. 推荐列：章节、动态维度、证据覆盖、主要竞品、主要引用。
 4. 章节编号和动态维度名称必须来自 dynamic_analysis_sections。
-5. 证据覆盖和主要引用必须基于 Context 中的 claim/citation_ref；没有引用就写“公开证据不足”。
+5. 证据覆盖和主要引用必须基于 Context 中的 claim/citation_ref；没有引用就写"公开证据不足"。
 """
 
     def _dynamic_section_prompt(self, section: dict[str, Any]) -> str:
         return f"""
-请只基于 Context 输出“{section['number']} {section['title']}”小节正文，不要输出章节标题。
+请只基于 Context 输出"{section['number']} {section['title']}"小节正文，不要输出章节标题。
 
 小节必须包含：
-1. 一个二维对比表格，固定采用“竞品横向、维度纵向”：第一列为“对比维度”，后续列为各竞品名称；不要输出“竞品/对象、结论、引用”这种长表。
+1. 一个二维对比表格，固定采用"竞品横向、维度纵向"：第一列为"对比维度"，后续列为各竞品名称；不要输出"竞品/对象、结论、引用"这种长表。
 2. 一段对应的分析文字。
 3. 表格或段落中保留相关 citation_ref，例如 [1]。
 4. 只要 Context 中存在与本动态维度相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
-5. 对间接公开证据生成的结论要保持保守表述，例如“公开资料显示”“间接证据显示”“尚不足以确认完整细节”。
-6. 如果 claim 带有 specificity_hints，表格中的竞品单元格或紧随其后的分析文字至少使用其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要把这些细节压成“多种能力”“能力体系”“产品矩阵”“相关信号”等概述性描述。
-7. 对比表行必须拆成本小节下的 3-6 个共同对比口径；如果本小节只有极少 claim，才允许少于 3 行。不要只输出一行“{section['title']}”大而全汇总。
-8. 每个竞品单元格分别概括该竞品在该口径下已有引用 claim。不要把每条 claim 拆成“竞品/对象、结论、引用”的纵向列表。
+5. 对间接公开证据生成的结论要保持保守表述，例如"公开资料显示""间接证据显示""尚不足以确认完整细节"。
+6. 如果 claim 带有 specificity_hints，表格中的竞品单元格或紧随其后的分析文字至少使用其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要把这些细节压成"多种能力""能力体系""产品矩阵""相关信号"等概述性描述。
+7. 对比表行必须拆成本小节下的 3-6 个共同对比口径；如果本小节只有极少 claim，才允许少于 3 行。不要只输出一行"{section['title']}"大而全汇总。
+8. 每个竞品单元格分别概括该竞品在该口径下已有引用 claim。不要把每条 claim 拆成"竞品/对象、结论、引用"的纵向列表。
 9. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
 
 表格示例格式：
@@ -627,22 +618,26 @@ class ReportWriterAgent:
 ## 第四章：总结
 
 ### SWOT 因素矩阵
-必须严格输出下面这个固定 2×2 SWOT 因素矩阵；不要改表头、不要改行名、不要新增列。只替换每个格子里的编号内容：
+
+基于 Context 中的 analysis_claims 和 evidence_items 对主要竞品做综合分析，输出固定 2×2 SWOT 因素矩阵；不要改表头、不要改行名、不要新增列。只替换每个格子里的编号内容：
 
 |  | 正向因素 | 负向因素 |
 | --- | --- | --- |
 | 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
 | 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
 
-每个象限最多 3-5 条，绑定 citation_ref。证据不足可以少于 3 条；如果已经有带 citation_ref 的条目，不要再追加“公开证据不足”占位。只有整个象限没有任何可引用证据时，才在该象限格子中写“公开证据不足”。需覆盖以下追问：
-- S: 核心优势是什么？差距多大？能维持多久？
-- W: 哪些劣势影响最大？是否被机会放大？
-- O: 哪些是结构性机会？竞品是否忽视？
-- T: 哪些威胁致命？竞品可能的应对路径？
+每个象限必须覆盖双方竞品，在条目中明确提及竞品名。每个象限最多 3-5 条，每条绑定 citation_ref。
+
+S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
+- **W 劣势来源**：竞品间功能/定价/覆盖面的横向差距（用竞品 A 的 S 反推竞品 B 的 W）；用户反馈或评测中明确指出的不足；公开报道中提及的产品/运营短板；履约或服务体系的缺口
+- **T 威胁来源**：竞品正在推进的战略动作或产品迭代；行业政策、合规要求或监管变化；技术路线替代或架构变化的风险；市场格局或客户偏好迁移的信号
+- W 和 T 的每一条都必须使用 citation_ref 绑定证据原文——即使证据原文没有出现"劣势""威胁"字样，只要能从证据中合理推导即可。例如：从"竞品 A 已支持 X 功能 [1]"推导竞品 B 在 X 功能上的缺口，引用 [1]
+
+证据不足时某个象限可少于 3 条。只有整个象限在双方竞品上均无任何可引用证据时，才写"公开证据不足"。如果其中一个竞品有证据可写而另一竞品不足，优先写出有证据的竞品条目；不要在已有一条带 citation_ref 条目后再追加"公开证据不足"。
 
 ### TOWS 战略矩阵
 
-基于 SWOT 因子交叉配对，输出 TOWS 战略矩阵（SO 增长型 / WO 扭转型 / ST 多点型 / WT 防御型）。
+基于上述 SWOT 因子交叉配对，输出 TOWS 战略矩阵（SO 增长型 / WO 扭转型 / ST 多点型 / WT 防御型）。
 必须严格输出下面这个固定 TOWS 战略矩阵；不要改表头、不要改行名、不要新增列。只替换每个格子里的编号内容：
 
 |  | O 机会 | T 威胁 |
@@ -650,13 +645,15 @@ class ReportWriterAgent:
 | S 优势 | **SO 增长型**<br>1. ...<br>2. ... | **ST 多点型**<br>1. ...<br>2. ... |
 | W 劣势 | **WO 扭转型**<br>1. ...<br>2. ... | **WT 防御型**<br>1. ...<br>2. ... |
 
-每个格子最多 1-2 条具体战略推演（可观察的动作，不是空泛结论），绑定 citation_ref。
-如果已有带 citation_ref 的推演，不要再追加"公开证据不足，无法推演"占位；只有整个格子没有任何可引用证据时才写"公开证据不足，无法推演"。
+每个格子输出 1-2 条具体战略推演（可观察/可验证的动作，不是空泛结论），绑定 citation_ref（可直接复用对应 SWOT 条目的引用）。
+即使对应 SWOT 象限条目较少，仍应尽力推演。只有同格子的两个 SWOT 来源象限均为"公开证据不足"时，才写"公开证据不足，无法推演"。
+不允许一个格子里既有推演又有"公开证据不足"占位——要么全写推演，要么全写不足。
 
 ### 总结论述
-- 输出一段综合结论，说明核心竞争差异、竞品下一步最可能的战略动作及关键机会窗口。
+- 基于 TOWS 矩阵，输出 2-3 段综合结论。说明核心竞争差异、双方竞品各自下一步最可能的战略动作，以及各自相对对方的关键机会窗口和风险敞口。
+- 如果某个竞品证据偏少，在结论中如实说明"该竞品公开披露较少"，但仍基于已有证据给出可验证的判断。
 
-如果 Context 中的 claim 带有 specificity_hints，SWOT/TOWS/总结论述应优先保留模块名、数字、版本、报告/认证名称或业务场景，不要只写“能力体系”“多种能力”“相关信号”等概述词。
+如果 Context 中的 claim 带有 specificity_hints，SWOT/TOWS/总结论述应优先保留模块名、数字、版本、报告/认证名称或业务场景，不要只写"能力体系""多种能力""相关信号"等概述词。
 必须保留可用的 citation_ref，例如 [1]。不要输出附录。
 """
 
@@ -665,6 +662,31 @@ class ReportWriterAgent:
             (report or "").strip(),
             ("## 第三章", "## 第四章", "## 附录"),
         ).strip()
+
+    def _opening_has_expected_competitor_citations(
+        self,
+        opening: str,
+        state: CompetitorAnalysisState,
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> bool:
+        task = state.get("task", {})
+        competitors = state.get("competitors") or task.get("competitors", [])
+        expected_ref_sets = []
+        for competitor in competitors:
+            if not isinstance(competitor, dict):
+                continue
+            refs = self._citation_refs_for_evidence_ids(
+                competitor.get("evidence_ids", []),
+                citation_refs_by_evidence_id,
+            )
+            if refs:
+                expected_ref_sets.append(refs)
+        if not expected_ref_sets:
+            return True
+        return all(
+            any(ref in opening for ref in refs)
+            for refs in expected_ref_sets
+        )
 
     def _clean_summary_segment(self, report: str) -> str:
         segment = (report or "").strip()
@@ -677,6 +699,10 @@ class ReportWriterAgent:
         if not self._has_fixed_summary_matrices(segment):
             return ""
         if self._has_mixed_summary_gap_placeholder(segment):
+            return ""
+        if self._has_uncited_summary_matrix_content(segment):
+            return ""
+        if self._has_bad_tows_wt_pair(segment):
             return ""
         return segment
 
@@ -702,6 +728,11 @@ class ReportWriterAgent:
             "公开资料不足",
             "有效证据不足",
             "证据不足",
+            "缺少公开证据",
+            "未明确提及",
+            "未发现",
+            "未检索到",
+            "未披露",
         )
         for line in (report or "").splitlines():
             stripped = line.strip()
@@ -713,6 +744,76 @@ class ReportWriterAgent:
                 ):
                     return True
         return False
+
+    def _has_uncited_summary_matrix_content(self, report: str) -> bool:
+        import re
+
+        citation_pattern = re.compile(r"\[\d+\]")
+        matrix_labels = (
+            "**S 优势**",
+            "**W 劣势**",
+            "**O 机会**",
+            "**T 威胁**",
+            "**SO 增长型**",
+            "**ST 多点型**",
+            "**WO 扭转型**",
+            "**WT 防御型**",
+        )
+        for line in (report or "").splitlines():
+            stripped = line.strip()
+            if not self._is_markdown_table_row(stripped):
+                continue
+            for cell in self._markdown_row_cells(stripped):
+                if not any(label in cell for label in matrix_labels):
+                    continue
+                if citation_pattern.search(cell):
+                    continue
+                if self._summary_gap_only_cell(cell):
+                    continue
+                return True
+        return False
+
+    def _has_bad_tows_wt_pair(self, report: str) -> bool:
+        import re
+
+        for line in (report or "").splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("| W 劣势 |"):
+                continue
+            cells = self._markdown_row_cells(stripped)
+            if len(cells) < 3:
+                continue
+            wt_cell = cells[2]
+            if self._summary_gap_only_cell(wt_cell):
+                continue
+            if re.search(r"\b(?:SO|ST|WO)\d*\b", wt_cell):
+                return True
+        return False
+
+    def _summary_gap_only_cell(self, cell: str) -> bool:
+        import re
+
+        if re.search(r"\[\d+\]", cell or ""):
+            return False
+        allowed = {
+            "公开证据不足",
+            "公开资料不足",
+            "有效证据不足",
+            "证据不足",
+            "公开证据不足无法推演",
+            "公开证据不足，无法推演",
+        }
+        value = re.sub(r"\*\*[^*]+\*\*", "", str(cell or ""))
+        parts = re.split(r"<br\s*/?>", value, flags=re.IGNORECASE)
+        meaningful_parts = []
+        for part in parts:
+            normalized = re.sub(r"^\s*\d+[.、]\s*", "", part.strip())
+            normalized = normalized.strip(" 。；;，,：:")
+            if normalized:
+                meaningful_parts.append(normalized)
+        if not meaningful_parts:
+            return False
+        return all(part in allowed for part in meaningful_parts)
 
     def _clean_dynamic_section_body(self, report: str) -> str:
         body = self._strip_leading_markdown_heading(report)
@@ -1158,7 +1259,52 @@ class ReportWriterAgent:
         claims: list[dict[str, Any]],
         evidence_items: list[dict[str, Any]],
     ) -> str:
-        evidence_ids = " ".join(self._ordered_evidence_ids(claims, evidence_items)[:3]) or "无"
+        evidence_ids = " ".join(self._ordered_evidence_ids(claims, evidence_items)[:3])
+        strength_cell = (
+            f"已采集证据显示竞品在核心协作能力、差异化场景方面具备可追溯优势。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足"
+        )
+        weakness_cell = (
+            f"部分维度公开披露有限，竞品间横向对比存在信息缺口；需补充采集后进一步确认。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足"
+        )
+        opportunity_cell = (
+            f"可围绕证据充分的差异化维度进一步定位，结合行业数字化趋势寻找增量空间。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足"
+        )
+        threat_cell = (
+            f"竞品战略动作和市场格局变化可能形成竞争压力，需持续跟踪关键信号。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足"
+        )
+        so_cell = (
+            f"竞品可能以已验证优势领域为核心扩展增量市场，通过标杆案例复用到同行业客户。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足，无法推演"
+        )
+        st_cell = (
+            f"竞品可依托核心优势维持客户粘性，同时监测外部威胁变化以调整策略重心。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足，无法推演"
+        )
+        wo_cell = (
+            f"竞品可通过补齐公开披露薄弱环节，抓住行业需求窗口期扭转信息不对称劣势。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足，无法推演"
+        )
+        wt_cell = (
+            f"竞品需在证据薄弱领域加强信息采集与风险预判，防止关键维度出现竞争盲区。{evidence_ids}"
+            if evidence_ids
+            else "公开证据不足，无法推演"
+        )
+        conclusion = (
+            f"整体来看，当前报告优先呈现已有证据支持的竞争差异；对公开资料不足的维度建议补充采集后迭代更新。{evidence_ids}"
+            if evidence_ids
+            else "整体来看，当前公开证据不足，需补充采集或人工校验后再形成总结判断。"
+        )
         return "\n".join(
             [
                 "## 第四章：总结",
@@ -1167,19 +1313,19 @@ class ReportWriterAgent:
                 "",
                 "|  | 正向因素 | 负向因素 |",
                 "| --- | --- | --- |",
-                f"| 内部 | **S 优势**<br>1. 基于已接受证据的综合判断。{evidence_ids} | **W 劣势**<br>1. 未覆盖或证据不足的维度需继续补充。 |",
-                f"| 外部 | **O 机会**<br>1. 可围绕证据充分的差异化维度进一步定位。{evidence_ids} | **T 威胁**<br>1. 竞品已有公开信号可能形成竞争压力。{evidence_ids} |",
+                f"| 内部 | **S 优势**<br>1. {strength_cell} | **W 劣势**<br>1. {weakness_cell} |",
+                f"| 外部 | **O 机会**<br>1. {opportunity_cell} | **T 威胁**<br>1. {threat_cell} |",
                 "",
                 "### TOWS 战略矩阵",
                 "",
                 "|  | O 机会 | T 威胁 |",
                 "| --- | --- | --- |",
-                f"| S 优势 | **SO 增长型**<br>1. 竞品可能以优势领域为核心扩展增量市场。{evidence_ids} | **ST 多点型**<br>1. 竞品可能通过多线布局对冲外部风险。{evidence_ids} |",
-                "| W 劣势 | **WO 扭转型**<br>1. 竞品可能借市场机会调整弱势领域。 | **WT 防御型**<br>1. 竞品弱势领域在外部压力下可能成为突破口。 |",
+                f"| S 优势 | **SO 增长型**<br>1. {so_cell} | **ST 多点型**<br>1. {st_cell} |",
+                f"| W 劣势 | **WO 扭转型**<br>1. {wo_cell} | **WT 防御型**<br>1. {wt_cell} |",
                 "",
                 "### 总结论述",
                 "",
-                "整体来看，当前报告优先呈现已有证据支持的竞争差异；对公开资料不足的维度，结论保持保守，并在附录中保留信息索引以便复核。",
+                conclusion,
             ]
         )
 
@@ -1549,6 +1695,14 @@ class ReportWriterAgent:
         claim_support_reviews: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         if not claim_support_reviews:
+            if any(claim.get("support_status") for claim in claims):
+                return [
+                    claim
+                    for claim in claims
+                    if claim.get("support_status") == "supported"
+                    and claim.get("support_recommended_action", "accept")
+                    in {"", "accept"}
+                ]
             return claims
         review_by_claim = {
             review.get("claim_id", ""): review
@@ -1718,7 +1872,7 @@ class ReportWriterAgent:
                     "title": title,
                     "guiding_question": (
                         str(meta.get("description") or "").strip()
-                        or f"基于已有公开证据，对比竞品在“{title}”维度上的表现、差异和可验证信号。"
+                        or f"基于已有公开证据，对比竞品在\N{LEFT DOUBLE QUOTATION MARK}{title}\N{RIGHT DOUBLE QUOTATION MARK}维度上的表现、差异和可验证信号。"
                     ),
                     "source_dimension_ids": [dimension_id],
                     "competitors": self._section_competitors(

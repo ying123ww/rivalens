@@ -291,12 +291,21 @@ class CoverageReviewer:
                 else SourceGapDecision.model_validate(raw_decision)
             )
         except ValueError as exc:
-            review["status"] = (
-                "not_configured"
-                if "not configured" in str(exc).lower()
-                else "failed"
-            )
+            not_configured = "not configured" in str(exc).lower()
+            review["status"] = "not_configured" if not_configured else "failed"
             review["error"] = str(exc)
+            if not_configured:
+                review["mode"] = "rule_fallback"
+                return await self._rule_based_source_gap_assessment(
+                    branch=branch,
+                    accepted_evidence=accepted_evidence,
+                    accepted_count=accepted_count,
+                    minimum_count=minimum_count,
+                    found_source_types=found_source_types,
+                    source_preferences=source_preferences,
+                    source_metrics=source_metrics,
+                    review=review,
+                )
             return {"gaps": [], "review": review}
         except Exception as exc:
             review["status"] = "failed"
@@ -697,6 +706,116 @@ class CoverageReviewer:
             )
         )
 
+    async def _rule_based_source_gap_assessment(
+        self,
+        *,
+        branch: ResearchBranch,
+        accepted_evidence: list[dict[str, Any]],
+        accepted_count: int,
+        minimum_count: int,
+        found_source_types: list[str],
+        source_preferences: list[str],
+        source_metrics: SourceMetrics,
+        review: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Rule-based source coverage assessment when no LLM advisor is configured.
+
+        Checks source type diversity, domain diversity, and evidence count
+        against minimum thresholds to decide whether to open a source gap.
+        """
+        gaps: list[dict[str, Any]] = []
+
+        unique_domains = source_metrics.get("unique_domain_count", 0)
+        independent_count = source_metrics.get("independent_source_count", 0)
+        unique_source_types = len(set(found_source_types)) if found_source_types else 0
+        preferred_missing = [
+            st for st in source_preferences
+            if st not in set(found_source_types)
+        ]
+
+        # ── gap 1: count too low ──
+        if accepted_count < minimum_count and accepted_evidence:
+            gaps.append(self._source_gap(
+                f"rule_count_below_minimum_{accepted_count}_of_{minimum_count}",
+                f"Only {accepted_count} accepted source(s) — need {minimum_count}.",
+                source_preferences or ["official_site", "news", "review"],
+                accepted_count,
+                minimum_count,
+                blocking=True,
+                reason=(
+                    f"Accepted evidence count ({accepted_count}) is below "
+                    f"the minimum ({minimum_count})."
+                ),
+                expected_improvement=(
+                    f"Searching for additional public sources should raise "
+                    f"accepted count to at least {minimum_count}."
+                ),
+                confidence=0.9,
+            ))
+
+        # ── gap 2: single source type only ──
+        if unique_source_types <= 1 and accepted_count >= 2:
+            target_types = preferred_missing[:3] or ["news", "review", "official_site"]
+            gaps.append(self._source_gap(
+                "rule_single_source_type",
+                "Only one source type found — diversify sources.",
+                target_types,
+                accepted_count,
+                minimum_count,
+                blocking=False,
+                reason=(
+                    f"Found source types: {found_source_types}. "
+                    "A single source type risks bias; need at least 2 types."
+                ),
+                expected_improvement="Adding a second source type improves traceability.",
+                confidence=0.8,
+            ))
+
+        # ── gap 3: no independent source ──
+        if independent_count == 0 and accepted_count >= 2:
+            gaps.append(self._source_gap(
+                "rule_no_independent_source",
+                "Search for independent third-party coverage.",
+                ["news", "review", "analyst_report", "academic"],
+                accepted_count,
+                minimum_count,
+                blocking=False,
+                reason="No independent (non-official) sources found.",
+                expected_improvement="Independent sources add authority and reduce bias.",
+                confidence=0.85,
+            ))
+
+        # ── gap 4: single domain only ──
+        if unique_domains <= 1 and accepted_count >= 2:
+            gaps.append(self._source_gap(
+                "rule_single_domain",
+                "All evidence from one domain — search for other publishers.",
+                preferred_missing[:3] or ["news", "review"],
+                accepted_count,
+                minimum_count,
+                blocking=False,
+                reason=f"Only {unique_domains} unique domain(s).",
+                expected_improvement="Multiple domains improve source independence.",
+                confidence=0.85,
+            ))
+
+        # ── gap 5: preferred source types completely missing ──
+        if preferred_missing and accepted_count >= minimum_count:
+            gaps.append(self._source_gap(
+                "rule_missing_preferred_types",
+                f"Preferred source types not found: {', '.join(preferred_missing[:3])}.",
+                preferred_missing[:3],
+                accepted_count,
+                minimum_count,
+                blocking=False,
+                reason=f"Missing preferred types: {', '.join(preferred_missing[:3])}.",
+                expected_improvement="Targeted search for preferred source types.",
+                confidence=0.7,
+            ))
+
+        review["gaps_found"] = len(gaps)
+        return {"gaps": gaps, "review": review}
+
     def _slug(self, value: str) -> str:
         slug = "".join(
             character.lower() if character.isalnum() else "_"
@@ -711,7 +830,7 @@ class CoverageReviewer:
                 return max(1, int(raw_count))
             except (TypeError, ValueError):
                 pass
-        return 2
+        return 4
 
     def fallback_target_source_types(self, branch: ResearchBranch) -> list[str]:
         source_hints = [
