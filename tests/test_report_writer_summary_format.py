@@ -97,6 +97,84 @@ def test_clean_summary_segment_rejects_mixed_gap_fillers():
     assert ReportWriterAgent()._clean_summary_segment(mixed_summary) == ""
 
 
+def test_clean_summary_segment_rejects_cited_soft_gap_fillers():
+    soft_gap_summary = """
+## 第四章：总结
+
+### SWOT 因素矩阵
+
+|  | 正向因素 | 负向因素 |
+| --- | --- | --- |
+| 内部 | **S 优势**<br>1. 飞书项目支持 50 天免费试用。[1]<br>2. 公开证据中未明确提及钉钉在此维度的标杆客户案例。[2] | **W 劣势**<br>1. 公开证据不足。 |
+| 外部 | **O 机会**<br>1. AI 协同仍有结构性机会。[2] | **T 威胁**<br>1. 跨界 SaaS 竞争可能分流客户。[3] |
+
+### TOWS 战略矩阵
+
+|  | O 机会 | T 威胁 |
+| --- | --- | --- |
+| S 优势 | **SO 增长型**<br>1. 依托飞书项目扩展 AI 项目管理方案。[1][2] | **ST 多点型**<br>1. 用项目管理深度绑定核心客户。[1][3] |
+| W 劣势 | **WO 扭转型**<br>1. 公开证据不足，无法推演。 | **WT 防御型**<br>1. 公开证据不足，无法推演。 |
+
+### 总结论述
+
+格式不应被接受。
+"""
+
+    assert ReportWriterAgent()._clean_summary_segment(soft_gap_summary) == ""
+
+
+def test_clean_summary_segment_rejects_uncited_soft_gap_cells():
+    uncited_gap_summary = """
+## 第四章：总结
+
+### SWOT 因素矩阵
+
+|  | 正向因素 | 负向因素 |
+| --- | --- | --- |
+| 内部 | **S 优势**<br>1. 飞书项目支持 50 天免费试用。[1] | **W 劣势**<br>1. 飞书：公开证据中未明确提及针对其内部劣势的具体描述。 |
+| 外部 | **O 机会**<br>1. AI 协同仍有结构性机会。[2] | **T 威胁**<br>1. 跨界 SaaS 竞争可能分流客户。[3] |
+
+### TOWS 战略矩阵
+
+|  | O 机会 | T 威胁 |
+| --- | --- | --- |
+| S 优势 | **SO 增长型**<br>1. 依托飞书项目扩展 AI 项目管理方案。[1][2] | **ST 多点型**<br>1. 用项目管理深度绑定核心客户。[1][3] |
+| W 劣势 | **WO 扭转型**<br>1. 公开证据不足，无法推演。 | **WT 防御型**<br>1. 公开证据不足，无法推演。 |
+
+### 总结论述
+
+格式不应被接受。
+"""
+
+    assert ReportWriterAgent()._clean_summary_segment(uncited_gap_summary) == ""
+
+
+def test_clean_summary_segment_rejects_wt_using_st_pair():
+    bad_wt_summary = """
+## 第四章：总结
+
+### SWOT 因素矩阵
+
+|  | 正向因素 | 负向因素 |
+| --- | --- | --- |
+| 内部 | **S 优势**<br>1. 飞书项目支持 50 天免费试用。[1] | **W 劣势**<br>1. 产品迁移成本较高。[2] |
+| 外部 | **O 机会**<br>1. AI 协同仍有结构性机会。[3] | **T 威胁**<br>1. 跨界 SaaS 竞争可能分流客户。[4] |
+
+### TOWS 战略矩阵
+
+|  | O 机会 | T 威胁 |
+| --- | --- | --- |
+| S 优势 | **SO 增长型**<br>1. 依托飞书项目扩展 AI 项目管理方案。[1][3] | **ST 多点型**<br>1. 用项目管理深度绑定核心客户。[1][4] |
+| W 劣势 | **WO 扭转型**<br>1. 通过 AI 协同机会降低迁移成本。[2][3] | **WT 防御型**<br>1. 沿用 ST1 的客户绑定动作缓解迁移风险。[2][4] |
+
+### 总结论述
+
+格式不应被接受。
+"""
+
+    assert ReportWriterAgent()._clean_summary_segment(bad_wt_summary) == ""
+
+
 def test_fallback_summary_uses_fixed_matrix_contract():
     summary = ReportWriterAgent()._fallback_summary_chapter(
         claims=[{"evidence_ids": ["ev_1"]}],
@@ -106,6 +184,30 @@ def test_fallback_summary_uses_fixed_matrix_contract():
     assert ReportWriterAgent()._has_fixed_summary_matrices(summary)
     assert "|  | 正向因素 | 负向因素 |" in summary
     assert "| W 劣势 | **WO 扭转型**" in summary
+    assert "竞品弱势领域在外部压力下可能成为突破口" not in summary
+    assert "**WT 防御型**<br>1. 公开证据不足，无法推演" in summary
+
+
+def test_opening_segment_requires_profile_refs_for_each_competitor():
+    writer = ReportWriterAgent()
+    state = {
+        "competitors": [
+            {"name": "飞书", "evidence_ids": ["ev_feishu"]},
+            {"name": "钉钉", "evidence_ids": ["ev_dingtalk"]},
+        ]
+    }
+    refs = {"ev_feishu": "[1]", "ev_dingtalk": "[2]"}
+
+    assert not writer._opening_has_expected_competitor_citations(
+        "## 第二章：确定竞品\n\n飞书主要引用 [1]，钉钉主要引用 []。",
+        state,
+        refs,
+    )
+    assert writer._opening_has_expected_competitor_citations(
+        "## 第二章：确定竞品\n\n飞书主要引用 [1]，钉钉主要引用 [2]。",
+        state,
+        refs,
+    )
 
 
 def test_dynamic_section_body_requires_refs_for_each_claim_competitor():

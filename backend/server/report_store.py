@@ -227,6 +227,7 @@ _FIXED_KEYS = frozenset({
 
 def _report_to_row(report_id: str, report: dict[str, Any]) -> dict[str, Any]:
     """Split a flat report dict into fixed columns + ``data`` JSONB payload."""
+    report = dict(report)
 
     def _pop(key: str, default: Any = None) -> Any:
         v = report.get(key, default)
@@ -240,7 +241,7 @@ def _report_to_row(report_id: str, report: dict[str, Any]) -> dict[str, Any]:
         "trace_summary", "assessments", "evidence_index",
         "analysis_claims", "claim_support_reviews", "competitor_knowledge", "state",
         "research_information", "research_costs", "visited_urls",
-        "research_images",
+        "research_images", "celery_task_id",
     ):
         if key in report:
             data[key] = report.pop(key)

@@ -257,6 +257,23 @@ def _get_websocket_send_lock(websocket: Any | None) -> asyncio.Lock:
     return lock
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _request_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 async def _safe_websocket_send_json(websocket, data: Dict[str, Any]) -> bool:
     try:
         async with _get_websocket_send_lock(websocket):
@@ -464,6 +481,67 @@ async def handle_start_command(
     })
     await upsert_run_report("running")
 
+    use_celery = (
+        _request_flag(json_data.get("use_celery"))
+        or _request_flag(json_data.get("generate_in_background"))
+        or _env_flag("RIVALENS_WS_CELERY_ENABLED", default=False)
+    )
+    if use_celery:
+        try:
+            from backend.server.celery_tasks import generate_report_task
+
+            research_request = {
+                "task": task,
+                "report_type": report_type,
+                "report_source": report_source,
+                "tone": tone,
+                "headers": headers,
+                "source_urls": source_urls or [],
+                "document_urls": document_urls or [],
+                "query_domains": query_domains or [],
+                "mcp_enabled": bool(mcp_enabled),
+                "mcp_strategy": mcp_strategy,
+                "mcp_configs": mcp_configs or [],
+                "max_search_results": max_search_results,
+                "industry_direction_plan": industry_direction_plan,
+                "user_id": user_id,
+            }
+            async_result = generate_report_task.delay(research_request, research_id)
+            celery_task_id = str(async_result.id)
+            await logs_handler.send_json(
+                {
+                    "type": "logs",
+                    "content": "task_queued",
+                    "output": f"Run {research_id} queued for Celery worker.",
+                    "metadata": {
+                        "research_id": research_id,
+                        "status": "queued",
+                        "celery_task_id": celery_task_id,
+                    },
+                }
+            )
+            await logs_handler.send_json(
+                {
+                    "type": "path",
+                    "output": {
+                        "research_id": research_id,
+                        "status": "queued",
+                        "celery_task_id": celery_task_id,
+                    },
+                }
+            )
+            await logs_handler.flush_log_batch()
+            await upsert_run_report(
+                "queued",
+                structured_response={"celery_task_id": celery_task_id},
+            )
+            return
+        except Exception:
+            logger.exception(
+                "Failed to enqueue WebSocket Celery report generation task %s; falling back",
+                research_id,
+            )
+
     async def send_progress_heartbeat() -> None:
         heartbeat_interval = logs_handler._env_int(
             "RIVALENS_WS_HEARTBEAT_INTERVAL_SECONDS",
@@ -630,6 +708,7 @@ async def handle_chat_command(websocket, data: str):
         })
 
 async def send_file_paths(websocket, file_paths: Dict[str, str]):
+    logger.info("Sending file paths to client: %s", {k: v for k, v in file_paths.items()})
     await websocket.send_json({"type": "path", "output": file_paths})
 
 
@@ -639,6 +718,7 @@ def _structured_report_store_fields(
 ) -> Dict[str, Any]:
     fields: Dict[str, Any] = {}
     for key in (
+        "celery_task_id",
         "run_id",
         "research_information",
         "trace_summary",

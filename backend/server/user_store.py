@@ -143,6 +143,30 @@ class UserStore:
             )
         return self.get_user_by_id(normalized_id)
 
+    def update_user_profile(
+        self,
+        user_id: str | UUID,
+        *,
+        display_name: str,
+    ) -> dict | None:
+        try:
+            normalized_id = (
+                user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+            )
+        except ValueError:
+            return None
+
+        now = _utcnow()
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(users)
+                .where(users.c.id == normalized_id)
+                .values(display_name=display_name, updated_at=now)
+            )
+        if result.rowcount < 1:
+            return None
+        return self.get_user_by_id(normalized_id)
+
 
 def _sqlalchemy_database_url(database_url: str) -> str:
     if database_url.startswith("postgresql://"):

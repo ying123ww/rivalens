@@ -13,8 +13,8 @@ const inter = Lexend({ subsets: ["latin"] });
 let title = "Rivalens";
 let description =
   "LLM based autonomous agent that conducts local and web research on any topic and generates a comprehensive report with citations.";
-let url = "https://github.com/rivalens/rivalens";
-let ogimage = "/favicon.ico";
+let url = "https://github.com/ying123ww/rivalens";
+let ogimage = "/img/messi.JPG";
 let sitename = "Rivalens";
 
 export const metadata: Metadata = {
@@ -23,8 +23,8 @@ export const metadata: Metadata = {
   description,
   manifest: '/manifest.json',
   icons: {
-    icon: "/img/agents/defaultAgentAvatar.JPG",
-    apple: '/img/agents/defaultAgentAvatar.JPG',
+    icon: "/img/messi.JPG",
+    apple: '/img/messi.JPG',
   },
   appleWebApp: {
     capable: true,
@@ -69,7 +69,7 @@ export default function RootLayout({
         <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID!} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <link rel="apple-touch-icon" href="/img/agents/defaultAgentAvatar.JPG" />
+        <link rel="apple-touch-icon" href="/img/messi.JPG" />
       </head>
       <body
         className={`app-container ${inter.className} flex min-h-screen flex-col justify-between`}

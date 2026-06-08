@@ -58,6 +58,56 @@ class FakeConcurrentClaimWriter:
             self.active_count -= 1
 
 
+class FakeKnowledgeFactExtractor:
+    provider = "fake"
+    model = "fake-knowledge"
+    concurrency = 2
+    timeout_seconds = 7
+    batch_size = 2
+    max_batches = 3
+
+    def is_configured(self) -> bool:
+        return True
+
+    async def extract_facts(self, *, evidence_items, rule_facts):
+        return {
+            "facts": [
+                {
+                    "evidence_ids": ["ev_ai"],
+                    "competitor": "Acme",
+                    "analysis_dimension_id": "core_product_supply",
+                    "fact_type": "feature_presence",
+                    "subject": "Acme AI assistant",
+                    "predicate": "describes",
+                    "object": "Acme AI assistant extracts action items from meeting summaries.",
+                    "statement": "Acme AI assistant extracts action items from meeting summaries.",
+                    "confidence": 0.82,
+                },
+                {
+                    "evidence_ids": ["missing_ev"],
+                    "competitor": "Acme",
+                    "analysis_dimension_id": "core_product_supply",
+                    "fact_type": "feature_presence",
+                    "object": "Invalid evidence binding should be rejected.",
+                },
+            ],
+            "metadata": {
+                "llm_batch_count": 1,
+                "llm_success_count": 1,
+                "llm_failed_count": 0,
+                "llm_fallback_count": 0,
+                "llm_generated_fact_count": 2,
+                "llm_prompt_chars": 456,
+                "llm_cost": 0.02,
+            },
+        }
+
+
+class FailingKnowledgeFactExtractor(FakeKnowledgeFactExtractor):
+    async def extract_facts(self, *, evidence_items, rule_facts):
+        raise RuntimeError("fake knowledge LLM failure")
+
+
 def _combined_pricing_evidence():
     return [
         {
@@ -199,6 +249,70 @@ def test_knowledge_structuring_uses_rule_extractor_metadata():
     assert facts[0]["subject"] == "Acme Pricing Model"
     assert facts[0]["evidence_ids"] == ["ev_1"]
     assert facts[0]["normalized_key"]
+
+
+def test_knowledge_structuring_llm_fact_extractor_merges_valid_candidates():
+    agent = KnowledgeStructuringAgent(fact_extractor=FakeKnowledgeFactExtractor())
+    evidence = [
+        {
+            "id": "ev_ai",
+            "competitor": "Acme",
+            "analysis_dimension_id": "core_product_supply",
+            "dimension_name": "Core Product Supply",
+            "source_type": "docs",
+            "title": "Acme AI assistant",
+            "excerpt": "Acme describes an AI assistant for meeting summaries and extracts action items.",
+            "url": "https://acme.example/ai",
+            "confidence": 0.9,
+        }
+    ]
+
+    facts, metadata = asyncio.run(
+        agent._build_knowledge_facts_with_metadata_async(evidence)
+    )
+
+    assert metadata["source"] == "rule+llm"
+    assert metadata["llm_configured"] is True
+    assert metadata["llm_concurrency"] == 2
+    assert metadata["llm_timeout_seconds"] == 7
+    assert metadata["llm_batch_size"] == 2
+    assert metadata["llm_batch_cap"] == 3
+    assert metadata["llm_valid_fact_count"] == 1
+    assert metadata["llm_invalid_fact_count"] == 1
+    assert metadata["llm_invalid_evidence_id_count"] == 1
+    assert any(
+        (fact.get("qualifiers", {}) or {}).get("source") == "llm_fact_extraction"
+        for fact in facts
+    )
+    assert all(
+        evidence_id == "ev_ai"
+        for fact in facts
+        for evidence_id in fact.get("evidence_ids", [])
+    )
+
+
+def test_knowledge_structuring_llm_fact_extractor_falls_back_to_rules():
+    agent = KnowledgeStructuringAgent(fact_extractor=FailingKnowledgeFactExtractor())
+    evidence = [
+        {
+            "id": "ev_ai",
+            "competitor": "Acme",
+            "analysis_dimension_id": "core_product_supply",
+            "source_type": "docs",
+            "title": "Acme AI assistant",
+            "excerpt": "Acme describes an AI assistant for meeting summaries.",
+            "confidence": 0.9,
+        }
+    ]
+
+    facts, metadata = asyncio.run(
+        agent._build_knowledge_facts_with_metadata_async(evidence)
+    )
+
+    assert metadata["source"] == "rule"
+    assert metadata["llm_failed_count"] == 1
+    assert metadata["llm_fallback_count"] == 1
+    assert len(facts) == metadata["knowledge_fact_count"]
 
 
 def test_knowledge_structuring_builds_fact_packages_by_competitor_dimension():
@@ -1413,6 +1527,42 @@ def test_high_risk_claim_without_knowledge_fact_requires_revision_only():
     assert review["support_status"] == "weak"
     assert review["recommended_action"] == "revise"
     assert review["suggested_revision"]
+
+
+def test_evidence_only_medium_claim_is_limited_and_not_written():
+    reviewer = ClaimSupportReviewer()
+    claim = {
+        "id": "claim_feature",
+        "analysis_dimension_id": "core_product_supply",
+        "claim_type": "capability_signal",
+        "claim_risk_level": "medium",
+        "claim": "Acme describes an AI assistant for meeting summaries.",
+        "competitors": ["Acme"],
+        "evidence_ids": ["ev_1"],
+        "confidence": 0.8,
+    }
+    state = {
+        "analysis_claims": [claim],
+        "evidence_items": [
+            {
+                "id": "ev_1",
+                "competitor": "Acme",
+                "analysis_dimension_id": "core_product_supply",
+                "title": "Acme AI assistant",
+                "excerpt": "Acme describes an AI assistant for meeting summaries.",
+                "url": "https://acme.example/ai",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+
+    assert review["support_status"] == "supported_with_limitations"
+    assert review["recommended_action"] == "revise"
+    assert review["suggested_revision"]
+    assert result["messages"][0]["payload"]["supported_with_limitations_count"] == 1
+    assert ReportWriterAgent()._supported_claims([claim], [review]) == []
 
 
 def test_claim_support_suppresses_claim_without_evidence_binding():

@@ -29,6 +29,9 @@ services:
       RIVALENS_SESSION_PERSISTENCE_ENABLED: ${RIVALENS_SESSION_PERSISTENCE_ENABLED:-true}
       RIVALENS_LLM_RPM_LIMIT: ${RIVALENS_LLM_RPM_LIMIT:-60}
       REDIS_URL: redis://:123456@redis:6379/0
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:123456@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:123456@redis:6379/1}
+      RIVALENS_CELERY_ENABLED: ${RIVALENS_CELERY_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +45,50 @@ services:
     restart: always
     ports:
       - 8000:8000
+
+  rivalens-worker:
+    pull_policy: build
+    image: rivalens/rivalens
+    build: ./
+    command: ["celery", "-A", "backend.server.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=${CELERY_WORKER_CONCURRENCY:-2}"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-rivalens-local}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_WORKSPACE_ID: ${LANGSMITH_WORKSPACE_ID:-}
+      LANGCHAIN_CALLBACKS_BACKGROUND: ${LANGCHAIN_CALLBACKS_BACKGROUND:-false}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-true}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-rivalens-local}
+      LOGGING_LEVEL: INFO
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      IMAGE_GENERATION_ENABLED: ${IMAGE_GENERATION_ENABLED:-false}
+      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-gemini-2.0-flash-preview-image-generation}
+      IMAGE_GENERATION_MAX_IMAGES: ${IMAGE_GENERATION_MAX_IMAGES:-3}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rivalens}:${POSTGRES_PASSWORD:-123456}@postgres:5432/rivalens
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-rivalens-local-development-secret-change-before-production}
+      AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-86400}
+      RIVALENS_TRACE_PERSISTENCE_ENABLED: ${RIVALENS_TRACE_PERSISTENCE_ENABLED:-true}
+      RIVALENS_SESSION_PERSISTENCE_ENABLED: ${RIVALENS_SESSION_PERSISTENCE_ENABLED:-true}
+      RIVALENS_LLM_RPM_LIMIT: ${RIVALENS_LLM_RPM_LIMIT:-60}
+      REDIS_URL: redis://:123456@redis:6379/0
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:123456@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:123456@redis:6379/1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ${PWD}/my-docs:/usr/src/app/my-docs:rw
+      - ${PWD}/outputs:/usr/src/app/outputs:rw
+      - ${PWD}/logs:/usr/src/app/logs:rw
+    user: root
+    restart: always
       
   rivalens-nextjs:
     pull_policy: build

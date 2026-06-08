@@ -226,7 +226,13 @@ class EvidenceReviewResult(TypedDict, total=False):
 
 
 BranchDriftRisk = Literal["low", "medium", "high"]
-ClaimSupportStatus = Literal["supported", "weak", "contradicted", "unverifiable"]
+ClaimSupportStatus = Literal[
+    "supported",
+    "supported_with_limitations",
+    "weak",
+    "contradicted",
+    "unverifiable",
+]
 ClaimSupportRecommendedAction = Literal[
     "accept",
     "revise",
@@ -1118,6 +1124,7 @@ class ClaimSupportReviewPayload(StrictPayloadModel):
 class ClaimSupportMessagePayload(StrictPayloadModel):
     review_count: int = Field(ge=0)
     supported_count: int = Field(ge=0)
+    supported_with_limitations_count: int = Field(default=0, ge=0)
     weak_count: int = Field(ge=0)
     contradicted_count: int = Field(default=0, ge=0)
     unverifiable_count: int = Field(default=0, ge=0)

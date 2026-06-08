@@ -45,6 +45,7 @@ from server.auth import (
     InvalidTokenError,
     LoginRequest,
     RegisterRequest,
+    UpdateCurrentUserRequest,
     UserPublic,
     create_access_token,
     decode_access_token,
@@ -286,6 +287,7 @@ def _build_report_store_record(
     }
 
     for key in (
+        "celery_task_id",
         "run_id",
         "research_information",
         "docx_path",
@@ -311,6 +313,35 @@ def _build_report_store_record(
         record.pop("error")
 
     return record
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _enqueue_report_generation_task(
+    research_request: ResearchRequest,
+    research_id: str,
+) -> str | None:
+    if not _env_flag("RIVALENS_CELERY_ENABLED", default=False):
+        return None
+    try:
+        from backend.server.celery_tasks import generate_report_task
+
+        async_result = generate_report_task.delay(
+            research_request.model_dump(mode="json"),
+            research_id,
+        )
+        return str(async_result.id)
+    except Exception:
+        logger.exception(
+            "Failed to enqueue Celery report generation task %s; falling back",
+            research_id,
+        )
+        return None
 
 
 async def _upsert_report_generation_record(
@@ -461,6 +492,20 @@ def login_user(request: LoginRequest):
 @app.get("/api/auth/me", response_model=UserPublic)
 def get_current_user(user: Dict[str, Any] = Depends(_require_current_user)):
     return to_public_user(user)
+
+
+@app.patch("/api/auth/me", response_model=UserPublic)
+def update_current_user(
+    request: UpdateCurrentUserRequest,
+    user: Dict[str, Any] = Depends(_require_current_user),
+):
+    updated_user = user_store.update_user_profile(
+        user["id"],
+        display_name=request.display_name,
+    )
+    if updated_user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return to_public_user(updated_user)
 
 
 # ── Session API ──────────────────────────────────────────────────
@@ -660,6 +705,7 @@ async def get_report_status(research_id: str):
     return {
         "research_id": research_id,
         "status": report.get("status") or ("completed" if report.get("answer") else "unknown"),
+        "celery_task_id": report.get("celery_task_id"),
         "timestamp": report.get("timestamp"),
         "error": report.get("error"),
         "artifacts": report.get("artifacts"),
@@ -853,6 +899,21 @@ async def generate_report(research_request: ResearchRequest, background_tasks: B
     await _upsert_report_generation_record(research_id, research_request, "running")
 
     if research_request.generate_in_background:
+        celery_task_id = _enqueue_report_generation_task(research_request, research_id)
+        if celery_task_id:
+            await _upsert_report_generation_record(
+                research_id,
+                research_request,
+                "queued",
+                response={"celery_task_id": celery_task_id},
+            )
+            return {
+                "message": "Your report is queued for background generation.",
+                "research_id": research_id,
+                "status": "queued",
+                "celery_task_id": celery_task_id,
+                "status_url": f"/api/reports/{research_id}/status",
+            }
         background_tasks.add_task(write_report_and_store, research_request=research_request, research_id=research_id)
         return {"message": "Your report is being generated in the background. Please check back later.",
                 "research_id": research_id,

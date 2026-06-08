@@ -40,7 +40,7 @@ body::before {
     width: 100%;
     height: 100%;
     /* Use an existing asset to avoid 404s */
-    background-image: url('./static/defaultAgentAvatar.JPG');
+    background-image: url('./static/messi.JPG');
     background-position: center;
     background-size: contain;
     background-repeat: no-repeat;

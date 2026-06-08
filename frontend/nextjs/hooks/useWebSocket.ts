@@ -269,6 +269,10 @@ export const useWebSocket = (
                   answer: data.output,
                 });
               }
+              // Report is complete — stop loading even if the "path" message hasn't arrived yet.
+              researchActiveRef.current = false;
+              setLoading(false);
+              localStorage.removeItem('activeResearchId');
             } else if (data.type === 'path') {
               if (data.output && typeof data.output === 'object') {
                 setReportContext?.((current: any) => ({

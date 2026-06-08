@@ -14,9 +14,9 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
 from rivalens.research.llm_provider.generic.base import (
-    NO_SUPPORT_TEMPERATURE_MODELS,
     SUPPORT_REASONING_EFFORT_MODELS,
     ReasoningEfforts,
+    is_no_support_temperature_model,
 )
 
 from ..prompts import PromptFamily
@@ -120,7 +120,7 @@ async def create_chat_completion(
     if model in SUPPORT_REASONING_EFFORT_MODELS:
         provider_kwargs['reasoning_effort'] = reasoning_effort
 
-    if model not in NO_SUPPORT_TEMPERATURE_MODELS:
+    if not is_no_support_temperature_model(model):
         provider_kwargs['temperature'] = temperature
         provider_kwargs['max_tokens'] = max_tokens
     else:
@@ -232,7 +232,8 @@ async def construct_subtopics(
 
         if config.smart_llm_model in SUPPORT_REASONING_EFFORT_MODELS:
             provider_kwargs['reasoning_effort'] = ReasoningEfforts.High.value
-        else:
+
+        if not is_no_support_temperature_model(config.smart_llm_model):
             provider_kwargs['temperature'] = config.temperature
             provider_kwargs['max_tokens'] = config.smart_token_limit
 

@@ -1,13 +1,19 @@
 """Structure collected evidence into the active competitor knowledge schema."""
 
+import asyncio
 from collections import defaultdict
 import hashlib
+import json
+import os
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import json_repair
+
 from rivalens.agents.evidence_snippets import EvidenceSnippetBuilder
 from rivalens.agents.messages import create_agent_message, latest_message_for
+from rivalens.research.utils.llm import create_chat_completion
 from rivalens.schema import (
     CompetitorAnalysisState,
     CompetitorKnowledge,
@@ -40,12 +46,313 @@ PRICING_ATOM_PREDICATES = {
 }
 
 
+class KnowledgeFactLLMExtractor:
+    prompt_id = "knowledge_fact_llm_extraction_v1"
+
+    def __init__(
+        self,
+        llm_spec: str | None = None,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        batch_size: int | None = None,
+        max_batches: int | None = None,
+        concurrency: int | None = None,
+        timeout_seconds: int | None = None,
+        max_evidence_chars: int | None = None,
+    ) -> None:
+        self.llm_spec = llm_spec or self._llm_spec_from_env()
+        self.temperature = temperature
+        self.max_tokens = max_tokens or self._env_int(
+            "RIVALENS_KNOWLEDGE_FACT_LLM_MAX_TOKENS",
+            900,
+            minimum=300,
+        )
+        self.batch_size = batch_size or self._env_int(
+            "RIVALENS_KNOWLEDGE_FACT_LLM_BATCH_SIZE",
+            4,
+            minimum=1,
+        )
+        self.max_batches = max_batches or self._env_int(
+            "RIVALENS_KNOWLEDGE_FACT_LLM_MAX_BATCHES",
+            12,
+            minimum=1,
+        )
+        self.concurrency = concurrency or self._env_int(
+            "RIVALENS_KNOWLEDGE_FACT_LLM_CONCURRENCY",
+            4,
+            minimum=1,
+        )
+        self.timeout_seconds = timeout_seconds or self._env_int(
+            "RIVALENS_KNOWLEDGE_FACT_LLM_TIMEOUT_SECONDS",
+            45,
+            minimum=5,
+        )
+        self.max_evidence_chars = max_evidence_chars or self._env_int(
+            "RIVALENS_KNOWLEDGE_FACT_LLM_EVIDENCE_CHARS",
+            1600,
+            minimum=300,
+        )
+
+    @property
+    def provider(self) -> str | None:
+        parsed = self._parse_llm_spec(self.llm_spec)
+        return parsed[0] if parsed else None
+
+    @property
+    def model(self) -> str | None:
+        parsed = self._parse_llm_spec(self.llm_spec)
+        return parsed[1] if parsed else None
+
+    def is_configured(self) -> bool:
+        return bool(self.provider and self.model)
+
+    async def extract_facts(
+        self,
+        evidence_items: list[dict[str, Any]],
+        rule_facts: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        provider = self.provider
+        model = self.model
+        if not provider or not model:
+            raise ValueError("Knowledge fact LLM is not configured.")
+
+        eligible = [
+            evidence
+            for evidence in evidence_items
+            if evidence.get("id")
+            and (
+                evidence.get("analysis_dimension_id")
+                or evidence.get("dimension_id")
+            )
+            and (
+                evidence.get("analysis_dimension_id")
+                or evidence.get("dimension_id")
+            )
+            != "competitor_profile"
+        ]
+        batches = [
+            eligible[index : index + self.batch_size]
+            for index in range(0, len(eligible), self.batch_size)
+        ][: self.max_batches]
+        metadata: dict[str, Any] = {
+            "llm_prompt_id": self.prompt_id,
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_concurrency": self.concurrency,
+            "llm_timeout_seconds": self.timeout_seconds,
+            "llm_batch_size": self.batch_size,
+            "llm_batch_cap": self.max_batches,
+            "llm_batch_count": len(batches),
+            "llm_input_evidence_count": len(eligible),
+            "llm_rule_fact_count": len(rule_facts or []),
+            "llm_success_count": 0,
+            "llm_failed_count": 0,
+            "llm_fallback_count": 0,
+            "llm_generated_fact_count": 0,
+            "llm_cost": 0.0,
+            "llm_prompt_chars": 0,
+        }
+        if not batches:
+            return {"facts": [], "metadata": metadata}
+
+        semaphore = asyncio.Semaphore(self.concurrency)
+        results = await asyncio.gather(
+            *[
+                self._extract_batch_with_guard(
+                    semaphore,
+                    batch,
+                    batch_index=batch_index,
+                    provider=provider,
+                    model=model,
+                )
+                for batch_index, batch in enumerate(batches, start=1)
+            ]
+        )
+        facts: list[dict[str, Any]] = []
+        for result in results:
+            result_metadata = result.get("metadata", {}) or {}
+            facts.extend(result.get("facts", []) or [])
+            if result_metadata.get("llm_success"):
+                metadata["llm_success_count"] += 1
+            if result_metadata.get("llm_failed"):
+                metadata["llm_failed_count"] += 1
+            if result_metadata.get("llm_fallback"):
+                metadata["llm_fallback_count"] += 1
+            metadata["llm_cost"] += float(result_metadata.get("llm_cost", 0.0))
+            metadata["llm_prompt_chars"] += int(
+                result_metadata.get("llm_prompt_chars", 0)
+            )
+        metadata["llm_cost"] = round(metadata["llm_cost"], 6)
+        metadata["llm_generated_fact_count"] = len(facts)
+        return {"facts": facts, "metadata": metadata}
+
+    async def _extract_batch_with_guard(
+        self,
+        semaphore: asyncio.Semaphore,
+        evidence_batch: list[dict[str, Any]],
+        *,
+        batch_index: int,
+        provider: str,
+        model: str,
+    ) -> dict[str, Any]:
+        async with semaphore:
+            try:
+                return await asyncio.wait_for(
+                    self._extract_batch(
+                        evidence_batch,
+                        batch_index=batch_index,
+                        provider=provider,
+                        model=model,
+                    ),
+                    timeout=self.timeout_seconds,
+                )
+            except Exception as exc:
+                return {
+                    "facts": [],
+                    "metadata": {
+                        "llm_failed": True,
+                        "llm_fallback": True,
+                        "llm_failure_type": type(exc).__name__,
+                    },
+                }
+
+    async def _extract_batch(
+        self,
+        evidence_batch: list[dict[str, Any]],
+        *,
+        batch_index: int,
+        provider: str,
+        model: str,
+    ) -> dict[str, Any]:
+        llm_cost = 0.0
+
+        def add_cost(cost: float) -> None:
+            nonlocal llm_cost
+            llm_cost += float(cost)
+
+        prompt = self._prompt(evidence_batch)
+        response = await create_chat_completion(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            llm_provider=provider,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            cost_callback=add_cost,
+            rivalens_operation="knowledge_fact_extraction",
+            rivalens_trace_context={
+                "batch_index": batch_index,
+                "evidence_ids": [
+                    evidence.get("id", "") for evidence in evidence_batch
+                ],
+            },
+            rivalens_evidence_count=len(evidence_batch),
+        )
+        parsed = json_repair.loads(response)
+        facts = parsed.get("facts", []) if isinstance(parsed, dict) else parsed
+        if not isinstance(facts, list):
+            raise ValueError("Knowledge fact LLM response must include a facts list.")
+        return {
+            "facts": facts,
+            "metadata": {
+                "llm_success": True,
+                "llm_cost": round(llm_cost, 6),
+                "llm_prompt_chars": len(prompt),
+            },
+        }
+
+    def _prompt(self, evidence_batch: list[dict[str, Any]]) -> str:
+        payload = {
+            "evidence_items": [
+                {
+                    "id": evidence.get("id", ""),
+                    "competitor": evidence.get("competitor", ""),
+                    "analysis_dimension_id": evidence.get("analysis_dimension_id")
+                    or evidence.get("dimension_id")
+                    or "",
+                    "dimension_name": evidence.get("dimension_name", ""),
+                    "source_type": evidence.get("source_type", ""),
+                    "title": clean_text(evidence.get("title", ""))[:180],
+                    "text": self._evidence_text_for_prompt(evidence),
+                }
+                for evidence in evidence_batch
+            ],
+            "allowed_fact_types": sorted(FACT_TYPES),
+        }
+        payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
+        return f"""Return strict JSON only.
+
+Extract concise atomic KnowledgeFact candidates from the provided public evidence.
+
+Required JSON shape:
+{{"facts": [{{"evidence_ids": ["ev_id"], "competitor": "name", "analysis_dimension_id": "dimension_id", "fact_type": "feature_presence", "subject": "short subject", "predicate": "describes", "object": "atomic evidence-bound object", "statement": "one evidence-bound sentence", "confidence": 0.0}}]}}
+
+Rules:
+- Use only evidence IDs shown in evidence_items. Every fact must include at least one evidence_id.
+- Do not generate competitor_profile facts.
+- Do not write strategy, SWOT, TOWS, recommendations, rankings, or superiority claims unless directly stated in evidence.
+- Do not generate gap placeholders such as "public evidence is insufficient".
+- Keep each fact atomic; split pricing, feature, target user, compliance, integration, and market signals when they are distinct.
+
+Input:
+{payload_json}
+"""
+
+    def _evidence_text_for_prompt(self, evidence: dict[str, Any]) -> str:
+        snippets = evidence.get("evidence_snippets", []) or []
+        snippet_text = " ".join(
+            str(snippet.get("text", "") or "").strip()
+            for snippet in snippets[:4]
+            if str(snippet.get("text", "") or "").strip()
+        )
+        text = " ".join(
+            str(value or "")
+            for value in (
+                snippet_text,
+                evidence.get("summary", ""),
+                evidence.get("excerpt", ""),
+                evidence.get("text", ""),
+            )
+        )
+        return clean_source_text(text)[: self.max_evidence_chars]
+
+    def _llm_spec_from_env(self) -> str | None:
+        return os.getenv("RIVALENS_KNOWLEDGE_FACT_LLM") or os.getenv(
+            "KNOWLEDGE_FACT_LLM"
+        )
+
+    def _parse_llm_spec(self, llm_spec: str | None) -> tuple[str, str] | None:
+        if not llm_spec or ":" not in llm_spec:
+            return None
+        provider, model = llm_spec.split(":", 1)
+        provider = provider.strip()
+        model = model.strip()
+        if not provider or not model:
+            return None
+        return provider, model
+
+    def _env_int(self, env_name: str, default: int, minimum: int = 0) -> int:
+        raw_value = os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
+
+
 class KnowledgeStructuringAgent:
     def __init__(
         self,
         snippet_builder: EvidenceSnippetBuilder | None = None,
+        fact_extractor: KnowledgeFactLLMExtractor | None = None,
     ) -> None:
         self.snippet_builder = snippet_builder or EvidenceSnippetBuilder()
+        self.fact_extractor = (
+            fact_extractor
+            if fact_extractor is not None
+            else KnowledgeFactLLMExtractor()
+        )
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         task = state.get("task", {})
@@ -62,7 +369,7 @@ class KnowledgeStructuringAgent:
             state.get("research_branches", []),
         )
 
-        knowledge_facts, fact_extraction = self._build_knowledge_facts_with_metadata(
+        knowledge_facts, fact_extraction = await self._build_knowledge_facts_with_metadata_async(
             evidence_items,
         )
         knowledge_fact_packages = self._build_knowledge_fact_packages(
@@ -124,6 +431,50 @@ class KnowledgeStructuringAgent:
                             0,
                         ),
                         "knowledge_fact_source": fact_extraction.get("source", ""),
+                        "knowledge_fact_llm_configured": fact_extraction.get(
+                            "llm_configured",
+                            False,
+                        ),
+                        "knowledge_fact_llm_concurrency": fact_extraction.get(
+                            "llm_concurrency",
+                            0,
+                        ),
+                        "knowledge_fact_llm_timeout_seconds": fact_extraction.get(
+                            "llm_timeout_seconds",
+                            0,
+                        ),
+                        "knowledge_fact_llm_batch_size": fact_extraction.get(
+                            "llm_batch_size",
+                            0,
+                        ),
+                        "knowledge_fact_llm_batch_cap": fact_extraction.get(
+                            "llm_batch_cap",
+                            0,
+                        ),
+                        "knowledge_fact_llm_success_count": fact_extraction.get(
+                            "llm_success_count",
+                            0,
+                        ),
+                        "knowledge_fact_llm_failed_count": fact_extraction.get(
+                            "llm_failed_count",
+                            0,
+                        ),
+                        "knowledge_fact_llm_fallback_count": fact_extraction.get(
+                            "llm_fallback_count",
+                            0,
+                        ),
+                        "knowledge_fact_llm_generated_fact_count": fact_extraction.get(
+                            "llm_generated_fact_count",
+                            0,
+                        ),
+                        "knowledge_fact_llm_cost": fact_extraction.get(
+                            "llm_cost",
+                            0.0,
+                        ),
+                        "knowledge_fact_llm_prompt_chars": fact_extraction.get(
+                            "llm_prompt_chars",
+                            0,
+                        ),
                         "rule_input_evidence_count": fact_extraction.get(
                             "rule_input_evidence_count",
                             0,
@@ -295,11 +646,281 @@ class KnowledgeStructuringAgent:
         stats["rule_input_evidence_count"] = len(evidence_items)
         return facts, stats
 
+    async def _build_knowledge_facts_with_metadata_async(
+        self,
+        evidence_items: list[dict[str, Any]],
+    ) -> tuple[list[KnowledgeFact], dict[str, Any]]:
+        rule_facts, stats = self._build_knowledge_facts_with_metadata(
+            evidence_items,
+        )
+        extractor = self.fact_extractor
+        configured = self._fact_extractor_configured(extractor)
+        stats.update(
+            {
+                "llm_configured": configured,
+                "llm_provider": getattr(extractor, "provider", None) or "",
+                "llm_model": getattr(extractor, "model", None) or "",
+                "llm_concurrency": (
+                    int(getattr(extractor, "concurrency", 0) or 0)
+                    if configured
+                    else 0
+                ),
+                "llm_timeout_seconds": (
+                    int(getattr(extractor, "timeout_seconds", 0) or 0)
+                    if configured
+                    else 0
+                ),
+                "llm_batch_size": (
+                    int(getattr(extractor, "batch_size", 0) or 0)
+                    if configured
+                    else 0
+                ),
+                "llm_batch_cap": (
+                    int(getattr(extractor, "max_batches", 0) or 0)
+                    if configured
+                    else 0
+                ),
+                "llm_batch_count": 0,
+                "llm_success_count": 0,
+                "llm_failed_count": 0,
+                "llm_fallback_count": 0,
+                "llm_generated_fact_count": 0,
+                "llm_valid_fact_count": 0,
+                "llm_invalid_fact_count": 0,
+                "llm_invalid_evidence_id_count": 0,
+                "llm_cost": 0.0,
+                "llm_prompt_chars": 0,
+            }
+        )
+        if not configured:
+            return rule_facts, stats
+
+        try:
+            result = await extractor.extract_facts(
+                evidence_items=evidence_items,
+                rule_facts=rule_facts,
+            )
+        except Exception as exc:
+            stats.update(
+                {
+                    "llm_failed_count": 1,
+                    "llm_fallback_count": 1,
+                    "llm_failure_type": type(exc).__name__,
+                    "knowledge_fact_count": len(rule_facts),
+                }
+            )
+            return rule_facts, stats
+
+        llm_metadata = result.get("metadata", {}) if isinstance(result, dict) else {}
+        if isinstance(llm_metadata, dict):
+            stats.update(llm_metadata)
+
+        candidates = result.get("facts", []) if isinstance(result, dict) else []
+        llm_facts, validation = self._validated_llm_facts(candidates, evidence_items)
+        stats.update(validation)
+        if not llm_facts:
+            stats["source"] = "rule"
+            stats["knowledge_fact_count"] = len(rule_facts)
+            if stats.get("llm_batch_count", 0):
+                stats["llm_fallback_count"] = max(
+                    1,
+                    int(stats.get("llm_fallback_count", 0) or 0),
+                )
+            return rule_facts, stats
+
+        facts = self._merge_rule_and_llm_facts(rule_facts, llm_facts)
+        stats["source"] = "rule+llm"
+        stats["knowledge_fact_count"] = len(facts)
+        stats["llm_valid_fact_count"] = len(llm_facts)
+        return facts, stats
+
     def _build_knowledge_facts(
         self,
         evidence_items: list[dict[str, Any]],
     ) -> list[KnowledgeFact]:
         facts, _stats = self._build_knowledge_facts_with_stats(evidence_items)
+        return facts
+
+    def _fact_extractor_configured(self, extractor: Any) -> bool:
+        if extractor is None:
+            return False
+        is_configured = getattr(extractor, "is_configured", None)
+        if callable(is_configured):
+            return bool(is_configured())
+        return True
+
+    def _validated_llm_facts(
+        self,
+        candidates: Any,
+        evidence_items: list[dict[str, Any]],
+    ) -> tuple[list[KnowledgeFact], dict[str, int]]:
+        if not isinstance(candidates, list):
+            return [], {
+                "llm_invalid_fact_count": 1,
+                "llm_invalid_evidence_id_count": 0,
+            }
+
+        evidence_by_id = {
+            evidence.get("id", ""): evidence
+            for evidence in evidence_items
+            if evidence.get("id")
+        }
+        facts: list[KnowledgeFact] = []
+        invalid_fact_count = 0
+        invalid_evidence_id_count = 0
+        for candidate in candidates:
+            fact, invalid_evidence_ids = self._llm_fact_from_candidate(
+                candidate,
+                evidence_by_id,
+            )
+            invalid_evidence_id_count += invalid_evidence_ids
+            if not fact:
+                invalid_fact_count += 1
+                continue
+            finding = self._atomization_finding(fact, evidence_by_id)
+            if finding.get("status") == "too_broad":
+                invalid_fact_count += 1
+                continue
+            facts.append(fact)
+        return facts, {
+            "llm_invalid_fact_count": invalid_fact_count,
+            "llm_invalid_evidence_id_count": invalid_evidence_id_count,
+        }
+
+    def _llm_fact_from_candidate(
+        self,
+        candidate: Any,
+        evidence_by_id: dict[str, dict[str, Any]],
+    ) -> tuple[KnowledgeFact | None, int]:
+        if not isinstance(candidate, dict):
+            return None, 0
+        raw_ids = candidate.get("evidence_ids", [])
+        if isinstance(raw_ids, str):
+            raw_ids = [raw_ids]
+        if not isinstance(raw_ids, list):
+            return None, 0
+        evidence_ids = self._dedupe(
+            str(evidence_id)
+            for evidence_id in raw_ids
+            if str(evidence_id) in evidence_by_id
+        )
+        invalid_evidence_ids = len(
+            [
+                evidence_id
+                for evidence_id in raw_ids
+                if str(evidence_id) not in evidence_by_id
+            ]
+        )
+        if not evidence_ids:
+            return None, invalid_evidence_ids
+
+        primary_evidence = evidence_by_id[evidence_ids[0]]
+        analysis_dimension_id = str(
+            candidate.get("analysis_dimension_id")
+            or self._evidence_analysis_dimension_id(primary_evidence)
+            or ""
+        )
+        if not analysis_dimension_id or analysis_dimension_id == "competitor_profile":
+            return None, invalid_evidence_ids
+
+        statement = clean_text(candidate.get("statement", ""))
+        fact_object = clean_text(candidate.get("object", "") or statement)
+        if not fact_object or is_low_quality_text(fact_object):
+            return None, invalid_evidence_ids
+        fact_type = str(candidate.get("fact_type", "") or "")
+        if fact_type not in FACT_TYPES:
+            fact_type = self._fact_type_for_evidence(
+                primary_evidence,
+                analysis_dimension_id,
+                fact_object,
+            )
+        subject = clean_text(candidate.get("subject", "")) or self._fact_subject(
+            primary_evidence,
+        )
+        predicate = clean_text(candidate.get("predicate", "")) or self._predicate_for_fact_type(
+            fact_type,
+        )
+        fact_object = fact_object[:GENERIC_FACT_OBJECT_CHARS]
+        if not statement:
+            statement = self._fact_statement(subject, predicate, fact_object)
+        else:
+            statement = statement[:700]
+
+        competitor = clean_text(candidate.get("competitor", "")) or str(
+            primary_evidence.get("competitor", "")
+        )
+        qualifiers = (
+            dict(candidate.get("qualifiers", {}))
+            if isinstance(candidate.get("qualifiers"), dict)
+            else {}
+        )
+        qualifiers.update(
+            {
+                "source": "llm_fact_extraction",
+                "source_type": primary_evidence.get("source_type", ""),
+                "title": primary_evidence.get("title", ""),
+                "url": primary_evidence.get("url", ""),
+                "dimension_name": primary_evidence.get("dimension_name", ""),
+            }
+        )
+        normalized_key = clean_text(candidate.get("normalized_key", "")) or self._fact_normalized_key(
+            competitor=competitor,
+            dimension=analysis_dimension_id,
+            fact_type=fact_type,
+            predicate=predicate,
+            fact_object=fact_object,
+        )
+        evidence_confidence = self._average_confidence(
+            [evidence_by_id[evidence_id] for evidence_id in evidence_ids]
+        )
+        confidence = min(
+            evidence_confidence,
+            self._bounded_confidence(candidate.get("confidence", evidence_confidence)),
+        )
+        value = (
+            dict(candidate.get("value", {}))
+            if isinstance(candidate.get("value"), dict)
+            else {}
+        )
+        value.setdefault("object", fact_object)
+        return {
+            "id": "",
+            "competitor": competitor,
+            "analysis_dimension_id": analysis_dimension_id,
+            "schema_field_id": "",
+            "fact_type": fact_type,
+            "subject": subject[:180],
+            "predicate": predicate[:80],
+            "object": fact_object,
+            "qualifiers": qualifiers,
+            "normalized_key": normalized_key,
+            "statement": statement,
+            "value": value,
+            "evidence_ids": evidence_ids,
+            "report_section_id": primary_evidence.get("report_section_id", ""),
+            "confidence": round(confidence, 2),
+        }, invalid_evidence_ids
+
+    def _merge_rule_and_llm_facts(
+        self,
+        rule_facts: list[KnowledgeFact],
+        llm_facts: list[KnowledgeFact],
+    ) -> list[KnowledgeFact]:
+        facts_by_key: dict[str, KnowledgeFact] = {}
+        for fact in [*rule_facts, *llm_facts]:
+            fact_copy = dict(fact)
+            fact_copy["id"] = ""
+            key = fact_copy.get("normalized_key", "")
+            if not key:
+                continue
+            if key in facts_by_key:
+                facts_by_key[key] = self._merge_fact(facts_by_key[key], fact_copy)
+            else:
+                facts_by_key[key] = fact_copy
+
+        facts = list(facts_by_key.values())
+        for index, fact in enumerate(facts, start=1):
+            fact["id"] = f"fact_{index}"
         return facts
 
     def _build_knowledge_fact_packages(
@@ -1422,6 +2043,13 @@ class KnowledgeStructuringAgent:
         if not confidences:
             return 0.5
         return round(sum(confidences) / len(confidences), 2)
+
+    def _bounded_confidence(self, value: Any) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return 0.5
+        return max(0.0, min(1.0, confidence))
 
     def _accepted_evidence_items(
         self,

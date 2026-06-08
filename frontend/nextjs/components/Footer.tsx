@@ -31,7 +31,7 @@ const Footer: React.FC<FooterProps> = ({ chatBoxSettings, setChatBoxSettings }) 
             © {new Date().getFullYear()} Rivalens. All rights reserved.
         </div>
         <div className="flex items-center gap-4 order-1 sm:order-2 mb-2 sm:mb-0">
-          <Link href={"https://github.com/rivalens/rivalens"} target="_blank" className="p-1">
+          <Link href={"https://github.com/ying123ww/rivalens"} target="_blank" className="p-1">
               <svg 
                 xmlns="http://www.w3.org/2000/svg" 
                 viewBox="0 0 24 24" 
@@ -46,7 +46,7 @@ const Footer: React.FC<FooterProps> = ({ chatBoxSettings, setChatBoxSettings }) 
                 <polyline points="9 22 9 12 15 12 15 22" />
               </svg>
           </Link>
-          <Link href={"https://github.com/rivalens/rivalens"} target="_blank" className="p-1">
+          <Link href={"https://github.com/ying123ww/rivalens"} target="_blank" className="p-1">
             <img
               src={"/img/github.svg"}
               alt="github"

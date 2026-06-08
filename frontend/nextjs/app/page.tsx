@@ -738,7 +738,17 @@ export default function Home() {
       "run_cancelled",
       "error",
     ];
+    const runningTaskMessage = "分析任务进行中......";
+    const formatLogLine = (item: any) => {
+      if (item.content === "run_started") {
+        return runningTaskMessage;
+      }
+      return `${item.content || "log"}: ${item.output || ""}`;
+    };
     const logText = (data: any) => {
+      if (data.content === "run_started") {
+        return runningTaskMessage;
+      }
       if (data.content !== "log_batch") {
         return data.output;
       }
@@ -747,11 +757,11 @@ export default function Home() {
         return data.output;
       }
       return latest
-        .map((item: any) => `${item.content || "log"}: ${item.output || ""}`)
+        .map(formatLogLine)
         .join("\n");
     };
     
-    const newLogs = groupedData.reduce((acc: any[], data) => {
+    const newLogs = groupedData.reduce((acc: any[], data, index) => {
       // Process accordion blocks (grouped data)
       if (data.type === 'accordionBlock') {
         const logs = data.items.map((item: any, subIndex: any) => ({
@@ -761,14 +771,14 @@ export default function Home() {
           key: `${item.type}-${item.content}-${subIndex}`,
         }));
         return [...acc, ...logs];
-      } 
+      }
       // Process status reports
       else if (statusReports.includes(data.content)) {
         return [...acc, {
           header: data.content,
           text: logText(data),
           metadata: data.metadata,
-          key: `${data.type}-${data.content}`,
+          key: `${data.type}-${data.content}-${index}`,
         }];
       }
       return acc;

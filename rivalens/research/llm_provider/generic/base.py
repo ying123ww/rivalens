@@ -78,6 +78,25 @@ NO_SUPPORT_TEMPERATURE_MODELS = [
     "gpt-5-mini",
 ]
 
+# Reasoning models identified by prefix (e.g. doubao-seed-2-0-lite, doubao-seed-1-5-thinking).
+# These models use output tokens for internal reasoning first (like o1, deepseek-reasoner)
+# and can exhaust max_tokens before producing a visible response.
+NO_SUPPORT_TEMPERATURE_MODEL_PREFIXES = [
+    "doubao-seed",
+]
+
+
+def is_no_support_temperature_model(model: str) -> bool:
+    """Check whether *model* is a reasoning model that doesn't support temperature
+    and should not have max_tokens imposed externally."""
+    if model in NO_SUPPORT_TEMPERATURE_MODELS:
+        return True
+    return any(
+        model.startswith(prefix)
+        for prefix in NO_SUPPORT_TEMPERATURE_MODEL_PREFIXES
+    )
+
+
 SUPPORT_REASONING_EFFORT_MODELS = [
     "o3-mini",
     "o3-mini-2025-01-31",
