@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 
 import type { AuthUser } from "./AuthProvider";
 import { useAuth } from "./AuthProvider";
+import { Landing } from "./Landing";
+import "./auth-green.css";
 
 type AuthMode = "login" | "register";
 
@@ -20,7 +22,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <AuthForm onAuthenticated={refreshUser} />;
+    return <UnauthExperience onAuthenticated={refreshUser} />;
   }
 
   return (
@@ -205,21 +207,44 @@ function ProfileEditor({
 
 function AuthLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-950 px-6">
-      <div className="w-full max-w-sm space-y-4">
-        <div className="h-7 w-28 animate-pulse rounded bg-gray-800" />
-        <div className="h-4 w-full animate-pulse rounded bg-gray-900" />
-        <div className="h-11 w-full animate-pulse rounded bg-gray-800" />
-        <div className="h-11 w-full animate-pulse rounded bg-gray-800" />
+    <main className="rl-auth">
+      <div className="rl-auth__skeleton">
+        <span style={{ height: "1.75rem", width: "7rem" }} />
+        <span style={{ height: "1rem", width: "100%" }} />
+        <span style={{ height: "2.75rem", width: "100%" }} />
+        <span style={{ height: "2.75rem", width: "100%" }} />
       </div>
     </main>
   );
 }
 
-function AuthForm({
+type UnauthView = "landing" | "auth";
+
+function UnauthExperience({
   onAuthenticated,
 }: {
   onAuthenticated: () => Promise<void>;
+}) {
+  const [view, setView] = useState<UnauthView>("landing");
+
+  if (view === "auth") {
+    return (
+      <AuthForm
+        onAuthenticated={onAuthenticated}
+        onBack={() => setView("landing")}
+      />
+    );
+  }
+
+  return <Landing onEnter={() => setView("auth")} />;
+}
+
+function AuthForm({
+  onAuthenticated,
+  onBack,
+}: {
+  onAuthenticated: () => Promise<void>;
+  onBack?: () => void;
 }) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [displayName, setDisplayName] = useState("");
@@ -269,64 +294,69 @@ function AuthForm({
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gray-950 px-5 py-12 text-gray-100">
-      <div className="absolute inset-x-0 top-0 h-px bg-teal-500/50" />
-      <section className="relative grid w-full max-w-5xl overflow-hidden rounded-2xl border border-gray-800 bg-gray-900 shadow-2xl shadow-black/30 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="hidden min-h-[620px] flex-col justify-between bg-gray-950 p-12 lg:flex">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-300">
-              Rivalens
-            </p>
-            <h1 className="mt-8 max-w-md text-4xl font-semibold leading-tight text-gray-100">
-              让每条竞品结论，都能回到它的证据。
-            </h1>
-            <p className="mt-5 max-w-md text-sm leading-7 text-gray-400">
-              登录后进入可追溯的多 Agent 竞品分析工作台，完成方向确认、公开证据采集、分析与来源复核。
-            </p>
-          </div>
-          <div className="space-y-3 text-sm text-gray-400">
-            <p>结构化 Agent 协作</p>
-            <p>证据与分析结论绑定</p>
-            <p>LangSmith trace 独立观测</p>
-          </div>
+    <main className="rl-auth">
+      <div className="rl-auth__container">
+        <div className="rl-auth__pitch">
+          <span className="rl-auth__brand">RIVALENS</span>
+          <h1>
+            让每条竞品结论，
+            <br />
+            都能回到它的<i>证据</i>。
+          </h1>
+          <p>
+            登录后进入可追溯的多 Agent 竞品分析工作台，完成方向确认、公开证据采集、分析与来源复核。
+          </p>
+          <ul className="rl-auth__points">
+            <li>结构化 Agent 协作</li>
+            <li>证据与分析结论绑定</li>
+            <li>LangSmith trace 独立观测</li>
+          </ul>
         </div>
 
-        <div className="px-6 py-9 sm:px-10 sm:py-12">
-          <div className="mb-8 lg:hidden">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-300">
-              Rivalens
-            </p>
-          </div>
+        <div className="rl-auth__card">
+          {onBack && (
+            <button type="button" className="rl-auth__back" onClick={onBack}>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <line x1="19" y1="12" x2="5" y2="12" />
+                <polyline points="12 19 5 12 12 5" />
+              </svg>
+              返回首页
+            </button>
+          )}
+          <div className="rl-auth__mobilebrand">RIVALENS</div>
 
-          <div className="mb-8 flex gap-1 rounded-lg bg-gray-950 p-1">
+          <div className="rl-auth__tabs">
+            <span className="rl-auth__ind" data-mode={mode} />
             {(["login", "register"] as AuthMode[]).map((item) => (
               <button
                 key={item}
                 type="button"
                 onClick={() => switchMode(item)}
-                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 ${
-                  mode === item
-                    ? "bg-gray-800 text-gray-100"
-                    : "text-gray-500 hover:text-gray-300"
-                }`}
+                className={mode === item ? "active" : undefined}
               >
                 {item === "login" ? "登录" : "注册"}
               </button>
             ))}
           </div>
 
-          <div className="mb-7">
-            <h2 className="text-2xl font-semibold text-gray-100">
-              {mode === "login" ? "欢迎回来" : "创建分析账户"}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-gray-400">
-              {mode === "login"
-                ? "使用邮箱继续进入竞品分析工作台。"
-                : "只需邮箱、显示名和密码即可开始。"}
-            </p>
-          </div>
+          <h2>{mode === "login" ? "欢迎回来" : "创建分析账户"}</h2>
+          <p className="rl-auth__sub">
+            {mode === "login"
+              ? "使用邮箱继续进入竞品分析工作台。"
+              : "只需邮箱、显示名和密码即可开始。"}
+          </p>
 
-          <form className="space-y-5" onSubmit={submit}>
+          <form onSubmit={submit}>
             {mode === "register" && (
               <AuthField
                 label="显示名"
@@ -359,10 +389,7 @@ function AuthForm({
             />
 
             {error && (
-              <p
-                role="alert"
-                className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200"
-              >
+              <p role="alert" className="rl-auth__error">
                 {error}
               </p>
             )}
@@ -370,7 +397,7 @@ function AuthForm({
             <button
               type="submit"
               disabled={submitting}
-              className="w-full rounded-md bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rl-auth__submit"
             >
               {submitting
                 ? "处理中..."
@@ -380,11 +407,11 @@ function AuthForm({
             </button>
           </form>
 
-          <p className="mt-7 text-xs leading-5 text-gray-500">
+          <p className="rl-auth__note">
             密码只以加盐摘要形式存储。LangSmith API Key 与 trace 数据不会写入用户表。
           </p>
         </div>
-      </section>
+      </div>
     </main>
   );
 }
@@ -411,10 +438,8 @@ function AuthField({
   minLength,
 }: AuthFieldProps) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-medium text-gray-300">
-        {label}
-      </span>
+    <label className="rl-field">
+      <span>{label}</span>
       <input
         required
         name={name}
@@ -424,7 +449,6 @@ function AuthField({
         autoComplete={autoComplete}
         placeholder={placeholder}
         minLength={minLength}
-        className="w-full rounded-md border border-gray-700 bg-gray-950 px-3.5 py-3 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-600 hover:border-gray-600 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
       />
     </label>
   );

@@ -1,0 +1,556 @@
+/* RIVALENS green/cream landing wrapper — visual only, ported from rivalens-landing #top + #flow.
+   Everything is scoped under .rl-landing so it never leaks into the dark research workbench. */
+
+.rl-landing {
+  --bg: #fff9f0;
+  --bg-surface: #f4ebd9;
+  --bg-elevated: #fcf4e6;
+  --ink: #3a2e2a;
+  --ink-muted: #8c7a73;
+  --accent: #00b371;
+  --accent-deep: #00935d;
+  --accent-soft: rgba(0, 179, 113, 0.12);
+  --accent-glow: rgba(0, 179, 113, 0.28);
+  --border: rgba(58, 46, 42, 0.12);
+  --border-strong: rgba(58, 46, 42, 0.22);
+  --font-display: "Space Grotesk", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Noto Serif SC", "Songti SC", Georgia, serif;
+  --font-body: "Noto Sans SC", "Inter", system-ui, sans-serif;
+  --section-pad: 120px;
+  --radius-sm: 10px;
+  --radius-lg: 28px;
+
+  position: relative;
+  width: 100%;
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.65;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 23px,
+      rgba(0, 179, 113, 0.05) 23px,
+      rgba(0, 179, 113, 0.05) 24px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 23px,
+      rgba(0, 179, 113, 0.05) 23px,
+      rgba(0, 179, 113, 0.05) 24px
+    );
+}
+
+.rl-landing * {
+  box-sizing: border-box;
+}
+
+.rl-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 5vw;
+  position: relative;
+  z-index: 2;
+}
+
+.rl-landing .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+}
+
+.rl-landing .eyebrow .rule {
+  width: 36px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.rl-landing .line-wrap {
+  display: block;
+  overflow: hidden;
+  padding-top: 0.15em;
+  margin-top: -0.15em;
+}
+
+.rl-landing .line-inner {
+  display: block;
+}
+
+/* ---- buttons ---- */
+.rl-landing .btn-primary,
+.rl-landing .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.95rem 2rem;
+  border-radius: 100px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--font-display);
+  cursor: pointer;
+  border: none;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.rl-landing .btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 10px 28px -10px var(--accent-glow);
+}
+
+.rl-landing .btn-primary:hover {
+  background: var(--accent-deep);
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px -10px var(--accent-glow);
+}
+
+.rl-landing .btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+}
+
+.rl-landing .btn-ghost:hover {
+  border-color: var(--ink);
+}
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.rl-hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 20px;
+  overflow: hidden;
+  background: radial-gradient(
+      ellipse 60% 50% at 50% -5%,
+      var(--accent-soft) 0%,
+      transparent 65%
+    ),
+    var(--bg);
+  border-radius: 0 0 50% 50% / 0 0 5vw 5vw;
+  /* Top padding reserves the brand zone so the vertically-centered hero
+     content always clears the RIVALENS wordmark, even on short viewports. */
+  padding-top: clamp(96px, 13vh, 140px);
+  padding-bottom: calc(var(--section-pad) + 6vw);
+}
+
+.rl-hero__grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  width: 100%;
+  height: 100%;
+}
+
+.rl-hero__brand {
+  position: absolute;
+  top: clamp(26px, 5vh, 52px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.rl-hero__inner {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 920px;
+}
+
+.rl-hero__eyebrow {
+  margin-bottom: 2rem;
+  opacity: 0;
+  animation: rl-fade 0.6s ease 0.25s forwards;
+}
+
+.rl-hero__title {
+  font-family: var(--font-serif);
+  font-size: clamp(2.8rem, 7vw, 6.4rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  margin-bottom: 1.8rem;
+  color: var(--ink);
+}
+
+.rl-hero__title i {
+  font-style: normal;
+  color: var(--accent-deep);
+}
+
+.rl-hero__title .line-inner {
+  transform: translateY(110%);
+  animation: rl-line-up 0.95s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+}
+
+.rl-hero__title .line-wrap:nth-child(2) .line-inner {
+  animation-delay: 0.25s;
+}
+
+.rl-hero__desc {
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
+  color: var(--ink-muted);
+  line-height: 1.75;
+  max-width: 40ch;
+  margin-bottom: 2.6rem;
+  opacity: 0;
+  transform: translateY(24px);
+  animation: rl-fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.55s forwards;
+}
+
+.rl-hero__actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(24px);
+  animation: rl-fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.7s forwards;
+}
+
+.rl-hero__cue {
+  position: absolute;
+  bottom: 7vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+}
+
+.rl-hero__cue span {
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.rl-hero__cue svg {
+  width: 18px;
+  height: 18px;
+  animation: rl-bob 2s ease-in-out infinite;
+}
+
+/* ============================================================
+   FLOW — dark band, vertical multi-agent timeline
+   ============================================================ */
+.rl-flow {
+  padding: calc(var(--section-pad) + 6vw) 0 var(--section-pad);
+  background: #211a17;
+  color: #f4ebd9;
+  position: relative;
+  z-index: 2;
+  margin-top: -6vw;
+  clip-path: polygon(0 0, 100% 0, 100% 86%, 50% 100%, 0 86%);
+  padding-bottom: calc(var(--section-pad) + 9vw);
+}
+
+.rl-flow .rl-container {
+  max-width: 1040px;
+}
+
+.rl-flow__head {
+  text-align: center;
+  margin-bottom: 12vh;
+}
+
+.rl-flow__head .eyebrow {
+  color: var(--accent);
+}
+
+.rl-flow__head h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2rem, 4vw, 4rem);
+  letter-spacing: -0.02em;
+  margin-top: 1.2rem;
+  color: #fff9f0;
+}
+
+.rl-flow__head p {
+  max-width: 46ch;
+  margin: 1.2rem auto 0;
+  color: #b9a99f;
+}
+
+.rl-timeline {
+  position: relative;
+}
+
+.rl-timeline__track {
+  position: absolute;
+  left: 25px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(244, 235, 217, 0.16);
+}
+
+.rl-timeline__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0%;
+  background: var(--accent);
+  transition: height 1.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@media (min-width: 768px) {
+  .rl-timeline__track {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+.rl-tl-item {
+  position: relative;
+  display: flex;
+  margin-bottom: 9vh;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+/* Hidden state is only applied once JS arms the animation, so the four steps
+   are always visible if JS / IntersectionObserver is unavailable. */
+.rl-landing.is-armed .rl-tl-item {
+  opacity: 0;
+  transform: translateY(28px);
+}
+
+.rl-landing.is-armed .rl-tl-item.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.rl-tl-item:last-child {
+  margin-bottom: 0;
+}
+
+.rl-tl-node {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #2e2520;
+  border: 2px solid rgba(244, 235, 217, 0.25);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: #b9a99f;
+  z-index: 2;
+  transition: all 0.45s ease;
+  transition-delay: 0.25s;
+}
+
+.rl-tl-item.is-visible .rl-tl-node {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #18120f;
+  box-shadow: 0 0 0 6px var(--accent-soft);
+}
+
+.rl-tl-content {
+  margin-left: 80px;
+  width: calc(100% - 80px);
+}
+
+.rl-tl-content h4 {
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 2.4vw, 1.9rem);
+  font-weight: 600;
+  margin-bottom: 0.7rem;
+  color: #fff9f0;
+}
+
+.rl-tl-content p {
+  color: #b9a99f;
+  max-width: 42ch;
+}
+
+.rl-tl-tag {
+  display: inline-block;
+  margin-top: 0.9rem;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid rgba(0, 179, 113, 0.4);
+  padding: 4px 12px;
+  border-radius: 100px;
+}
+
+@media (min-width: 768px) {
+  .rl-tl-item {
+    justify-content: center;
+  }
+  .rl-tl-node {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .rl-tl-content {
+    width: 50%;
+    margin-left: 0;
+  }
+  .rl-tl-item:nth-child(odd) .rl-tl-content {
+    padding-right: 80px;
+    text-align: right;
+    margin-right: auto;
+  }
+  .rl-tl-item:nth-child(odd) .rl-tl-content p,
+  .rl-tl-item:nth-child(odd) .rl-tl-content .rl-tl-tag {
+    margin-left: auto;
+  }
+  .rl-tl-item:nth-child(even) .rl-tl-content {
+    padding-left: 80px;
+    text-align: left;
+    margin-left: auto;
+  }
+}
+
+/* focal step — break the clone grid */
+.rl-tl-item.focal .rl-tl-content h4 {
+  color: var(--accent);
+}
+.rl-tl-item.focal .rl-tl-node {
+  width: 60px;
+  height: 60px;
+  font-size: 1.4rem;
+}
+
+/* ---- reveal on scroll (enhancement only; hidden state gated behind .is-armed) ---- */
+.rl-landing [data-reveal] {
+  transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.rl-landing.is-armed [data-reveal] {
+  opacity: 0;
+  transform: translateY(40px);
+  filter: blur(6px);
+}
+
+.rl-landing.is-armed [data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.rl-foot {
+  padding: 3.5rem 5vw;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  position: relative;
+  z-index: 2;
+}
+
+.rl-foot__logo {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+
+.rl-foot__meta {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
+.rl-foot__links {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+.rl-foot__links button:hover {
+  color: var(--ink);
+}
+
+/* ---- keyframes ---- */
+@keyframes rl-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rl-fade-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rl-line-up {
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes rl-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rl-landing *,
+  .rl-landing *::before,
+  .rl-landing *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .rl-hero__eyebrow,
+  .rl-hero__desc,
+  .rl-hero__actions,
+  .rl-landing [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  .rl-hero__title .line-inner {
+    transform: none !important;
+  }
+}
