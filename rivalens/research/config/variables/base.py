@@ -20,7 +20,6 @@ class BaseConfig(TypedDict):
     MEMORY_BACKEND: str
     TOTAL_WORDS: int
     REPORT_FORMAT: str
-    CURATE_SOURCES: bool
     MAX_ITERATIONS: int
     LANGUAGE: str
     AGENT_ROLE: Union[str, None]
@@ -34,9 +33,6 @@ class BaseConfig(TypedDict):
     LLM_KWARGS: dict
     EMBEDDING_KWARGS: dict
     VERBOSE: bool
-    DEEP_RESEARCH_CONCURRENCY: int
-    DEEP_RESEARCH_DEPTH: int
-    DEEP_RESEARCH_BREADTH: int
     MCP_SERVERS: List[Dict[str, Any]]
     MCP_AUTO_TOOL_SELECTION: bool
     MCP_USE_LLM_ARGS: bool

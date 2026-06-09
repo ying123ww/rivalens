@@ -383,11 +383,7 @@ class ResearchConductor:
         elif self.researcher.report_source == ReportSource.LangChainVectorStore.value:
             research_data = await self._get_context_by_vectorstore(self.researcher.query, self.researcher.vector_store_filter)
 
-        # Rank and curate the sources
         self.researcher.context = research_data
-        if self.researcher.cfg.curate_sources:
-            self.logger.info("Curating sources")
-            self.researcher.context = await self.researcher.source_curator.curate_sources(research_data)
 
         if self.researcher.verbose:
             await stream_output(

@@ -16,7 +16,6 @@ class ReportType(Enum):
         CustomReport: User-defined custom report format.
         DetailedReport: In-depth detailed analysis report.
         SubtopicReport: Report focused on a specific subtopic.
-        DeepResearch: Deep research mode with extensive analysis.
     """
     ResearchReport = "research_report"
     ResourceReport = "resource_report"
@@ -24,7 +23,6 @@ class ReportType(Enum):
     CustomReport = "custom_report"
     DetailedReport = "detailed_report"
     SubtopicReport = "subtopic_report"
-    DeepResearch = "deep"
 
 
 class ReportSource(Enum):

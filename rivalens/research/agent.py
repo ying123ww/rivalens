@@ -6,7 +6,7 @@ autonomous research and report generation using LLMs and web search.
 
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 from .actions import (
     add_references,
@@ -27,8 +27,6 @@ from .trace_context import (
 )
 from .skills.browser import BrowserManager
 from .skills.context_manager import ContextManager
-from .skills.curator import SourceCurator
-from .skills.deep_research import DeepResearchSkill
 from .skills.researcher import ResearchConductor
 from .skills.writer import ReportGenerator
 from .utils.enum import ReportSource, ReportType, Tone
@@ -194,10 +192,6 @@ class ResearchEngine:
         self.report_generator: ReportGenerator = ReportGenerator(self)
         self.context_manager: ContextManager = ContextManager(self)
         self.scraper_manager: BrowserManager = BrowserManager(self)
-        self.source_curator: SourceCurator = SourceCurator(self)
-        self.deep_researcher: Optional[DeepResearchSkill] = None
-        if report_type == ReportType.DeepResearch.value:
-            self.deep_researcher = DeepResearchSkill(self)
 
         self._research_id: str = ""  # Unique ID for this research session
 
@@ -302,7 +296,7 @@ class ResearchEngine:
         agent selection, web searching, and context gathering.
 
         Args:
-            on_progress: Optional callback for progress updates during deep research.
+            on_progress: Optional callback for progress updates.
 
         Returns:
             The accumulated research context.
@@ -313,11 +307,6 @@ class ResearchEngine:
             "agent": self.agent,
             "role": self.role
         })
-
-        # Handle deep research separately
-        if self.report_type == ReportType.DeepResearch.value and self.deep_researcher:
-            self._current_step = "deep_research"
-            return await self._handle_deep_research(on_progress)
 
         if not (self.agent and self.role):
             self._current_step = "agent_selection"
@@ -350,54 +339,6 @@ class ResearchEngine:
             "context_length": len(self.context)
         })
         
-        return self.context
-
-    async def _handle_deep_research(self, on_progress=None):
-        """Handle deep research execution and logging.
-
-        Args:
-            on_progress: Optional callback for progress updates.
-
-        Returns:
-            The accumulated research context from deep research.
-        """
-        # Log deep research configuration
-        await self._log_event("research", step="deep_research_initialize", details={
-            "type": "deep_research",
-            "breadth": self.deep_researcher.breadth,
-            "depth": self.deep_researcher.depth,
-            "concurrency": self.deep_researcher.concurrency_limit
-        })
-
-        # Log deep research start
-        await self._log_event("research", step="deep_research_start", details={
-            "query": self.query,
-            "breadth": self.deep_researcher.breadth,
-            "depth": self.deep_researcher.depth,
-            "concurrency": self.deep_researcher.concurrency_limit
-        })
-
-        # Run deep research and get context
-        self.context = await self.deep_researcher.run(on_progress=on_progress)
-
-        # Get total research costs
-        total_costs = self.get_costs()
-
-        # Log deep research completion with costs
-        await self._log_event("research", step="deep_research_complete", details={
-            "context_length": len(self.context),
-            "visited_urls": len(self.visited_urls),
-            "total_costs": total_costs
-        })
-
-        # Log final cost update
-        await self._log_event("research", step="cost_update", details={
-            "cost": total_costs,
-            "total_cost": total_costs,
-            "research_type": "deep_research"
-        })
-
-        # Return the research context
         return self.context
 
     async def write_report(

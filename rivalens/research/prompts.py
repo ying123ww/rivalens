@@ -224,40 +224,6 @@ Assume that the current date is {date.today()}.
 """
 
     @staticmethod
-    def curate_sources(query, sources, max_results=10):
-        return f"""Your goal is to evaluate and curate the provided scraped content for the research task: "{query}"
-    while prioritizing the inclusion of relevant and high-quality information, especially sources containing statistics, numbers, or concrete data.
-
-The final curated list will be used as context for creating a research report, so prioritize:
-- Retaining as much original information as possible, with extra emphasis on sources featuring quantitative data or unique insights
-- Including a wide range of perspectives and insights
-- Filtering out only clearly irrelevant or unusable content
-
-EVALUATION GUIDELINES:
-1. Assess each source based on:
-   - Relevance: Include sources directly or partially connected to the research query. Err on the side of inclusion.
-   - Credibility: Favor authoritative sources but retain others unless clearly untrustworthy.
-   - Currency: Prefer recent information unless older data is essential or valuable.
-   - Objectivity: Retain sources with bias if they provide a unique or complementary perspective.
-   - Quantitative Value: Give higher priority to sources with statistics, numbers, or other concrete data.
-2. Source Selection:
-   - Include as many relevant sources as possible, up to {max_results}, focusing on broad coverage and diversity.
-   - Prioritize sources with statistics, numerical data, or verifiable facts.
-   - Overlapping content is acceptable if it adds depth, especially when data is involved.
-   - Exclude sources only if they are entirely irrelevant, severely outdated, or unusable due to poor content quality.
-3. Content Retention:
-   - DO NOT rewrite, summarize, or condense any source content.
-   - Retain all usable information, cleaning up only clear garbage or formatting issues.
-   - Keep marginally relevant or incomplete sources if they contain valuable data or insights.
-
-SOURCES LIST TO EVALUATE:
-{sources}
-
-You MUST return your response in the EXACT sources JSON list format as the original sources.
-The response MUST not contain any markdown format or additional text (like ```json), just the JSON list!
-"""
-
-    @staticmethod
     def generate_resource_report_prompt(
         question, context, report_source: str, report_format="apa", tone=None, total_words=1000, language="english"
     ):
@@ -321,78 +287,6 @@ The response MUST not contain any markdown format or additional text (like ```js
             " Use appropriate Markdown syntax to format the outline and ensure readability."
             " Consider using markdown tables and other formatting features where they would enhance the presentation of information."
         )
-
-    @staticmethod
-    def generate_deep_research_prompt(
-        question: str,
-        context: str,
-        report_source: str,
-        report_format="apa",
-        tone=None,
-        total_words=2000,
-        language: str = "english"
-    ):
-        """Generates the deep research report prompt, specialized for handling hierarchical research results.
-        Args:
-            question (str): The research question
-            context (str): The research context containing learnings with citations
-            report_source (str): Source of the research (web, etc.)
-            report_format (str): Report formatting style
-            tone: The tone to use in writing
-            total_words (int): Minimum word count
-            language (str): Output language
-        Returns:
-            str: The deep research report prompt
-        """
-        reference_prompt = ""
-        if report_source == ReportSource.Web.value:
-            reference_prompt = f"""
-You MUST write all used source urls at the end of the report as references, and make sure to not add duplicated sources, but only one reference for each.
-Every url should be hyperlinked: [url website](url)
-Additionally, you MUST include hyperlinks to the relevant URLs wherever they are referenced in the report:
-
-eg: Author, A. A. (Year, Month Date). Title of web page. Website Name. [url website](url)
-"""
-        else:
-            reference_prompt = f"""
-You MUST write all used source document names at the end of the report as references, and make sure to not add duplicated sources, but only one reference for each."
-"""
-
-        tone_prompt = f"Write the report in a {tone.value} tone." if tone else ""
-
-        return f"""
-Using the following hierarchically researched information and citations:
-
-"{context}"
-
-Write a comprehensive research report answering the query: "{question}"
-
-The report should:
-1. Synthesize information from multiple levels of research depth
-2. Integrate findings from various research branches
-3. Present a coherent narrative that builds from foundational to advanced insights
-4. Maintain proper citation of sources throughout
-5. Be well-structured with clear sections and subsections
-6. Have a minimum length of {total_words} words
-7. Follow {report_format} format with markdown syntax
-8. Use markdown tables, lists and other formatting features when presenting comparative data, statistics, or structured information
-
-Additional requirements:
-- Prioritize insights that emerged from deeper levels of research
-- Highlight connections between different research branches
-- Include relevant statistics, data, and concrete examples
-- You MUST determine your own concrete and valid opinion based on the given information. Do NOT defer to general and meaningless conclusions.
-- You MUST prioritize the relevance, reliability, and significance of the sources you use. Choose trusted sources over less reliable ones.
-- You must also prioritize new articles over older articles if the source can be trusted.
-- Use in-text citation references in {report_format} format and make it with markdown hyperlink placed at the end of the sentence or paragraph that references them like this: ([in-text citation](url)).
-- {tone_prompt}
-- Write in {language}
-
-{reference_prompt}
-
-Please write a thorough, well-researched report that synthesizes all the gathered information into a cohesive whole.
-Assume the current date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.
-"""
 
     @staticmethod
     def auto_agent_instructions():
@@ -763,7 +657,6 @@ report_type_mapping = {
     ReportType.OutlineReport.value: "generate_outline_report_prompt",
     ReportType.CustomReport.value: "generate_custom_report_prompt",
     ReportType.SubtopicReport.value: "generate_subtopic_report_prompt",
-    ReportType.DeepResearch.value: "generate_deep_research_prompt",
 }
 
 

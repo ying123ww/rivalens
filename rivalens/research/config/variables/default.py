@@ -11,7 +11,6 @@ DEFAULT_CONFIG: BaseConfig = {
     "SMART_TOKEN_LIMIT": 6000,
     "STRATEGIC_TOKEN_LIMIT": 4000,
     "BROWSE_CHUNK_MAX_LENGTH": 8192,
-    "CURATE_SOURCES": False,
     "SUMMARY_TOKEN_LIMIT": 700,
     "TEMPERATURE": 0.4,
     "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
@@ -32,10 +31,6 @@ DEFAULT_CONFIG: BaseConfig = {
     "LLM_KWARGS": {},
     "EMBEDDING_KWARGS": {},
     "VERBOSE": False,
-    # Deep research specific settings
-    "DEEP_RESEARCH_BREADTH": 3,
-    "DEEP_RESEARCH_DEPTH": 2,
-    "DEEP_RESEARCH_CONCURRENCY": 4,
     
     # MCP retriever specific settings
     "MCP_SERVERS": [],  # List of predefined MCP server configurations
