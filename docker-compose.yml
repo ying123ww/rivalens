@@ -18,7 +18,6 @@
 services:
   # ── API 服务 ──────────────────────────────────────────────────────
   rivalens:
-    image: rivalens/rivalens
     build: .
     restart: unless-stopped
     expose:
@@ -93,7 +92,6 @@ services:
 
   # ── Celery Worker ─────────────────────────────────────────────────
   rivalens-worker:
-    image: rivalens/rivalens
     build: .
     restart: unless-stopped
     command: >
