@@ -1,5 +1,9 @@
 # Rivalens
 
+<p align="right">
+  <a href="./README.md">English</a>
+</p>
+
 <p align="center">
   <strong>AI 驱动的竞品分析智能体系统，具备全链路可溯源的证据工作流</strong>
 </p>
