@@ -402,6 +402,13 @@ class AnalysisAgent:
                 self._append_pricing_claims(claims, knowledge)
                 self._append_persona_claims(claims, knowledge)
 
+        supplementary_claims = self._supplementary_claims_from_unclaimed_accepted_evidence(
+            state,
+            claims,
+        )
+        if supplementary_claims:
+            claims = [*claims, *supplementary_claims]
+
         message = create_agent_message(
             sender="analysis",
             receiver="claim_support",
@@ -489,6 +496,14 @@ class AnalysisAgent:
                         "analysis_llm_prompt_chars": claim_generation.get(
                             "llm_prompt_chars",
                             0,
+                        ),
+                        "supplementary_claim_count": len(supplementary_claims),
+                        "supplementary_evidence_count": len(
+                            {
+                                evidence_id
+                                for claim in supplementary_claims
+                                for evidence_id in claim.get("evidence_ids", [])
+                            }
                         ),
                     },
                 }
@@ -1342,7 +1357,141 @@ class AnalysisAgent:
         text = clean_text(fact.get("object") or fact.get("statement", ""))
         if not text or is_low_quality_text(text):
             return ""
-        return " ".join(text.split())[:320]
+        normalized = " ".join(text.split())
+        if str(fact.get("fact_type", "")) == "pricing_signal":
+            return normalized[:320]
+        return self._summarize_fact_object(normalized, str(fact.get("fact_type", "")))
+
+    def _summarize_fact_object(self, text: str, fact_type: str) -> str:
+        candidates = self._fact_object_candidate_segments(text, fact_type)
+        for candidate in candidates:
+            if self._usable_fact_object_segment(candidate):
+                return candidate[:220]
+        stripped = self._strip_source_chrome(text)
+        return stripped[:180] if self._usable_fact_object_segment(stripped) else ""
+
+    def _fact_object_candidate_segments(self, text: str, fact_type: str) -> list[str]:
+        value = self._strip_source_chrome(text)
+        segments = [
+            segment.strip(" ，,。.;；:：")
+            for segment in re.split(r"[。！？!?；;]\s*|\s+(?=[一二三四五六七八九十]、|\d+[.、])", value)
+            if segment.strip()
+        ]
+        keywords_by_type = {
+            "target_user_signal": (
+                "面向",
+                "用户",
+                "客户",
+                "企业",
+                "团队",
+                "组织",
+                "场景",
+                "适合",
+                "支持",
+                "解决方案",
+            ),
+            "feature_presence": (
+                "支持",
+                "提供",
+                "覆盖",
+                "包括",
+                "集成",
+                "模块",
+                "能力",
+                "功能",
+            ),
+            "market_signal": (
+                "发布",
+                "推出",
+                "签约",
+                "客户",
+                "增长",
+                "服务",
+                "用户",
+            ),
+            "trust_compliance_signal": (
+                "安全",
+                "合规",
+                "认证",
+                "权限",
+                "审计",
+                "加密",
+                "等保",
+                "国密",
+            ),
+            "integration_signal": (
+                "API",
+                "SDK",
+                "开放平台",
+                "集成",
+                "连接器",
+                "生态",
+            ),
+        }
+        keywords = keywords_by_type.get(
+            fact_type,
+            ("支持", "提供", "面向", "发布", "推出", "客户", "用户", "场景"),
+        )
+        prioritized = [
+            segment
+            for segment in segments
+            if any(keyword.lower() in segment.lower() for keyword in keywords)
+        ]
+        return [*prioritized, *segments]
+
+    def _strip_source_chrome(self, text: str) -> str:
+        value = " ".join(str(text or "").split())
+        chrome_patterns = [
+            r"^.*?合作与支持\s+飞行社\s+定价\s+\S+\s+下载飞书\s+",
+            r"^.*?博客中心\s+",
+            r"^.*?\d+\s*评论\s+\d+\s*浏览\s+\d+\s*收藏\s+\d+\s*分钟\s+",
+            r"^.*?Skip to main content\s+",
+            r"^.*?跳转到内容\s+",
+            r"^.*?加入願望清單\s+",
+            r"^.*?添加到心愿单\s+",
+            r"^.*?瞭解詳情\s+",
+            r"^.*?了解详情\s+",
+        ]
+        for pattern in chrome_patterns:
+            value = re.sub(pattern, "", value, flags=re.IGNORECASE)
+        return value.strip()
+
+    def _usable_fact_object_segment(self, segment: str) -> bool:
+        value = " ".join(str(segment or "").split()).strip()
+        if len(value) < 12:
+            return False
+        lowered = value.lower()
+        raw_markers = (
+            "google play",
+            "app store",
+            "加入願望清單",
+            "添加到心愿单",
+            "安裝 分享",
+            "安装 分享",
+            "使用者互動",
+            "瞭解詳情",
+            "了解詳情",
+            "次下載",
+            "次下载",
+            "則評論",
+            "条评价",
+            "star",
+            "跳转到内容",
+            "维基百科",
+            "skip to main content",
+            "排行榜 好课秒杀",
+            "人人都是产品经理",
+            "悟空 超级服务",
+            "官方商城",
+            "钉钉体验中心",
+            "模版中心",
+            "模板中心",
+            "welcome to",
+            "立即追踪工时",
+        )
+        if any(marker in lowered for marker in raw_markers):
+            return False
+        return True
 
     def _claim_normalized_key(
         self,
@@ -1516,6 +1665,171 @@ class AnalysisAgent:
 
         return claims
 
+    def _supplementary_claims_from_unclaimed_accepted_evidence(
+        self,
+        state: CompetitorAnalysisState,
+        existing_claims: list[dict[str, Any]],
+    ) -> list[AnalysisClaim]:
+        claimed_evidence_ids = {
+            evidence_id
+            for claim in existing_claims
+            for evidence_id in claim.get("evidence_ids", [])
+            if evidence_id
+        }
+        evidence_by_id = {
+            evidence.get("id", ""): evidence
+            for evidence in state.get("evidence_items", [])
+            if evidence.get("id")
+        }
+        unclaimed_accepted_ids = [
+            evidence_id
+            for review in state.get("evidence_reviews", [])
+            for evidence_id in review.get("accepted_evidence_ids", [])
+            if evidence_id in evidence_by_id and evidence_id not in claimed_evidence_ids
+        ]
+        unclaimed_accepted_ids = list(dict.fromkeys(unclaimed_accepted_ids))
+        if not unclaimed_accepted_ids:
+            return []
+
+        dimensions_by_id = self._analysis_dimension_lookup(state)
+        branch_by_id = {
+            branch.get("id", ""): branch
+            for branch in state.get("research_branches", [])
+            if branch.get("id")
+        }
+        next_index = len(existing_claims) + 1
+        claims: list[AnalysisClaim] = []
+
+        for review in state.get("evidence_reviews", []):
+            accepted_ids = [
+                evidence_id
+                for evidence_id in review.get("accepted_evidence_ids", [])
+                if evidence_id in unclaimed_accepted_ids
+            ]
+            if not accepted_ids:
+                continue
+            branch = branch_by_id.get(review.get("branch_id", ""), {})
+            claim_candidates = [
+                candidate
+                for evidence_id in accepted_ids
+                if (
+                    candidate := self._supplementary_claim_candidate(
+                        evidence_by_id[evidence_id],
+                        evidence_id,
+                        review,
+                        branch,
+                        dimensions_by_id,
+                    )
+                )
+            ]
+            for cluster in self._cluster_claim_candidates(claim_candidates):
+                representative = cluster[0]
+                cluster_evidence_items = [
+                    candidate["evidence"] for candidate in cluster
+                ]
+                cluster_evidence_ids = [
+                    candidate["evidence_id"] for candidate in cluster
+                ]
+                claims.append(
+                    {
+                        "id": f"claim_{next_index}",
+                        "analysis_dimension_id": representative[
+                            "analysis_dimension_id"
+                        ],
+                        "knowledge_fact_ids": [],
+                        "report_section_id": representative.get(
+                            "report_section_id",
+                            "",
+                        ),
+                        "claim_source": "supplementary_claim",
+                        "claim_type": "coverage_claim",
+                        "claim_risk_level": self._claim_risk_level(
+                            claim_type="coverage_claim",
+                            analysis_dimension_id=representative[
+                                "analysis_dimension_id"
+                            ],
+                            claim_text=representative["claim"],
+                        ),
+                        "normalized_key": self._claim_normalized_key(
+                            representative["competitor"],
+                            representative["analysis_dimension_id"],
+                            "coverage_claim",
+                            subject=representative.get("title", ""),
+                            predicate="accepted_evidence_coverage",
+                            fact_key="|".join(cluster_evidence_ids),
+                        ),
+                        "branch_id": review.get("branch_id", ""),
+                        "evidence_review_id": review.get("id", ""),
+                        "claim": representative["claim"],
+                        "competitors": [representative["competitor"]]
+                        if representative["competitor"]
+                        else [],
+                        "evidence_ids": cluster_evidence_ids,
+                        "reasoning": (
+                            "Supplementary coverage claim created because "
+                            f"{len(cluster_evidence_ids)} accepted EvidenceItem(s) "
+                            "were not covered by any primary analysis claim."
+                        ),
+                        "confidence": self._quality_gated_confidence(
+                            cluster_evidence_items,
+                            review,
+                        ),
+                    }
+                )
+                next_index += 1
+        return claims
+
+    def _supplementary_claim_candidate(
+        self,
+        evidence: dict[str, Any],
+        evidence_id: str,
+        review: dict[str, Any],
+        branch: dict[str, Any],
+        dimensions_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        competitor = (
+            branch.get("competitor")
+            or evidence.get("competitor")
+            or "the target competitor"
+        )
+        dimension = (
+            branch.get("analysis_dimension_id")
+            or branch.get("dimension_id")
+            or evidence.get("analysis_dimension_id")
+            or evidence.get("dimension_id")
+            or "evidence_supported_findings"
+        )
+        evidence_text = self._evidence_excerpt_preview([evidence])
+        if is_low_quality_text(evidence_text):
+            return None
+        dimension_name = (
+            branch.get("dimension_name")
+            or evidence.get("dimension_name")
+            or dimensions_by_id.get(str(dimension), {}).get("name")
+            or str(dimension).replace("_", " ")
+        )
+        report_section_id = (
+            evidence.get("report_section_id")
+            or branch.get("report_section_id")
+            or primary_report_section_id(
+                dimensions_by_id.get(str(dimension), {"id": str(dimension)}),
+            )
+        )
+        return {
+            "competitor": str(competitor),
+            "analysis_dimension_id": str(dimension),
+            "dimension_name": str(dimension_name),
+            "report_section_id": report_section_id,
+            "evidence": evidence,
+            "evidence_id": evidence_id,
+            "title": evidence.get("title", ""),
+            "claim": self._evidence_claim_text(
+                str(competitor),
+                str(dimension_name),
+                evidence,
+            ),
+        }
+
     def _cluster_claim_candidates(
         self,
         candidates: list[dict[str, Any]],
@@ -1605,10 +1919,54 @@ class AnalysisAgent:
                 or evidence.get("url")
                 or ""
             )
-            normalized = " ".join(clean_text(text).split())
-            if normalized:
+            normalized = self._strip_source_chrome(" ".join(clean_text(text).split()))
+            if not normalized:
+                continue
+            evidence_context = " ".join(
+                str(evidence.get(key, "") or "")
+                for key in (
+                    "analysis_dimension_id",
+                    "dimension_id",
+                    "dimension_name",
+                    "source_type",
+                )
+            ).lower()
+            if (
+                any(term in evidence_context for term in ("pricing", "price", "定价", "价格"))
+                and self._usable_fact_object_segment(normalized)
+            ):
                 snippets.append(normalized[:220])
-        return " ".join(snippets)[:420] or "accepted source-backed evidence is available."
+                continue
+            preview = self._summarize_fact_object(
+                normalized,
+                self._fact_type_hint_from_evidence(evidence),
+            )
+            if preview:
+                snippets.append(preview[:220])
+        return " ".join(snippets)[:420]
+
+    def _fact_type_hint_from_evidence(self, evidence: dict[str, Any]) -> str:
+        context = " ".join(
+            str(evidence.get(key, "") or "")
+            for key in (
+                "analysis_dimension_id",
+                "dimension_id",
+                "dimension_name",
+                "source_type",
+                "title",
+            )
+        ).lower()
+        if any(term in context for term in ("pricing", "price", "billing", "定价", "价格", "收费")):
+            return "pricing_signal"
+        if any(term in context for term in ("target", "segment", "persona", "用户", "客户", "场景")):
+            return "target_user_signal"
+        if any(term in context for term in ("trust", "compliance", "security", "安全", "合规")):
+            return "trust_compliance_signal"
+        if any(term in context for term in ("integration", "ecosystem", "api", "sdk", "集成", "生态")):
+            return "integration_signal"
+        if any(term in context for term in ("market", "news", "growth", "市场", "增长")):
+            return "market_signal"
+        return "feature_presence"
 
     def _quality_gated_confidence(
         self,

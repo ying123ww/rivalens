@@ -3,6 +3,8 @@
 import json
 from typing import Any, Callable
 
+import json_repair
+
 from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.specificity import (
     combined_specificity_text,
@@ -19,6 +21,9 @@ SECTION_CLAIM_LIMIT = 12
 SECTION_MATRIX_ROW_LIMIT = 6
 DYNAMIC_ANALYSIS_SECTION_LIMIT = 8
 SUMMARY_CLAIM_LIMIT = 30
+SECTION_REPAIR_ATTEMPTS = 3
+SUMMARY_REPAIR_ATTEMPTS = 3
+OPENING_REPAIR_ATTEMPTS = 3
 OPENING_CONTEXT_CHAR_LIMIT = 6000
 ANALYSIS_OVERVIEW_CONTEXT_CHAR_LIMIT = 6000
 SECTION_CONTEXT_CHAR_LIMIT = 8000
@@ -204,6 +209,8 @@ class ReportWriterAgent:
                         "fallback_used": generation["fallback_used"] or not bool(generated_report),
                         "cost": generation["cost"],
                         "step_costs": generation["step_costs"],
+                        "repair_attempts": generation.get("repair_attempts", {}),
+                        "repair_feedback": generation.get("repair_feedback", {}),
                         "generation_error": generation_error,
                     },
                 }
@@ -271,12 +278,15 @@ class ReportWriterAgent:
 | 内部 | **S 优势**<br>1. ...<br>2. ...<br>3. ... | **W 劣势**<br>1. ...<br>2. ...<br>3. ... |
 | 外部 | **O 机会**<br>1. ...<br>2. ...<br>3. ... | **T 威胁**<br>1. ...<br>2. ...<br>3. ... |
 
-每个象限最多 3-5 条，每条绑定 citation_ref。尽力覆盖双方竞品，若一方证据不足可侧重有证据的一方，在条目中提及对应竞品名即可。
+每个象限最多 3-5 条，每个编号条目都必须绑定 citation_ref；同一个单元格里任意一条没有 citation_ref 都会被拒绝。尽力覆盖双方竞品，若一方证据不足可侧重有证据的一方，在条目中提及对应竞品名即可。
 
 S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
 - **W 劣势来源**：竞品间功能/定价/覆盖面的横向差距（用竞品 A 的 S 反推竞品 B 的 W）；用户反馈或评测中指出的不足；公开报道中提及的产品/运营短板；履约或服务体系的缺口
 - **T 威胁来源**：竞品正在推进的战略动作或产品迭代；行业政策、合规要求或监管变化；技术路线替代或架构变化的风险；市场格局或客户偏好迁移的信号
 - W 和 T 的每一条都必须使用 citation_ref 绑定证据原文——即使证据原文没有出现"劣势""威胁"字样，只要能从证据中合理推导即可。例如：从"竞品 A 已支持 X 功能 [1]"推导竞品 B 在 X 功能上的缺口，引用 [1]
+
+不要把"未公开披露/未检索到/公开证据不足"本身写成某个竞品的劣势或威胁；这类情况只能表述为覆盖限制。只有当 Context 中存在可引用的对比 claim 支撑真实差距时，才写 W/T 推导。
+当某个象限缺少足够高质量可引用 claim 时，宁可少写条目，也不要用单一竞品的优势反向编造另一竞品的短板。
 
 证据不足时某个象限可少于 3 条。只有整个象限无任何可引用证据时，才写"公开证据不足"。优先写出有证据的竞品条目；不要在已有一条带 citation_ref 条目后再追加"公开证据不足"。
 
@@ -291,7 +301,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
 | S 优势 | **SO 增长型**<br>1. ...<br>2. ... | **ST 多点型**<br>1. ...<br>2. ... |
 | W 劣势 | **WO 扭转型**<br>1. ...<br>2. ... | **WT 防御型**<br>1. ...<br>2. ... |
 
-每个格子输出 1-2 条具体战略推演（可观察/可验证的动作，不是空泛结论），绑定 citation_ref（可直接复用对应 SWOT 条目的引用）。
+每个格子输出 1-2 条具体战略推演（可观察/可验证的动作，不是空泛结论），每个编号条目都必须绑定 citation_ref（可直接复用对应 SWOT 条目的引用）。
 
 示例（仅供参考格式与颗粒度）：
 假设 Context 中 S: "产品免费额度显著高于同类 [3]"，O: "中小企业对低成本工具的需求在增长 [5]"，则 SO 格应写为：
@@ -328,32 +338,30 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             "segment_context_lengths": [],
             "segment_count": 0,
             "fallback_used": False,
+            "repair_attempts": {},
+            "repair_feedback": {},
         }
 
         opening_context = self._build_opening_context(
             state,
+            claims,
             citation_refs_by_evidence_id,
         )
-        opening = await self._generate_report_segment(
-            segment_id="opening",
+        opening = await self._generate_opening_segment_with_retries(
+            state=state,
             query=query,
             context=opening_context,
-            custom_prompt=self._opening_prompt(),
             cfg=cfg,
+            claims=claims,
+            citation_refs_by_evidence_id=citation_refs_by_evidence_id,
             generation=generation,
         )
-        opening = self._clean_opening_segment(opening)
-        if opening and not self._opening_has_expected_competitor_citations(
-            opening,
-            state,
-            citation_refs_by_evidence_id,
-        ):
-            opening = ""
         if not opening:
             generation["fallback_used"] = True
             opening = self._fallback_opening_chapters(
                 state,
                 citation_refs_by_evidence_id,
+                claims,
             )
 
         analysis_chapter = await self._generate_dynamic_analysis_chapter_segmented(
@@ -373,15 +381,12 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             analysis_dimensions,
             citation_refs_by_evidence_id,
         )
-        summary = await self._generate_report_segment(
-            segment_id="summary",
+        summary = await self._generate_summary_segment_with_retries(
             query=query,
             context=summary_context,
-            custom_prompt=self._summary_prompt(),
             cfg=cfg,
             generation=generation,
         )
-        summary = self._clean_summary_segment(summary)
         if not summary:
             generation["fallback_used"] = True
             summary = self._fallback_summary_chapter(claims, evidence_items)
@@ -392,6 +397,118 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             if segment.strip()
         )
         return generation
+
+    async def _generate_opening_segment_with_retries(
+        self,
+        state: CompetitorAnalysisState,
+        query: str,
+        context: str,
+        cfg: Config,
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        generation: dict[str, Any],
+    ) -> str:
+        generated = await self._generate_report_segment(
+            segment_id="opening",
+            query=query,
+            context=context,
+            custom_prompt=self._opening_prompt(),
+            cfg=cfg,
+            generation=generation,
+        )
+        opening = self._clean_opening_segment(generated)
+        errors = self._opening_validation_errors(
+            opening,
+            state,
+            claims,
+            citation_refs_by_evidence_id,
+        )
+        if opening and not errors:
+            return opening
+
+        for attempt in range(1, OPENING_REPAIR_ATTEMPTS + 1):
+            generation.setdefault("repair_attempts", {})["opening"] = attempt
+            generation.setdefault("repair_feedback", {}).setdefault(
+                "opening",
+                [],
+            ).append(
+                {
+                    "attempt": attempt,
+                    "errors": errors,
+                }
+            )
+            generated = await self._generate_report_segment(
+                segment_id=f"opening_repair_{attempt}",
+                query=query,
+                context=context,
+                custom_prompt=self._opening_repair_prompt(
+                    errors,
+                    generated,
+                    attempt,
+                ),
+                cfg=cfg,
+                generation=generation,
+            )
+            opening = self._clean_opening_segment(generated)
+            errors = self._opening_validation_errors(
+                opening,
+                state,
+                claims,
+                citation_refs_by_evidence_id,
+            )
+            if opening and not errors:
+                return opening
+        return ""
+
+    async def _generate_summary_segment_with_retries(
+        self,
+        query: str,
+        context: str,
+        cfg: Config,
+        generation: dict[str, Any],
+    ) -> str:
+        prompt = self._summary_prompt()
+        generated = await self._generate_report_segment(
+            segment_id="summary",
+            query=query,
+            context=context,
+            custom_prompt=prompt,
+            cfg=cfg,
+            generation=generation,
+        )
+        summary = self._clean_summary_segment(generated)
+        if summary:
+            return summary
+
+        errors = self._summary_validation_errors(generated)
+        for attempt in range(1, SUMMARY_REPAIR_ATTEMPTS + 1):
+            generation.setdefault("repair_attempts", {})["summary"] = attempt
+            generation.setdefault("repair_feedback", {}).setdefault(
+                "summary",
+                [],
+            ).append(
+                {
+                    "attempt": attempt,
+                    "errors": errors,
+                }
+            )
+            generated = await self._generate_report_segment(
+                segment_id=f"summary_repair_{attempt}",
+                query=query,
+                context=context,
+                custom_prompt=self._summary_repair_prompt(
+                    errors,
+                    generated,
+                    attempt,
+                ),
+                cfg=cfg,
+                generation=generation,
+            )
+            summary = self._clean_summary_segment(generated)
+            if summary:
+                return summary
+            errors = self._summary_validation_errors(generated)
+        return ""
 
     async def _generate_dynamic_analysis_chapter_segmented(
         self,
@@ -442,36 +559,33 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 for evidence in evidence_items
                 if self._matches_dynamic_section(evidence, section)
             ]
+            matrix_spec = self._section_matrix_spec(
+                section,
+                section_claims,
+                section_evidence,
+                citation_refs_by_evidence_id,
+            )
             section_context = self._build_dynamic_section_context(
                 state,
                 section,
                 section_claims,
                 citation_refs_by_evidence_id,
+                matrix_spec=matrix_spec,
             )
             section_body = ""
             if section_claims:
-                generated = await self._generate_report_segment(
-                    segment_id=f"analysis_{section['id']}",
+                section_body = await self._generate_dynamic_section_body_with_retries(
+                    state=state,
+                    section=section,
+                    section_claims=section_claims,
+                    section_evidence=section_evidence,
+                    citation_refs_by_evidence_id=citation_refs_by_evidence_id,
+                    matrix_spec=matrix_spec,
                     query=query,
                     context=section_context,
-                    custom_prompt=self._dynamic_section_prompt(section),
                     cfg=cfg,
                     generation=generation,
                 )
-                section_body = self._clean_dynamic_section_body(generated)
-                if section_body:
-                    if not self._dynamic_section_body_has_competitor_dimension_matrix(
-                        section_body,
-                        section,
-                        section_claims,
-                    ):
-                        section_body = ""
-                    elif not self._dynamic_section_body_covers_claim_competitors(
-                        section_body,
-                        section_claims,
-                        citation_refs_by_evidence_id,
-                    ):
-                        section_body = ""
 
             if not section_body:
                 if section_claims:
@@ -486,6 +600,205 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             else:
                 lines.extend(["", f"### {section['number']} {section['title']}", "", section_body])
         return "\n".join(lines)
+
+    async def _generate_dynamic_section_body_with_retries(
+        self,
+        state: CompetitorAnalysisState,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        matrix_spec: dict[str, Any],
+        query: str,
+        context: str,
+        cfg: Config,
+        generation: dict[str, Any],
+    ) -> str:
+        segment_key = f"analysis_{section['id']}"
+        generated = await self._generate_report_segment(
+            segment_id=segment_key,
+            query=query,
+            context=context,
+            custom_prompt=self._dynamic_section_prompt(section),
+            cfg=cfg,
+            generation=generation,
+        )
+        errors = self._dynamic_section_validation_errors(generated, matrix_spec)
+        section_body = ""
+        if not errors:
+            section_body = self._dynamic_section_body_from_llm_fill(
+                generated,
+                section,
+                section_claims,
+                section_evidence,
+                citation_refs_by_evidence_id,
+                matrix_spec,
+            )
+        if section_body and not errors:
+            return section_body
+
+        for attempt in range(1, SECTION_REPAIR_ATTEMPTS + 1):
+            generation.setdefault("repair_attempts", {})[segment_key] = attempt
+            generation.setdefault("repair_feedback", {}).setdefault(
+                segment_key,
+                [],
+            ).append(
+                {
+                    "attempt": attempt,
+                    "errors": errors,
+                }
+            )
+            generated = await self._generate_report_segment(
+                segment_id=f"{segment_key}_repair_{attempt}",
+                query=query,
+                context=context,
+                custom_prompt=self._dynamic_section_repair_prompt(
+                    section,
+                    errors,
+                    generated,
+                    attempt,
+                ),
+                cfg=cfg,
+                generation=generation,
+            )
+            errors = self._dynamic_section_validation_errors(generated, matrix_spec)
+            section_body = ""
+            if not errors:
+                section_body = self._dynamic_section_body_from_llm_fill(
+                    generated,
+                    section,
+                    section_claims,
+                    section_evidence,
+                    citation_refs_by_evidence_id,
+                    matrix_spec,
+                )
+            if section_body and not errors:
+                return section_body
+        return ""
+
+    def _dynamic_section_validation_errors(
+        self,
+        generated: str,
+        matrix_spec: dict[str, Any],
+    ) -> list[str]:
+        parsed = self._parse_llm_json_object(generated)
+        if not parsed:
+            return ["输出不是 strict JSON object，无法按固定矩阵填充。"]
+        errors = []
+        cells = parsed.get("cells")
+        if not isinstance(cells, list) or not cells:
+            errors.append("JSON 中缺少非空 cells 数组。")
+        rows = matrix_spec.get("rows", []) or []
+        competitors = matrix_spec.get("competitors", []) or []
+        if rows and competitors and isinstance(cells, list):
+            expected_cell_count = len(rows) * len(competitors)
+            if len(cells) < expected_cell_count:
+                errors.append(
+                    f"cells 数量少于固定矩阵单元格数量，应尽量填满 {expected_cell_count} 个单元格。"
+                )
+            cell_text_by_key = self._llm_cell_text_by_matrix_key(cells, matrix_spec)
+            errors.extend(
+                self._dynamic_section_cell_validation_errors(
+                    matrix_spec,
+                    cell_text_by_key,
+                )
+            )
+        if "analysis" not in parsed:
+            errors.append("JSON 中缺少 analysis 字段。")
+        return errors
+
+    def _dynamic_section_cell_validation_errors(
+        self,
+        matrix_spec: dict[str, Any],
+        cell_text_by_key: dict[tuple[str, str], str],
+    ) -> list[str]:
+        errors: list[str] = []
+        for row in matrix_spec.get("rows", []) or []:
+            if not isinstance(row, dict):
+                continue
+            row_key = str(row.get("row_key", "") or "").strip()
+            row_label = str(row.get("label", "") or row_key)
+            for cell in row.get("cells", []) or []:
+                if not isinstance(cell, dict):
+                    continue
+                competitor = str(cell.get("competitor", "") or "").strip()
+                text = " ".join(
+                    str(cell_text_by_key.get((row_key, competitor), "") or "").split()
+                )
+                candidates = cell.get("claim_candidates", []) or []
+                candidate_texts = [
+                    str(candidate.get("text", "") or "").strip()
+                    for candidate in candidates
+                    if isinstance(candidate, dict)
+                    and str(candidate.get("text", "") or "").strip()
+                ]
+                candidate_refs = {
+                    ref
+                    for candidate in candidates
+                    if isinstance(candidate, dict)
+                    for ref in candidate.get("citation_refs", []) or []
+                    if ref
+                }
+                cell_name = f"{row_label}/{competitor}"
+                if candidates:
+                    if not text:
+                        errors.append(f"{cell_name} 有 claim_candidates，但 LLM 未填写。")
+                    elif self._is_gap_placeholder(text):
+                        errors.append(
+                            f"{cell_name} 有 claim_candidates，不能写公开证据不足。"
+                        )
+                    elif self._looks_like_raw_source_excerpt(
+                        text,
+                        reject_long_text=False,
+                    ):
+                        errors.append(f"{cell_name} 写入了 raw source/page chrome。")
+                    elif candidate_refs and not any(ref in text for ref in candidate_refs):
+                        errors.append(
+                            f"{cell_name} 缺少候选 citation_ref：{''.join(sorted(candidate_refs))}。"
+                        )
+                    elif not self._llm_text_grounded_in_candidates(
+                        text,
+                        candidate_texts,
+                    ):
+                        errors.append(
+                            f"{cell_name} 文本未贴近候选 claim，不能只拼接 citation_ref。"
+                        )
+                elif text and not self._is_gap_placeholder(text):
+                    errors.append(
+                        f"{cell_name} 没有 claim_candidates，只能写公开证据不足。"
+                    )
+                if len(errors) >= 8:
+                    return errors
+        return errors
+
+    def _dynamic_section_repair_prompt(
+        self,
+        section: dict[str, Any],
+        errors: list[str],
+        previous_output: str,
+        attempt: int,
+    ) -> str:
+        error_lines = "\n".join(f"- {error}" for error in errors) or "- 未通过格式校验。"
+        previous = self._truncate_text(
+            " ".join(str(previous_output or "").split()),
+            1800,
+        )
+        return f"""
+{self._dynamic_section_prompt(section)}
+
+上一版"{section['number']} {section['title']}"未通过系统校验，这是第 {attempt}/{SECTION_REPAIR_ATTEMPTS} 次修复机会。
+
+必须修复的问题：
+{error_lines}
+
+请重新输出 strict JSON，不要输出 Markdown 表格，不要解释，不要输出章节标题。
+row_key 和 competitor 必须来自 Context.matrix_template；没有 claim_candidates 的 cell 才能写"公开证据不足"。
+每个有 claim_candidates 的 cell 必须用候选 text 改写一句，并保留其中至少一个候选 citation_ref。
+如果不知道如何改写，就直接压缩候选 text；不要把有候选的竞品写成公开证据不足。
+
+上一版输出（仅供定位错误）：
+{previous}
+"""
 
     async def _generate_dynamic_analysis_overview_segmented(
         self,
@@ -566,11 +879,39 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
 ## 第二章：确定竞品
 ### 竞品信息卡片
 - 为每个竞品输出一个简短信息卡片。
+- 每个竞品必须使用 Context.competitors 中的 citation_refs 或 profile_claims.citation_refs。
+- 如果该竞品有 citation_ref，不要写"公开资料不足"、"暂未完善"、"暂无对应公开标注引用来源"。
+- 缺少 notes 时，备注写"见后续分析维度"并附可用引用，不要写成资料不足。
 
 ### 竞品分类表格
 - 输出 Markdown 表格，推荐列：竞品、产品/品牌、分类、官网、备注、主要引用。
+- 主要引用列必须使用 citation_ref，例如 [1]；不要写 raw evidence id。
 
 必须保留可用的 citation_ref，例如 [1]。不要输出第三章、第四章或附录。
+"""
+
+    def _opening_repair_prompt(
+        self,
+        errors: list[str],
+        previous_output: str,
+        attempt: int,
+    ) -> str:
+        error_text = "\n".join(f"- {error}" for error in errors) or "- 格式或引用不合格"
+        return f"""
+请重新输出完整"# 竞品分析报告"、"## 第一章：分析目的"和"## 第二章：确定竞品"，不要解释，不要复述规则，不要输出第三章/第四章/附录。
+
+这是第 {attempt} 次修正。上一次输出未通过校验：
+{error_text}
+
+修正要求：
+- 每个竞品的信息卡片和分类表格都要保留可用 citation_ref，例如 [1]。
+- 如果 Context 中已有该竞品的 citation_ref，不要写"公开资料不足"、"暂未完善"、"暂无对应公开标注引用来源"。
+- 备注列可以写"见后续分析维度"并附该竞品可用引用；不要把缺少 profile 字段写成证据不足。
+- 官网必须使用 Context.competitors.website，不要自行猜测。
+- 只使用 Context 中的 competitor 字段、profile_claims、citation_ref。
+
+上一次输出如下，仅供你定位问题，不要照抄其中的错误占位：
+{previous_output}
 """
 
     def _dynamic_overview_prompt(self) -> str:
@@ -587,25 +928,27 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
 
     def _dynamic_section_prompt(self, section: dict[str, Any]) -> str:
         return f"""
-请只基于 Context 输出"{section['number']} {section['title']}"小节正文，不要输出章节标题。
+请只基于 Context 为"{section['number']} {section['title']}"小节填充既定矩阵。
 
-小节必须包含：
-1. 一个二维对比表格，固定采用"竞品横向、维度纵向"：第一列为"对比维度"，后续列为各竞品名称；不要输出"竞品/对象、结论、引用"这种长表。
-2. 一段对应的分析文字。
-3. 表格或段落中保留相关 citation_ref，例如 [1]。
-4. 只要 Context 中存在与本动态维度相关、可追溯的 claim，就可以引用；不要因为来源类型不是某类优先来源而弃用。
-5. 对间接公开证据生成的结论要保持保守表述，例如"公开资料显示""间接证据显示""尚不足以确认完整细节"。
-6. 如果 claim 带有 specificity_hints，表格中的竞品单元格或紧随其后的分析文字至少使用其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要把这些细节压成"多种能力""能力体系""产品矩阵""相关信号"等概述性描述。
-7. 对比表行必须拆成本小节下的 3-6 个共同对比口径；如果本小节只有极少 claim，才允许少于 3 行。不要只输出一行"{section['title']}"大而全汇总。
-8. 每个竞品单元格分别概括该竞品在该口径下已有引用 claim。不要把每条 claim 拆成"竞品/对象、结论、引用"的纵向列表。
-9. 如果 Context 中没有与本动态维度相关的任何 claim 或 evidence，跳过本小节，不要输出任何文字，不要编造。
+重要：不要生成 Markdown 表格，不要自行新增、删除、重排列或改名矩阵行列。矩阵结构已经在 Context.matrix_template 中给出，由系统渲染 Markdown。
 
-表格示例格式：
-| 对比维度 | 竞品 A | 竞品 B |
-| --- | --- | --- |
-| 定位与品牌主张 | 竞品 A 的可追溯定位结论。[1] | 竞品 B 的可追溯定位结论。[2] |
-| 产品模块与功能覆盖 | 竞品 A 的可追溯能力结论。[3] | 竞品 B 的可追溯能力结论。[4] |
-| 客户案例与行业落地 | 竞品 A 的可追溯落地结论。[5] | 竞品 B 的可追溯落地结论。[6] |
+只返回 strict JSON，形状如下：
+{{
+  "cells": [
+    {{"row_key": "来自 matrix_template.rows[].row_key", "competitor": "来自 matrix_template.competitors", "text": "该单元格的一句 claim 总结，保留 citation_ref"}}
+  ],
+  "analysis": "一段对应分析文字，保留 citation_ref"
+}}
+
+填充规则：
+1. 每个 cell 只能使用 matrix_template 中同一 row_key + competitor 下的 claim_candidates。
+2. 有 claim_candidates 的 cell 必须保留至少一个候选 citation_ref，例如 [1]。
+3. 如果 cell 的 candidate_scope 是 "same_dimension"，说明没有命中该行精确口径，但同一动态维度下有该竞品的可追溯 claim；请用"同维度公开证据显示..."等保守表述，不要写成该竞品整体"公开证据不足"。
+4. 没有 claim_candidates 的 cell 必须写且只能写"公开证据不足"。
+5. 不要从 raw evidence/excerpt/title 中直接推导新结论；raw evidence 只用于理解已给 claim，不可直接搬进正文。
+6. 对间接公开证据生成的结论要保持保守表述，例如"公开资料显示""间接证据显示""尚不足以确认完整细节"。
+7. 如果候选 claim 带有 specificity_hints，优先保留其中一个具体细节，例如模块名、价格/数字、版本、报告/认证名称或业务场景；不要只写"多种能力""能力体系""产品矩阵""相关信号"等概述性描述。
+8. analysis 只能综合 matrix_template 中有 citation_ref 的候选 claim；不要引入 Context 外信息。
 
 动态维度：{section['title']}
 维度说明：{section['guiding_question']}
@@ -668,7 +1011,26 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         opening: str,
         state: CompetitorAnalysisState,
         citation_refs_by_evidence_id: dict[str, str],
+        claims: list[dict[str, Any]] | None = None,
     ) -> bool:
+        return not self._opening_validation_errors(
+            opening,
+            state,
+            claims or [],
+            citation_refs_by_evidence_id,
+        )
+
+    def _opening_validation_errors(
+        self,
+        opening: str,
+        state: CompetitorAnalysisState,
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> list[str]:
+        errors: list[str] = []
+        value = opening or ""
+        if "# 竞品分析报告" not in value or "## 第二章：确定竞品" not in value:
+            errors.append("opening 必须包含报告标题和第二章。")
         task = state.get("task", {})
         competitors = state.get("competitors") or task.get("competitors", [])
         expected_ref_sets = []
@@ -679,16 +1041,49 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 competitor.get("evidence_ids", []),
                 citation_refs_by_evidence_id,
             )
+            refs.extend(
+                self._competitor_claim_refs(
+                    competitor,
+                    claims,
+                    citation_refs_by_evidence_id,
+                )
+            )
+            refs = list(dict.fromkeys(refs))
             if refs:
                 expected_ref_sets.append(refs)
-        if not expected_ref_sets:
-            return True
-        return all(
-            any(ref in opening for ref in refs)
-            for refs in expected_ref_sets
+        for refs in expected_ref_sets:
+            if not any(ref in value for ref in refs):
+                errors.append(
+                    "第二章缺少至少一个竞品的可用 citation_ref；每个有证据的竞品都必须出现引用。"
+                )
+                break
+        if expected_ref_sets and self._opening_has_gap_placeholder(value):
+            errors.append(
+                "第二章在已有 citation_ref 时仍写了公开资料不足、暂未完善或暂无引用占位。"
+            )
+        return errors
+
+    def _opening_has_gap_placeholder(self, opening: str) -> bool:
+        value = " ".join(str(opening or "").split())
+        gap_markers = (
+            "公开资料不足",
+            "公开数据不足",
+            "暂未完善",
+            "暂无对应公开标注引用来源",
+            "暂无对应公开引用来源",
+            "暂无引用",
         )
+        return any(marker in value for marker in gap_markers)
 
     def _clean_summary_segment(self, report: str) -> str:
+        segment = self._prepared_summary_segment(report)
+        if not segment:
+            return ""
+        if self._summary_validation_errors_for_segment(segment):
+            return ""
+        return segment
+
+    def _prepared_summary_segment(self, report: str) -> str:
         segment = (report or "").strip()
         if not segment:
             return ""
@@ -696,15 +1091,75 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         if summary_start >= 0:
             segment = segment[summary_start:]
         segment = self._truncate_before_any_heading(segment, ("## 附录",)).strip()
+        segment = self._strip_summary_instruction_echoes(segment)
+        return segment.strip()
+
+    def _summary_validation_errors(self, report: str) -> list[str]:
+        segment = self._prepared_summary_segment(report)
+        if not segment:
+            return ["输出为空或未包含第四章总结内容。"]
+        return self._summary_validation_errors_for_segment(segment)
+
+    def _summary_validation_errors_for_segment(self, segment: str) -> list[str]:
+        errors = []
         if not self._has_fixed_summary_matrices(segment):
-            return ""
+            errors.append("缺少固定 SWOT/TOWS 矩阵结构，或表头/行名被改动。")
         if self._has_mixed_summary_gap_placeholder(segment):
-            return ""
+            errors.append("同一个 SWOT/TOWS 单元格中混入了有引用结论和“公开证据不足”占位。")
         if self._has_uncited_summary_matrix_content(segment):
-            return ""
+            errors.append("SWOT/TOWS 某些编号条目缺少 citation_ref；每个编号条目都必须带 [n]。")
         if self._has_bad_tows_wt_pair(segment):
-            return ""
-        return segment
+            errors.append("WT 防御型格子引用了 SO/ST/WO 配对或复用了错误战略类型。")
+        return errors
+
+    def _summary_repair_prompt(
+        self,
+        errors: list[str],
+        previous_output: str,
+        attempt: int,
+    ) -> str:
+        error_lines = "\n".join(f"- {error}" for error in errors) or "- 未通过格式校验。"
+        previous = self._truncate_text(
+            " ".join(str(previous_output or "").split()),
+            2400,
+        )
+        return f"""
+{self._summary_prompt()}
+
+上一版第四章未通过系统校验，这是第 {attempt}/{SUMMARY_REPAIR_ATTEMPTS} 次修复机会。
+
+必须修复的问题：
+{error_lines}
+
+请重新输出完整"## 第四章：总结"，不要解释，不要复述规则，不要输出附录。
+特别注意：
+- 固定 SWOT/TOWS 表头和行名必须保持不变。
+- 每个编号条目都必须带 citation_ref，例如 [1] 或 [1][2]。
+- 不要在同一个单元格里同时写有效条目和"公开证据不足"。
+- 如果某个编号条目无法绑定 citation_ref，删除该条，而不是保留无引用条目。
+
+上一版输出（仅供定位错误，不能照抄无引用条目）：
+{previous}
+"""
+
+    def _strip_summary_instruction_echoes(self, report: str) -> str:
+        instruction_phrases = (
+            "基于 Context 中的 analysis_claims",
+            "基于上述 SWOT 因子交叉配对",
+            "必须严格输出下面这个固定 TOWS 战略矩阵",
+            "不要改表头",
+            "不要改行名",
+            "不要新增列",
+            "只替换每个格子",
+            "输出固定 2×2 SWOT 因素矩阵",
+            "输出 TOWS 战略矩阵",
+        )
+        cleaned_lines = [
+            line
+            for line in report.splitlines()
+            if not any(phrase in line for phrase in instruction_phrases)
+        ]
+        return "\n".join(cleaned_lines).strip()
 
     def _has_fixed_summary_matrices(self, report: str) -> bool:
         lines = [line.strip() for line in (report or "").splitlines()]
@@ -766,10 +1221,28 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             for cell in self._markdown_row_cells(stripped):
                 if not any(label in cell for label in matrix_labels):
                     continue
-                if citation_pattern.search(cell):
-                    continue
                 if self._summary_gap_only_cell(cell):
                     continue
+                if self._summary_cell_has_uncited_entries(cell, citation_pattern):
+                    return True
+        return False
+
+    def _summary_cell_has_uncited_entries(
+        self,
+        cell: str,
+        citation_pattern: Any,
+    ) -> bool:
+        import re
+
+        for part in re.split(r"<br\s*/?>", str(cell or ""), flags=re.IGNORECASE):
+            value = re.sub(r"\*\*[^*]+\*\*", "", part)
+            value = re.sub(r"^\s*\d+[.、]\s*", "", value.strip())
+            value = value.strip(" 。；;，,：:")
+            if not value:
+                continue
+            if self._summary_gap_only_cell(value):
+                continue
+            if not citation_pattern.search(value):
                 return True
         return False
 
@@ -822,6 +1295,199 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         if any(line.lstrip().startswith("#") for line in body.splitlines()):
             return ""
         return body
+
+    def _dynamic_section_body_from_llm_fill(
+        self,
+        generated: str,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        matrix_spec: dict[str, Any],
+    ) -> str:
+        parsed = self._parse_llm_json_object(generated)
+        if not parsed:
+            return ""
+
+        cells = parsed.get("cells", [])
+        cell_text_by_key = self._llm_cell_text_by_matrix_key(
+            cells if isinstance(cells, list) else [],
+            matrix_spec,
+        )
+
+        lines = self._dynamic_section_matrix_lines(
+            section,
+            section_claims,
+            section_evidence,
+            citation_refs_by_evidence_id,
+            matrix_spec,
+            cell_text_by_key,
+        )
+        if not lines:
+            return ""
+
+        analysis = self._accepted_llm_analysis_text(
+            str(parsed.get("analysis", "") or ""),
+            section_claims,
+            citation_refs_by_evidence_id,
+        )
+        if not analysis:
+            analysis = self._section_matrix_analysis(
+                section_claims,
+                citation_refs_by_evidence_id,
+            )
+        return "\n".join([*lines, "", analysis]).strip()
+
+    def _llm_cell_text_by_matrix_key(
+        self,
+        cells: list[Any],
+        matrix_spec: dict[str, Any],
+    ) -> dict[tuple[str, str], str]:
+        competitors = [
+            str(value or "").strip()
+            for value in matrix_spec.get("competitors", []) or []
+            if str(value or "").strip()
+        ]
+        rows = [
+            row
+            for row in matrix_spec.get("rows", []) or []
+            if isinstance(row, dict)
+        ]
+        row_keys = {
+            str(row.get("row_key", "") or "").strip()
+            for row in rows
+            if str(row.get("row_key", "") or "").strip()
+        }
+        row_key_by_label = {
+            str(row.get("label", "") or "").strip(): str(row.get("row_key", "") or "").strip()
+            for row in rows
+            if str(row.get("label", "") or "").strip()
+        }
+        text_by_key: dict[tuple[str, str], str] = {}
+        unresolved_cells: list[tuple[int, str, str]] = []
+
+        for index, cell in enumerate(cells):
+            if not isinstance(cell, dict):
+                continue
+            competitor = str(cell.get("competitor", "") or "").strip()
+            text = str(cell.get("text", "") or "").strip()
+            row_value = str(
+                cell.get("row_key", "") or cell.get("row_label", "") or ""
+            ).strip()
+            row_key = row_value if row_value in row_keys else row_key_by_label.get(row_value, "")
+            if row_key and competitor in competitors:
+                text_by_key[(row_key, competitor)] = text
+            else:
+                unresolved_cells.append((index, competitor, text))
+
+        if not rows or not competitors:
+            return text_by_key
+        for index, competitor, text in unresolved_cells:
+            if competitor not in competitors:
+                continue
+            row_index = index // len(competitors)
+            if row_index >= len(rows):
+                continue
+            row_key = str(rows[row_index].get("row_key", "") or "").strip()
+            if row_key and (row_key, competitor) not in text_by_key:
+                text_by_key[(row_key, competitor)] = text
+        return text_by_key
+
+    def _parse_llm_json_object(self, generated: str) -> dict[str, Any]:
+        text = (generated or "").strip()
+        if not text:
+            return {}
+        if "```" in text:
+            text = text.replace("```json", "```")
+            parts = text.split("```")
+            text = next(
+                (
+                    part.strip()
+                    for part in parts
+                    if "{" in part and "}" in part
+                ),
+                text,
+            )
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+        try:
+            parsed = json_repair.loads(text)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _accepted_llm_analysis_text(
+        self,
+        text: str,
+        section_claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> str:
+        value = " ".join(str(text or "").split()).strip()
+        if not value:
+            return ""
+        if "|" in value or value.startswith("#"):
+            return ""
+        if self._looks_like_raw_source_excerpt(value, reject_long_text=False):
+            return ""
+        writable_claims = [
+            claim for claim in section_claims if self._writable_claim_text(claim)
+        ]
+        all_refs = {
+            ref
+            for claim in writable_claims
+            for ref in self._citation_refs_for_evidence_ids(
+                claim.get("evidence_ids", []),
+                citation_refs_by_evidence_id,
+            )
+        }
+        if all_refs and not any(ref in value for ref in all_refs):
+            return ""
+        if self._analysis_text_has_supported_competitor_gap(
+            value,
+            writable_claims,
+        ):
+            return ""
+        return self._truncate_text(value, 520)
+
+    def _analysis_text_has_supported_competitor_gap(
+        self,
+        text: str,
+        writable_claims: list[dict[str, Any]],
+    ) -> bool:
+        import re
+
+        supported_competitors = {
+            str(competitor or "").strip()
+            for claim in writable_claims
+            for competitor in claim.get("competitors", []) or []
+            if str(competitor or "").strip()
+        }
+        if not supported_competitors:
+            return False
+        gap_phrases = (
+            "公开证据不足",
+            "公开资料不足",
+            "暂未获取",
+            "暂未覆盖",
+            "暂未披露",
+            "尚不足以确认",
+            "不足以确认",
+            "缺少可溯源",
+            "缺少公开",
+            "公开缺口",
+        )
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"[。！？!?；;]\s*", str(text or ""))
+            if sentence.strip()
+        ]
+        return any(
+            competitor in sentence and any(phrase in sentence for phrase in gap_phrases)
+            for competitor in supported_competitors
+            for sentence in sentences
+        )
 
     def _dynamic_section_body_has_competitor_dimension_matrix(
         self,
@@ -1009,19 +1675,27 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
     def _build_opening_context(
         self,
         state: CompetitorAnalysisState,
+        claims: list[dict[str, Any]],
         citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         payload = {
             "reporting_constraints": [
                 "Only write chapters one and two.",
                 "Use competitor fields and citation_ref values already attached to competitors.",
-                "Use competitors.website as provided; write 公开资料不足 only if website is empty.",
+                "Use competitors.website as provided; write 未提供 only if website is empty.",
+                "If a competitor has citation_refs or profile_claims, do not write 公开资料不足, 暂未完善, or 暂无对应公开标注引用来源.",
+                "For empty notes, write 见后续分析维度 with that competitor's citation_ref.",
                 "Do not guess or replace competitor websites during report writing.",
                 "Do not write chapter three, summary, or appendix.",
             ],
             "task": self._task_for_report_context(state, citation_refs_by_evidence_id),
             "competitors": self._compact_competitors_for_context(
                 state.get("competitors") or state.get("task", {}).get("competitors", []),
+                citation_refs_by_evidence_id,
+            ),
+            "profile_claims": self._compact_profile_claims_by_competitor(
+                state.get("competitors") or state.get("task", {}).get("competitors", []),
+                claims,
                 citation_refs_by_evidence_id,
             ),
         }
@@ -1033,10 +1707,12 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         section: dict[str, Any],
         claims: list[dict[str, Any]],
         citation_refs_by_evidence_id: dict[str, str],
+        matrix_spec: dict[str, Any] | None = None,
     ) -> str:
         report_evidence_ids = set(citation_refs_by_evidence_id)
         evidence_by_id = self._evidence_by_id(state)
         knowledge_fact_by_id = self._knowledge_fact_by_id(state)
+        writable_claims = [claim for claim in claims if self._writable_claim_text(claim)]
         mapped_dimensions = [
             dimension
             for dimension in self._analysis_dimensions(state, [])
@@ -1052,11 +1728,10 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 "If branch_coverage_states show blocked coverage with accepted_evidence_ids, describe this as same-basis, authority, or source-type coverage limits rather than no public evidence.",
                 "Do not infer new claims from raw evidence.",
                 "When specificity_hints exist, preserve concrete modules, metrics, reports, certifications, or scenarios instead of generic capability wording.",
-                "For every competitor represented in analysis_claims, include at least one citation_ref from that competitor's claims.",
-                "Write the subsection table as a matrix: first column 对比维度, following columns competitor names.",
-                "Do not use a long table with columns like 竞品/对象, 结论, 引用.",
-                "Do not write 公开证据不足 for a competitor that has citation-backed claims in analysis_claims.",
-                "If claims are missing, write 公开证据不足.",
+                "Return strict JSON that fills matrix_template cells; the system renders the Markdown matrix.",
+                "Do not add, remove, rename, or reorder matrix rows or competitor columns.",
+                "Only fill a cell from claim_candidates in the same row_key and competitor.",
+                "If a matrix cell has no claim_candidates, write exactly 公开证据不足.",
             ],
             "task_query": state.get("task", {}).get("query", ""),
             "competitors": self._compact_competitors_for_context(
@@ -1071,6 +1746,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 "source_dimension_ids": section.get("source_dimension_ids", []),
             },
             "mapped_analysis_dimensions": mapped_dimensions,
+            "matrix_template": matrix_spec or {},
             "branch_coverage_states": self._compact_branch_coverage_states(
                 [
                     coverage_state
@@ -1087,7 +1763,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                     knowledge_fact_by_id,
                 )
                 for claim in self._fair_sample_claims_by_competitor(
-                    claims,
+                    writable_claims,
                     SECTION_CLAIM_LIMIT,
                 )
             ],
@@ -1126,7 +1802,10 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                     evidence_by_id,
                     knowledge_fact_by_id,
                 )
-                for claim in claims[:SUMMARY_CLAIM_LIMIT]
+                for claim in self._summary_claims_for_context(
+                    claims,
+                    SUMMARY_CLAIM_LIMIT,
+                )
             ],
         }
         return self._dump_context_with_budget(payload, ANALYSIS_OVERVIEW_CONTEXT_CHAR_LIMIT)
@@ -1163,16 +1842,57 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                     evidence_by_id,
                     knowledge_fact_by_id,
                 )
-                for claim in claims[:SUMMARY_CLAIM_LIMIT]
+                for claim in self._summary_claims_for_context(
+                    claims,
+                    SUMMARY_CLAIM_LIMIT,
+                )
             ],
         }
         return self._dump_context_with_budget(payload, SUMMARY_CONTEXT_CHAR_LIMIT)
+
+    def _summary_claims_for_context(
+        self,
+        claims: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        writable_claims = [claim for claim in claims if self._writable_claim_text(claim)]
+        if limit <= 0:
+            return []
+        if len(writable_claims) <= limit:
+            return writable_claims
+
+        grouped_claims: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        group_order: list[tuple[str, str]] = []
+        for claim in writable_claims:
+            dimension_key = (
+                self._item_dimension_id(claim)
+                or str(claim.get("report_section_id", "") or "")
+                or "evidence_supported_findings"
+            )
+            group_key = (dimension_key, self._claim_competitor_key(claim))
+            if group_key not in grouped_claims:
+                grouped_claims[group_key] = []
+                group_order.append(group_key)
+            grouped_claims[group_key].append(claim)
+
+        sampled_claims: list[dict[str, Any]] = []
+        while len(sampled_claims) < limit and any(grouped_claims.values()):
+            for group_key in group_order:
+                group_claims = grouped_claims[group_key]
+                if not group_claims:
+                    continue
+                sampled_claims.append(group_claims.pop(0))
+                if len(sampled_claims) >= limit:
+                    break
+        return sampled_claims
 
     def _fallback_opening_chapters(
         self,
         state: CompetitorAnalysisState,
         citation_refs_by_evidence_id: dict[str, str],
+        claims: list[dict[str, Any]] | None = None,
     ) -> str:
+        claims = claims or []
         task = state.get("task", {})
         competitors = state.get("competitors") or task.get("competitors", [])
         lines = [
@@ -1195,16 +1915,28 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                         competitor.get("evidence_ids", []),
                         citation_refs_by_evidence_id,
                     )
+                    evidence_refs = list(
+                        dict.fromkeys(
+                            evidence_refs
+                            + self._competitor_claim_refs(
+                                competitor,
+                                claims,
+                                citation_refs_by_evidence_id,
+                            )
+                        )
+                    )
                     lines.append(f"- **{competitor.get('name', '未知竞品')}**")
-                    lines.append(f"  - 产品/品牌：{competitor.get('product', '公开资料不足') or '公开资料不足'}")
-                    lines.append(f"  - 官网：{website or '公开资料不足'}")
-                    lines.append(f"  - 分类：{competitor.get('category', '公开资料不足') or '公开资料不足'}")
-                    lines.append(f"  - 备注：{competitor.get('notes', '公开资料不足') or '公开资料不足'}")
-                    lines.append(f"  - 主要引用：{', '.join(evidence_refs) or '公开资料不足'}")
+                    lines.append(f"  - 产品/品牌：{competitor.get('product', '未提供') or '未提供'}")
+                    lines.append(f"  - 官网：{website or '未提供'}")
+                    lines.append(f"  - 分类：{competitor.get('category', '未提供') or '未提供'}")
+                    lines.append(
+                        f"  - 备注：{self._safe_competitor_notes(competitor)}"
+                    )
+                    lines.append(f"  - 主要引用：{', '.join(evidence_refs[:3]) or '无'}")
                 else:
                     lines.append(f"- **{competitor}**")
         else:
-            lines.append("- 公开资料不足。")
+            lines.append("- 未提供竞品信息。")
 
         lines.extend(
             [
@@ -1220,20 +1952,29 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 if isinstance(competitor, dict):
                     website = self._competitor_website(competitor)
                     evidence_refs = ", ".join(
-                        self._citation_refs_for_evidence_ids(
-                            competitor.get("evidence_ids", []),
-                            citation_refs_by_evidence_id,
+                        list(
+                            dict.fromkeys(
+                                self._citation_refs_for_evidence_ids(
+                                    competitor.get("evidence_ids", []),
+                                    citation_refs_by_evidence_id,
+                                )
+                                + self._competitor_claim_refs(
+                                    competitor,
+                                    claims,
+                                    citation_refs_by_evidence_id,
+                                )
+                            )
                         )[:3]
                     )
                     lines.append(
                         self._markdown_table_row(
                             [
                                 competitor.get("name", "") or "未知竞品",
-                                competitor.get("product", "") or "公开资料不足",
-                                competitor.get("category", "") or "公开资料不足",
-                                website or "公开资料不足",
-                                competitor.get("notes", "") or "公开资料不足",
-                                evidence_refs or "公开资料不足",
+                                competitor.get("product", "") or "未提供",
+                                competitor.get("category", "") or "未提供",
+                                website or "未提供",
+                                self._safe_competitor_notes(competitor),
+                                evidence_refs or "无",
                             ]
                         )
                     )
@@ -1242,16 +1983,16 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                         self._markdown_table_row(
                             [
                                 competitor,
-                                "公开资料不足",
-                                "公开资料不足",
-                                "公开资料不足",
-                                "公开资料不足",
-                                "公开资料不足",
+                                "未提供",
+                                "未提供",
+                                "未提供",
+                                "见后续分析维度",
+                                "无",
                             ]
                         )
                     )
         else:
-            lines.append("| 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 | 公开资料不足 |")
+            lines.append("| 未提供 | 未提供 | 未提供 | 未提供 | 见后续分析维度 | 无 |")
         return "\n".join(lines)
 
     def _fallback_summary_chapter(
@@ -1295,11 +2036,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             if evidence_ids
             else "公开证据不足，无法推演"
         )
-        wt_cell = (
-            f"竞品需在证据薄弱领域加强信息采集与风险预判，防止关键维度出现竞争盲区。{evidence_ids}"
-            if evidence_ids
-            else "公开证据不足，无法推演"
-        )
+        wt_cell = "公开证据不足，无法推演"
         conclusion = (
             f"整体来看，当前报告优先呈现已有证据支持的竞争差异；对公开资料不足的维度建议补充采集后迭代更新。{evidence_ids}"
             if evidence_ids
@@ -1370,7 +2107,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                     "product": competitor.get("product", ""),
                     "website": self._competitor_website(competitor),
                     "category": competitor.get("category", ""),
-                    "notes": competitor.get("notes", ""),
+                    "notes": self._safe_competitor_notes(competitor),
                     "evidence_ids": evidence_ids,
                     "citation_refs": self._citation_refs_for_evidence_ids(
                         evidence_ids,
@@ -1379,6 +2116,93 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 }
             )
         return compact_competitors
+
+    def _compact_profile_claims_by_competitor(
+        self,
+        competitors: list[Any],
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        profile_claims: dict[str, list[dict[str, Any]]] = {}
+        for competitor in competitors:
+            name = (
+                str(competitor.get("name", "") or "").strip()
+                if isinstance(competitor, dict)
+                else str(competitor or "").strip()
+            )
+            if not name:
+                continue
+            entries = []
+            for claim in claims:
+                if not self._claim_matches_competitor_name(claim, name):
+                    continue
+                claim_text = self._writable_claim_text(claim)
+                if not claim_text:
+                    continue
+                citation_refs = self._citation_refs_for_evidence_ids(
+                    claim.get("evidence_ids", []),
+                    citation_refs_by_evidence_id,
+                )
+                if not citation_refs:
+                    continue
+                entries.append(
+                    {
+                        "claim": self._truncate_text(claim_text, 140),
+                        "citation_refs": citation_refs[:3],
+                    }
+                )
+                if len(entries) >= 3:
+                    break
+            if entries:
+                profile_claims[name] = entries
+        return profile_claims
+
+    def _competitor_claim_refs(
+        self,
+        competitor: dict[str, Any] | str,
+        claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> list[str]:
+        name = (
+            str(competitor.get("name", "") or "").strip()
+            if isinstance(competitor, dict)
+            else str(competitor or "").strip()
+        )
+        refs: list[str] = []
+        for claim in claims:
+            if not self._claim_matches_competitor_name(claim, name):
+                continue
+            if not self._writable_claim_text(claim):
+                continue
+            refs.extend(
+                self._citation_refs_for_evidence_ids(
+                    claim.get("evidence_ids", []),
+                    citation_refs_by_evidence_id,
+                )
+            )
+        return list(dict.fromkeys(refs))
+
+    def _claim_matches_competitor_name(
+        self,
+        claim: dict[str, Any],
+        competitor_name: str,
+    ) -> bool:
+        if not competitor_name:
+            return False
+        competitors = [
+            str(value or "").strip()
+            for value in claim.get("competitors", []) or []
+            if str(value or "").strip()
+        ]
+        return competitor_name in competitors
+
+    def _safe_competitor_notes(self, competitor: dict[str, Any]) -> str:
+        notes = " ".join(str(competitor.get("notes", "") or "").split()).strip()
+        if not notes:
+            return "见后续分析维度"
+        if self._looks_like_raw_source_excerpt(notes, reject_long_text=False):
+            return "见后续分析维度"
+        return self._truncate_text(notes, 120)
 
     def _task_for_report_context(
         self,
@@ -1767,7 +2591,11 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             "| --- | --- | --- | --- | --- |",
         ]
         for section in sections:
-            section_claims = self._claims_for_dynamic_section(claims, section, 10_000)
+            section_claims = [
+                claim
+                for claim in self._claims_for_dynamic_section(claims, section, 10_000)
+                if self._writable_claim_text(claim)
+            ]
             section_evidence = [
                 evidence
                 for evidence in evidence_items
@@ -1835,14 +2663,6 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         for claim in claims:
             dimension_id = self._claim_dimension_id(claim, evidence_by_id)
             if dimension_id and dimension_id not in dimension_order:
-                dimension_order.append(dimension_id)
-        for evidence in evidence_items:
-            dimension_id = self._item_dimension_id(evidence)
-            if (
-                dimension_id
-                and dimension_id != "competitor_profile"
-                and dimension_id not in dimension_order
-            ):
                 dimension_order.append(dimension_id)
 
         sections: list[dict[str, Any]] = []
@@ -2016,7 +2836,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             "claim_source": claim.get("claim_source", ""),
             "branch_id": claim.get("branch_id", ""),
             "evidence_review_id": claim.get("evidence_review_id", ""),
-            "claim": claim.get("claim", ""),
+            "claim": self._writable_claim_text(claim) or claim.get("claim", ""),
             "claim_risk_level": claim.get("claim_risk_level", "medium"),
             "competitors": claim.get("competitors", []),
             "evidence_ids": evidence_ids,
@@ -2386,6 +3206,37 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         citation_refs_by_evidence_id: dict[str, str] | None = None,
     ) -> list[str]:
         citation_refs_by_evidence_id = citation_refs_by_evidence_id or {}
+        matrix_spec = self._section_matrix_spec(
+            section,
+            section_claims,
+            section_evidence,
+            citation_refs_by_evidence_id,
+        )
+        return [
+            f"### {section['number']} {section['title']}",
+            "",
+            *self._dynamic_section_matrix_lines(
+                section,
+                section_claims,
+                section_evidence,
+                citation_refs_by_evidence_id,
+                matrix_spec,
+                {},
+            ),
+            "",
+            self._section_matrix_analysis(
+                section_claims,
+                citation_refs_by_evidence_id,
+            ),
+        ]
+
+    def _section_matrix_spec(
+        self,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, Any]:
         rows = self._section_matrix_rows(
             section,
             section_claims,
@@ -2396,13 +3247,90 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             section_claims,
             section_evidence,
         )
+        spec_rows = []
+        for dimension_id, row_key, row_label in rows:
+            cells = []
+            for competitor in competitors:
+                matched_claims = self._matrix_cell_claims(
+                    dimension_id,
+                    row_key,
+                    competitor,
+                    section_claims,
+                    section_evidence,
+                )
+                writable_claims = self._writable_matrix_claims(matched_claims)
+                candidate_scope = "exact_row"
+                if not writable_claims:
+                    writable_claims = self._relaxed_matrix_cell_claims(
+                        dimension_id,
+                        competitor,
+                        section_claims,
+                    )
+                    candidate_scope = "same_dimension"
+                cells.append(
+                    {
+                        "competitor": competitor,
+                        "candidate_scope": (
+                            candidate_scope if writable_claims else "none"
+                        ),
+                        "claim_candidates": [
+                            self._matrix_cell_claim_candidate(
+                                claim,
+                                citation_refs_by_evidence_id,
+                            )
+                            for claim in writable_claims[:2]
+                        ],
+                    }
+                )
+            spec_rows.append(
+                {
+                    "dimension_id": dimension_id,
+                    "row_key": row_key,
+                    "label": row_label,
+                    "cells": cells,
+                }
+            )
+        return {
+            "columns": ["对比维度", *competitors],
+            "competitors": competitors,
+            "rows": spec_rows,
+        }
+
+    def _matrix_cell_claim_candidate(
+        self,
+        claim: dict[str, Any],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, Any]:
+        return {
+            "claim_id": claim.get("id", ""),
+            "text": self._truncate_text(self._writable_claim_text(claim), 260),
+            "citation_refs": self._citation_refs_for_evidence_ids(
+                claim.get("evidence_ids", []),
+                citation_refs_by_evidence_id,
+            ),
+            "specificity_hints": list(claim.get("specificity_hints", []) or [])[:4],
+        }
+
+    def _dynamic_section_matrix_lines(
+        self,
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        matrix_spec: dict[str, Any],
+        llm_cell_text_by_key: dict[tuple[str, str], str],
+    ) -> list[str]:
+        competitors = list(matrix_spec.get("competitors", []) or ["综合"])
         lines = [
-            f"### {section['number']} {section['title']}",
-            "",
             self._markdown_table_row(["对比维度", *competitors]),
             self._markdown_table_row(["---", *(["---"] * len(competitors))]),
         ]
-        for dimension_id, row_key, row_label in rows:
+        for row in matrix_spec.get("rows", []) or []:
+            if not isinstance(row, dict):
+                continue
+            dimension_id = str(row.get("dimension_id", "") or "")
+            row_key = str(row.get("row_key", "") or "")
+            row_label = str(row.get("label", "") or "证据覆盖概览")
             lines.append(
                 self._markdown_table_row(
                     [
@@ -2415,20 +3343,16 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                                 section_claims,
                                 section_evidence,
                                 citation_refs_by_evidence_id,
+                                llm_text=llm_cell_text_by_key.get(
+                                    (row_key, competitor),
+                                    "",
+                                ),
                             )
                             for competitor in competitors
                         ],
                     ]
                 )
             )
-        lines.append("")
-        lines.append(
-            self._section_matrix_analysis(
-                section_claims,
-                section_evidence,
-                citation_refs_by_evidence_id,
-            )
-        )
         return lines
 
     def _section_matrix_rows(
@@ -2452,7 +3376,9 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         }
         rows: list[tuple[str, str, str]] = []
         seen_rows: set[tuple[str, str]] = set()
-        for item in [*section_claims, *section_evidence]:
+        for item in section_claims:
+            if not self._writable_claim_text(item):
+                continue
             dimension_id = self._item_dimension_id(item) or source_dimension_id
             row_key, row_label = self._section_matrix_row_key_label(
                 section,
@@ -2468,7 +3394,12 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 break
 
         if rows:
-            return rows
+            return self._balanced_section_matrix_rows(
+                rows,
+                section,
+                section_claims,
+                section_evidence,
+            )
         return [
             (
                 source_dimension_id,
@@ -2476,6 +3407,56 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 str(section.get("title", "") or "证据覆盖概览"),
             )
         ]
+
+    def _balanced_section_matrix_rows(
+        self,
+        rows: list[tuple[str, str, str]],
+        section: dict[str, Any],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+    ) -> list[tuple[str, str, str]]:
+        competitors = self._section_matrix_competitors(
+            section,
+            section_claims,
+            section_evidence,
+        )
+        if len([competitor for competitor in competitors if competitor != "综合"]) < 2:
+            return rows
+
+        balanced_rows = [
+            row
+            for row in rows
+            if self._row_exact_competitor_count(
+                row,
+                competitors,
+                section_claims,
+                section_evidence,
+            )
+            >= min(2, len(competitors))
+        ]
+        return balanced_rows or rows
+
+    def _row_exact_competitor_count(
+        self,
+        row: tuple[str, str, str],
+        competitors: list[str],
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+    ) -> int:
+        dimension_id, row_key, _ = row
+        return sum(
+            1
+            for competitor in competitors
+            if self._writable_matrix_claims(
+                self._matrix_cell_claims(
+                    dimension_id,
+                    row_key,
+                    competitor,
+                    section_claims,
+                    section_evidence,
+                )
+            )
+        )
 
     def _section_matrix_row_key_label(
         self,
@@ -2679,8 +3660,6 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         for claim in section_claims:
             for competitor in claim.get("competitors", []) or []:
                 add_competitor(competitor)
-        for evidence in section_evidence:
-            add_competitor(evidence.get("competitor", ""))
 
         return competitors or ["综合"]
 
@@ -2692,26 +3671,93 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         section_claims: list[dict[str, Any]],
         section_evidence: list[dict[str, Any]],
         citation_refs_by_evidence_id: dict[str, str],
+        llm_text: str = "",
     ) -> str:
+        matched_claims = self._matrix_cell_claims(
+            dimension_id,
+            row_key,
+            competitor,
+            section_claims,
+            section_evidence,
+        )
+        matched_claims = self._writable_matrix_claims(matched_claims)
+        relaxed_claims: list[dict[str, Any]] = []
+        if not matched_claims:
+            relaxed_claims = self._relaxed_matrix_cell_claims(
+                dimension_id,
+                competitor,
+                section_claims,
+            )
+        fallback_cell = self._claims_matrix_cell_text(
+            matched_claims or relaxed_claims,
+            citation_refs_by_evidence_id,
+            prefix="" if matched_claims else "同维度公开证据显示，",
+        )
+        accepted_llm_text = self._accepted_llm_cell_text(
+            llm_text,
+            matched_claims or relaxed_claims,
+            citation_refs_by_evidence_id,
+            fallback_cell,
+        )
+        if accepted_llm_text:
+            return accepted_llm_text
+        return fallback_cell
+
+    def _matrix_cell_claims(
+        self,
+        dimension_id: str,
+        row_key: str,
+        competitor: str,
+        section_claims: list[dict[str, Any]],
+        section_evidence: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         evidence_by_id = {
             evidence.get("id", ""): evidence
             for evidence in section_evidence
             if evidence.get("id")
         }
-        matched_claims = [
+        return [
             claim
             for claim in section_claims
             if self._matrix_item_matches_dimension(claim, dimension_id)
             and self._matrix_item_matches_row(claim, row_key, evidence_by_id)
             and self._matrix_claim_matches_competitor(claim, competitor)
         ]
+
+    def _relaxed_matrix_cell_claims(
+        self,
+        dimension_id: str,
+        competitor: str,
+        section_claims: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        claims = [
+            claim
+            for claim in section_claims
+            if self._matrix_item_matches_dimension(claim, dimension_id)
+            and self._matrix_claim_matches_competitor(claim, competitor)
+        ]
+        return self._writable_matrix_claims(claims)
+
+    def _writable_matrix_claims(
+        self,
+        matched_claims: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [claim for claim in matched_claims if self._writable_claim_text(claim)]
+
+    def _claims_matrix_cell_text(
+        self,
+        matched_claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        prefix: str = "",
+    ) -> str:
         if matched_claims:
             entries = []
             for claim in matched_claims[:2]:
-                claim_text = self._truncate_text(
-                    self._presentable_claim_text(claim),
-                    220,
-                )
+                claim_text = self._truncate_text(self._writable_claim_text(claim), 220)
+                if not claim_text:
+                    continue
+                if prefix:
+                    claim_text = f"{prefix}{claim_text}"
                 if claim.get("support_status") == "weak":
                     claim_text += "（证据较弱，需复核）"
                 entries.append(
@@ -2721,36 +3767,80 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                         citation_refs_by_evidence_id,
                     )
                 )
-            return "<br>".join(entries)
-
-        matched_evidence = [
-            evidence
-            for evidence in section_evidence
-            if self._matrix_item_matches_dimension(evidence, dimension_id)
-            and self._matrix_item_matches_row(evidence, row_key, evidence_by_id)
-            and self._matrix_evidence_matches_competitor(evidence, competitor)
-        ]
-        if matched_evidence:
-            entries = []
-            for evidence in matched_evidence[:2]:
-                evidence_text = self._truncate_text(
-                    str(
-                        evidence.get("excerpt")
-                        or evidence.get("title")
-                        or "公开证据显示该维度存在可复核信息。"
-                    ),
-                    180,
-                )
-                entries.append(
-                    self._text_with_evidence_refs(
-                        evidence_text,
-                        [evidence.get("id", "")],
-                        citation_refs_by_evidence_id,
-                    )
-                )
-            return "<br>".join(entries)
+            if entries:
+                return "<br>".join(entries)
 
         return "公开证据不足"
+
+    def _accepted_llm_cell_text(
+        self,
+        llm_text: str,
+        matched_claims: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+        fallback_cell: str,
+    ) -> str:
+        if not matched_claims:
+            return "公开证据不足"
+        value = " ".join(str(llm_text or "").split()).strip()
+        if not value or self._is_gap_placeholder(value):
+            return fallback_cell
+        if "|" in value or value.startswith("#"):
+            return fallback_cell
+        if self._looks_like_raw_source_excerpt(value):
+            return fallback_cell
+        refs = {
+            ref
+            for claim in matched_claims
+            for ref in self._citation_refs_for_evidence_ids(
+                claim.get("evidence_ids", []),
+                citation_refs_by_evidence_id,
+            )
+        }
+        if refs and not any(ref in value for ref in refs):
+            return fallback_cell
+        candidate_texts = [
+            self._writable_claim_text(claim)
+            for claim in matched_claims
+            if self._writable_claim_text(claim)
+        ]
+        if candidate_texts and not self._llm_text_grounded_in_candidates(
+            value,
+            candidate_texts,
+        ):
+            return fallback_cell
+        return self._truncate_text(value, 260)
+
+    def _llm_text_grounded_in_candidates(
+        self,
+        text: str,
+        candidate_texts: list[str],
+    ) -> bool:
+        text_ngrams = self._grounding_ngrams(text)
+        if not text_ngrams:
+            return False
+        for candidate_text in candidate_texts:
+            candidate_ngrams = self._grounding_ngrams(candidate_text)
+            if not candidate_ngrams:
+                continue
+            overlap = len(text_ngrams.intersection(candidate_ngrams))
+            score = overlap / max(1, min(len(text_ngrams), len(candidate_ngrams)))
+            if score >= 0.22:
+                return True
+        return False
+
+    def _grounding_ngrams(self, text: str) -> set[str]:
+        import re
+
+        value = re.sub(r"\[\d+\]", "", str(text or "").lower())
+        value = re.sub(
+            r"(公开资料显示|公开证据显示|同维度公开证据显示|相关公开资料|相关信息)",
+            "",
+            value,
+        )
+        value = re.sub(r"[^\w\u4e00-\u9fff]+", "", value)
+        if len(value) < 4:
+            return {value} if value else set()
+        return {value[index : index + 2] for index in range(len(value) - 1)}
 
     def _matrix_item_matches_row(
         self,
@@ -2789,37 +3879,221 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             return not competitors or "综合" in competitors
         return competitor in competitors
 
-    def _matrix_evidence_matches_competitor(
-        self,
-        evidence: dict[str, Any],
-        competitor: str,
-    ) -> bool:
-        evidence_competitor = str(evidence.get("competitor", "") or "").strip()
-        if competitor == "综合":
-            return not evidence_competitor or evidence_competitor == "综合"
-        return evidence_competitor == competitor
-
     def _section_matrix_analysis(
         self,
         section_claims: list[dict[str, Any]],
-        section_evidence: list[dict[str, Any]],
         citation_refs_by_evidence_id: dict[str, str],
     ) -> str:
         if section_claims:
+            writable_claims = [
+                claim for claim in section_claims if self._writable_claim_text(claim)
+            ]
             claim_summaries = [
                 self._text_with_evidence_refs(
-                    self._truncate_text(self._presentable_claim_text(claim), 180),
+                    self._truncate_text(self._writable_claim_text(claim), 180),
                     claim.get("evidence_ids", []),
                     citation_refs_by_evidence_id,
                 )
-                for claim in section_claims[:3]
+                for claim in self._fair_sample_claims_by_competitor(
+                    writable_claims,
+                    3,
+                )
                 if claim.get("claim")
             ]
             if claim_summaries:
                 return "分析：" + "；".join(claim_summaries)
-        if section_evidence:
-            return "分析：该小节仅引用已采集证据中的可观察信息，仍需结合更多公开来源复核竞争差异。"
-        return "分析：该动态维度目前缺少足够的公开证据，需要补充采集或人工校验。"
+        return "分析：该动态维度目前缺少可写入正文的可追溯 claim，需要补充分析或人工校验。"
+
+    def _looks_like_raw_source_excerpt(
+        self,
+        text: str,
+        *,
+        reject_long_text: bool = True,
+    ) -> bool:
+        import re
+
+        value = " ".join(str(text or "").split()).lower()
+        if reject_long_text and len(value) >= 180:
+            return True
+        if re.search(r"\d+\s*评论\s+\d+\s*浏览\s+\d+\s*收藏", value):
+            return True
+        if re.search(r"\d+\s*浏览\s+\d+\s*收藏\s+\d+\s*分钟", value):
+            return True
+        if self._looks_like_outline_heading(value):
+            return True
+        raw_markers = (
+            "google play",
+            "app store",
+            "加入願望清單",
+            "添加到心愿单",
+            "安裝 分享",
+            "安装 分享",
+            "使用者互動",
+            "瞭解詳情",
+            "了解詳情",
+            "次下載",
+            "次下载",
+            "star",
+            "則評論",
+            "条评价",
+            "跳转到内容",
+            "维基百科",
+            "skip to main content",
+            "合作与支持 飞行社 定价",
+            "博客中心",
+            "排行榜 好课秒杀",
+            "人人都是产品经理",
+            "悟空 超级服务",
+            "官方商城",
+            "钉钉体验中心",
+            "模版中心",
+            "模板中心",
+            "welcome to",
+            "立即追踪工时",
+        )
+        return any(marker in value for marker in raw_markers)
+
+    def _looks_like_outline_heading(self, text: str) -> bool:
+        import re
+
+        value = " ".join(str(text or "").split()).strip()
+        return bool(
+            re.match(r"^[一二三四五六七八九十\d]+[、.]\s*[^，。！？!?；;]{4,60}$", value)
+        )
+
+    def _writable_claim_text(self, claim: dict[str, Any]) -> str:
+        text = self._presentable_claim_text(claim)
+        text = self._sanitize_presentable_claim_text(text, claim)
+        if not text or text == "公开证据不足":
+            return ""
+        if self._looks_like_raw_source_excerpt(text, reject_long_text=False):
+            return ""
+        return text
+
+    def _sanitize_presentable_claim_text(
+        self,
+        text: str,
+        claim: dict[str, Any],
+    ) -> str:
+        import re
+
+        value = " ".join(str(text or "").split()).strip()
+        if not value:
+            return ""
+        chrome_patterns = [
+            r"^.*?合作与支持\s+飞行社\s+定价\s+\S+\s+下载飞书\s+",
+            r"^.*?博客中心\s+",
+            r"^.*?\d+\s*评论\s+\d+\s*浏览\s+\d+\s*收藏\s+\d+\s*分钟\s+",
+            r"^.*?人人都是产品经理\s+",
+            r"^.*?Skip to main content\s+",
+            r"^.*?跳转到内容\s+",
+            r"^.*?加入願望清單\s+",
+            r"^.*?添加到心愿单\s+",
+            r"^.*?瞭解詳情\s+",
+            r"^.*?了解详情\s+",
+        ]
+        for pattern in chrome_patterns:
+            value = re.sub(pattern, "", value, flags=re.IGNORECASE).strip()
+        value = re.sub(r"^(公开证据显示，)?[^:：]{1,80}[:：]\s*", r"\1", value).strip()
+        if (
+            claim.get("claim_source") == "knowledge_fact_group"
+            or len(value) >= 260
+        ):
+            value = self._claim_summary_segment(value, claim)
+        return value
+
+    def _claim_summary_segment(self, text: str, claim: dict[str, Any]) -> str:
+        import re
+
+        value = " ".join(str(text or "").split()).strip()
+        if not value:
+            return ""
+        segments = [
+            segment.strip(" ，,。.;；:：")
+            for segment in re.split(
+                r"[。！？!?；;]\s*|\s+(?=[一二三四五六七八九十]、|\d+[.、])",
+                value,
+            )
+            if segment.strip()
+        ]
+        claim_type = str(claim.get("claim_type", "") or "")
+        keywords_by_type = {
+            "customer_segment_signal": (
+                "面向",
+                "用户",
+                "客户",
+                "企业",
+                "团队",
+                "组织",
+                "场景",
+                "适合",
+                "支持",
+            ),
+            "target_user_signal": (
+                "面向",
+                "用户",
+                "客户",
+                "企业",
+                "团队",
+                "组织",
+                "场景",
+                "适合",
+                "支持",
+            ),
+            "capability_signal": (
+                "支持",
+                "提供",
+                "覆盖",
+                "包括",
+                "集成",
+                "模块",
+                "能力",
+                "功能",
+            ),
+            "feature_presence": (
+                "支持",
+                "提供",
+                "覆盖",
+                "包括",
+                "集成",
+                "模块",
+                "能力",
+                "功能",
+            ),
+            "market_position_signal": (
+                "定位",
+                "主打",
+                "发布",
+                "推出",
+                "客户",
+                "签约",
+                "增长",
+            ),
+        }
+        keywords = keywords_by_type.get(
+            claim_type,
+            ("支持", "提供", "面向", "发布", "推出", "客户", "用户", "场景"),
+        )
+        prioritized = [
+            segment
+            for segment in segments
+            if any(keyword.lower() in segment.lower() for keyword in keywords)
+            and not self._looks_like_raw_source_excerpt(segment, reject_long_text=False)
+            and not self._looks_like_outline_heading(segment)
+        ]
+        if claim.get("claim_source") == "knowledge_fact_group" and not prioritized:
+            return ""
+        candidates = [*prioritized, *segments, value]
+        for candidate in candidates:
+            candidate = " ".join(candidate.split()).strip()
+            if len(candidate) < 12:
+                continue
+            if self._looks_like_raw_source_excerpt(candidate, reject_long_text=False):
+                continue
+            if self._looks_like_outline_heading(candidate):
+                continue
+            return self._truncate_text(candidate, 220)
+        return ""
 
     def _presentable_claim_text(self, claim: dict[str, Any]) -> str:
         import re
@@ -2960,7 +4234,9 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                     lines.append(f"  - 产品/品牌：{competitor.get('product', '公开资料不足') or '公开资料不足'}")
                     lines.append(f"  - 官网：{website or '公开资料不足'}")
                     lines.append(f"  - 分类：{competitor.get('category', '公开资料不足') or '公开资料不足'}")
-                    lines.append(f"  - 备注：{competitor.get('notes', '公开资料不足') or '公开资料不足'}")
+                    lines.append(
+                        f"  - 备注：{self._safe_competitor_notes(competitor)}"
+                    )
                     lines.append(f"  - 主要引用：{', '.join(competitor.get('evidence_ids', [])[:3]) or '公开资料不足'}")
                 else:
                     lines.append(f"- **{competitor}**")
@@ -2987,7 +4263,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                         f"{competitor.get('product', '') or '公开资料不足'} | "
                         f"{competitor.get('category', '') or '公开资料不足'} | "
                         f"{website or '公开资料不足'} | "
-                        f"{competitor.get('notes', '') or '公开资料不足'} |"
+                        f"{self._safe_competitor_notes(competitor)} |"
                         f"{evidence_ids or '公开资料不足'} |"
                     )
                 else:
@@ -3045,11 +4321,15 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         ]
         if evidence_items:
             claim_ids_by_evidence_id = self._claim_ids_by_evidence_id(claims)
+            claim_texts_by_evidence_id = self._claim_texts_by_evidence_id(claims)
             for evidence in evidence_items:
                 evidence_id = evidence.get("id", "")
                 url = evidence.get("url", "")
                 title = evidence.get("title") or url or "Untitled source"
-                excerpt = " ".join(str(evidence.get("excerpt", "")).split())[:160]
+                summary = self._appendix_summary_for_evidence(
+                    evidence,
+                    claim_texts_by_evidence_id,
+                )
                 lines.append(
                     self._markdown_table_row(
                         [
@@ -3064,13 +4344,57 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                             title,
                             evidence.get("source_type", "") or "other",
                             url or "无",
-                            excerpt or "无",
+                            summary,
                         ]
                     )
                 )
         else:
             lines.append("| 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 |")
         return f"{report.rstrip()}\n" + "\n".join(lines)
+
+    def _claim_texts_by_evidence_id(
+        self,
+        claims: list[dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        claim_texts_by_evidence_id: dict[str, list[str]] = {}
+        for claim in claims:
+            claim_text = self._writable_claim_text(claim)
+            if not claim_text:
+                continue
+            for evidence_id in claim.get("evidence_ids", []):
+                if not evidence_id:
+                    continue
+                claim_texts_by_evidence_id.setdefault(evidence_id, [])
+                if claim_text not in claim_texts_by_evidence_id[evidence_id]:
+                    claim_texts_by_evidence_id[evidence_id].append(claim_text)
+        return claim_texts_by_evidence_id
+
+    def _appendix_summary_for_evidence(
+        self,
+        evidence: dict[str, Any],
+        claim_texts_by_evidence_id: dict[str, list[str]],
+    ) -> str:
+        evidence_id = evidence.get("id", "")
+        for claim_text in claim_texts_by_evidence_id.get(evidence_id, []):
+            clean_claim = self._truncate_text(claim_text, 160)
+            if clean_claim:
+                return clean_claim
+
+        raw_summary = " ".join(
+            str(
+                evidence.get("summary")
+                or evidence.get("excerpt")
+                or evidence.get("title")
+                or ""
+            ).split()
+        )
+        clean_summary = self._sanitize_presentable_claim_text(raw_summary, {})
+        if clean_summary and not self._looks_like_raw_source_excerpt(
+            clean_summary,
+            reject_long_text=False,
+        ):
+            return self._truncate_text(clean_summary, 160)
+        return "来源已保留 URL，摘要需人工复核"
 
     def _apply_inline_citations(
         self,
