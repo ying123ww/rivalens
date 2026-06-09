@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package.json ./
 
 # Install dependencies (no lock file present – recommend adding one for reproducibility)
-RUN npm install
+RUN npm install --registry https://registry.npmmirror.com
 
 ###############################################
 # 2) Builder layer – builds Next.js (.next)
