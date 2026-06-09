@@ -37,7 +37,7 @@ export default function ResearchPageLayout({
   const contentRef = mainContentRef || defaultRef;
 
   return (
-    <main className="flex min-h-screen flex-col">
+    <main className="flex min-h-screen flex-col bg-gray-950">
       <Toaster 
         position="bottom-center" 
         toastOptions={toastOptions}

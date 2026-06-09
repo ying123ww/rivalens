@@ -87,7 +87,7 @@ const Accordion: React.FC<AccordionProps> = ({ logs }) => {
   };
 
   return (
-    <div id="accordion-collapse" data-accordion="collapse" className="mt-4 bg-gray-900 rounded-lg">
+    <div id="accordion-collapse" data-accordion="collapse" className="mt-4 bg-gray-950 rounded-lg">
       {processedLogs.map((log, index) => (
         <div key={index}>
           <h2 id={`accordion-collapse-heading-${index}`}>
@@ -122,7 +122,7 @@ const Accordion: React.FC<AccordionProps> = ({ logs }) => {
             className={`${openIndex === index ? '' : 'hidden'}`}
             aria-labelledby={`accordion-collapse-heading-${index}`}
           >
-            <div className="p-5 border border-b-0 border-gray-900 dark:border-gray-900 dark:bg-gray-900 text-white">
+            <div className="p-5 border border-b-0 border-gray-900 dark:border-gray-900 dark:bg-gray-950 text-white">
               {renderLogContent(log)}
             </div>
           </div>

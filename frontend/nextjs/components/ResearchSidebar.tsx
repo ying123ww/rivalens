@@ -80,7 +80,7 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
-            className="sidebar-overlay md:hidden fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-40"
+            className="sidebar-overlay md:hidden fixed inset-0 bg-gray-950/80 backdrop-blur-sm z-40"
             onClick={toggleSidebar}
             aria-hidden="true"
           />
@@ -102,7 +102,7 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
         <div
           className={`h-full transition-all duration-300 text-white overflow-hidden
             ${isOpen
-              ? 'bg-gray-900/80 backdrop-blur-md shadow-2xl shadow-black/30 p-3 sm:p-4'
+              ? 'bg-gray-950/90 backdrop-blur-md shadow-2xl shadow-black/30 p-3 sm:p-4'
               : 'bg-transparent p-0'
             }`}
         >
@@ -195,7 +195,7 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
                       {history.map((item) => (
                         <motion.li
                           key={item.id}
-                          className="relative rounded-xl transition-all duration-300 overflow-hidden group bg-gray-900/40 hover:bg-gray-800/60 border border-gray-700/30 hover:border-gray-600/50 backdrop-blur-sm"
+                          className="relative rounded-xl transition-all duration-300 overflow-hidden group bg-gray-950/50 hover:bg-gray-800/60 border border-gray-700/30 hover:border-gray-600/50 backdrop-blur-sm"
                           onMouseEnter={() => setHoveredItem(item.id)}
                           onMouseLeave={() => setHoveredItem(null)}
                         >

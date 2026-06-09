@@ -110,9 +110,9 @@ const Modal: React.FC<ChatBoxProps> = ({ chatBoxSettings, setChatBoxSettings }) 
             <div className="absolute -inset-0.5 bg-gradient-to-r from-teal-500/20 via-cyan-500/15 to-blue-500/20 rounded-xl blur-sm opacity-50 shadow-sm"></div>
             
             {/* Modal content */}
-            <div className="relative flex flex-col rounded-lg overflow-hidden bg-gray-900 border border-gray-800/60 shadow-md hover:shadow-teal-400/10 transition-shadow duration-300">
+            <div className="relative flex flex-col rounded-lg overflow-hidden bg-gray-950 border border-gray-800/60 shadow-md hover:shadow-teal-400/10 transition-shadow duration-300">
               {/* Header with subtler accent */}
-              <div className="bg-gray-900 p-5 border-b border-gray-800">
+              <div className="bg-gray-950 p-5 border-b border-gray-800">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-semibold text-white">
                     <span className="mr-2">⚙️</span>
@@ -130,7 +130,7 @@ const Modal: React.FC<ChatBoxProps> = ({ chatBoxSettings, setChatBoxSettings }) 
               </div>
               
               {/* Body with content */}
-              <div className="relative p-6 flex-auto bg-gray-900/95 modal-content">
+              <div className="relative p-6 flex-auto bg-gray-950/95 modal-content">
                 {false && (<div className="tabs mb-4">
                   <button onClick={() => setActiveTab('report_settings')} className={`tab-button ${activeTab === 'report_settings' ? 'active' : ''}`}>Report Settings</button>
                 </div>)}
@@ -145,7 +145,7 @@ const Modal: React.FC<ChatBoxProps> = ({ chatBoxSettings, setChatBoxSettings }) 
               </div>
               
               {/* Footer with actions */}
-              <div className="flex items-center justify-end p-4 border-t border-gray-800 bg-gray-900/80">
+              <div className="flex items-center justify-end p-4 border-t border-gray-800 bg-gray-950/80">
                 <button
                   className="mr-3 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-md transition-colors duration-200"
                   onClick={() => setShowModal(false)}
@@ -165,7 +165,7 @@ const Modal: React.FC<ChatBoxProps> = ({ chatBoxSettings, setChatBoxSettings }) 
       </motion.div>
       <motion.div 
         key="modal-background"
-        className="fixed inset-0 z-[999] bg-black"
+        className="fixed inset-0 z-[999] bg-gray-950/90"
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.6 }}
         exit={{ opacity: 0 }}
@@ -176,7 +176,7 @@ const Modal: React.FC<ChatBoxProps> = ({ chatBoxSettings, setChatBoxSettings }) 
   return (
     <div className="settings">
       <button
-        className="bg-gray-900 text-white px-6 py-3 rounded-lg shadow-sm hover:shadow-teal-400/10 transition-all duration-300 border border-gray-800 hover:border-teal-500/30"
+        className="rounded-[50px] bg-[#c5b0f4] px-5 py-2.5 text-[14px] font-[480] leading-[1.40] -tracking-[0.10px] text-black transition-all active:scale-[0.97] hover:brightness-105"
         type="button"
         onClick={() => setShowModal(true)}
       >

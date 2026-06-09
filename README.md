@@ -1,4 +1,4 @@
-# Rivalens
+# Rivalens — Traceable Multi-Agent Competitor Analysis
 
 <p align="right">
   <a href="./README.zh-CN.md">中文</a>
@@ -23,25 +23,25 @@
 
 Rivalens is a traceable multi-agent competitor analysis system built on LangGraph. It orchestrates specialist agents that plan research scope, collect public evidence, structure knowledge, generate analysis claims with citation support, and produce structured reports — all with end-to-end provenance tracking.
 
-The main package is `rivalens`, organized into these primary domains:
+The main package `rivalens` is organized into these domains:
 
 - `rivalens/workflows` — LangGraph DAG orchestration for competitor analysis
 - `rivalens/agents` — specialist agents for planning, collection, evidence review, branch control, knowledge structuring, analysis, writing, and publishing
 - `rivalens/file_context` — reusable CSV, Excel, JSON, and screenshot context helpers
-- `rivalens/schema` — structured competitor knowledge and evidence schema (Pydantic)
+- `rivalens/schema` — structured competitor knowledge and evidence Pydantic models
 - `rivalens/research` — evidence collection adapters, retrievers, scrapers, and the underlying research engine
 - `rivalens/industry_templates` — GICS-based industry direction templates for analysis planning
 - `rivalens/retrieval` — pgvector-based evidence RAG for post-report Q&A
 
 ## Features
 
-- **Multi-agent DAG** — Planner → Collector → Knowledge Structuring → Analyst → Claim Support Reviewer → Writer → Publisher, each with typed Pydantic message handoffs
+- **Multi-agent DAG** — Planner → Collector → Knowledge Structuring → Analyst → Claim Support Reviewer → Writer → Publisher, with typed Pydantic message handoffs
 - **Evidence traceability** — every analysis claim cites `KnowledgeFact` atoms, which cite accepted `EvidenceItem` records with source URLs
 - **Collection quality loop** — `EvidenceQualityReviewer` accepts/rejects per-source, `CoverageReviewer` tracks success-criteria gaps, follow-up branches resolve coverage gaps
 - **Deterministic knowledge extraction** — rule-based fact normalization and atomization (pricing split into free-tier, plan-price, usage-based-billing, etc.) before LLM analysis
 - **Claim support gate** — `ClaimSupportReviewer` validates citation support before writing; unsupported claims are revised once or suppressed
 - **Industry direction planning** — GICS sector matching with L0/L1/L2 facet templates, LLM fallback for ambiguous industries
-- **Multi-retriever search** — configurable retriever chain (Tavily, UniFuncs DeepSearch, Serper, Exa, MCP, local) per collection task
+- **Multi-retriever search** — configurable retriever chain (Tavily, UniFuncs DeepSearch, Serper, Exa, DuckDuckGo, and more) per collection task
 - **PostgreSQL + pgvector** — user auth, session persistence, traceability provenance, and evidence embedding RAG
 - **Structured agent messages** — validated JSON handoffs (`research_plan`, `evidence`, `schema`, `analysis`, `claim_support`, `report`, `publish`) replace free-form text between agents
 - **Docker Compose** — five-service stack: API server, Celery worker, Next.js frontend, PostgreSQL (pgvector), Redis
@@ -54,8 +54,8 @@ flowchart TB
 
     Workflow --> Planner["PlanningAgent\nscope, industry directions"]
     Workflow --> Collector["CollectionAgent\npublic evidence collection"]
-    Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem -> KnowledgeFact"]
-    Workflow --> Analyst["AnalysisAgent\nKnowledgeFact -> AnalysisClaim"]
+    Workflow --> Knowledge["KnowledgeStructuringAgent\nEvidenceItem → KnowledgeFact"]
+    Workflow --> Analyst["AnalysisAgent\nKnowledgeFact → AnalysisClaim"]
     Workflow --> ClaimSupport["ClaimSupportReviewer\nclaim citation support gate"]
     Workflow --> Writer["ReportWriterAgent\nstructured report"]
     Workflow --> Publisher["PublisherAgent\nartifacts"]
@@ -72,7 +72,7 @@ flowchart TB
     Collector --> CoverageReview["CoverageReviewer\ncoverage gaps / follow-up tasks"]
     EvidenceCollector --> Modes["ResearchMode\nstandard evidence"]
     Modes --> Engine["ResearchEngine\nsearch, scrape, context"]
-    Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / local / etc."]
+    Engine --> Retrievers["Retrievers\nTavily / Exa / Serper / MCP / etc."]
     Engine --> SourceCache["ScrapedSourceCache\ncanonical URL raw page cache"]
 
     Planner --> State["CompetitorAnalysisState"]
@@ -96,7 +96,7 @@ flowchart TB
 
 ### Active Workflow DAG
 
-The LangGraph entry point is `rivalens/workflows/agent.py`. The current multi-agent DAG:
+The LangGraph entry point is `rivalens/workflows/agent.py`:
 
 ```mermaid
 flowchart LR
@@ -118,7 +118,7 @@ rivalens/
 ├── pyproject.toml                   # Poetry project config
 ├── requirements.txt                 # Pip dependencies
 ├── setup.py                         # setuptools packaging
-├── Dockerfile                       # Multi-stage Python 3.12 image
+├── Dockerfile                       # Multi-stage Python image
 ├── docker-compose.yml               # 5-service stack
 ├── langgraph.json                   # LangGraph CLI config
 ├── alembic.ini                      # Database migration config
@@ -127,7 +127,7 @@ rivalens/
 │   ├── workflows/                   # LangGraph DAG definitions
 │   │   ├── agent.py                 # Graph entry point
 │   │   └── competitive_analysis.py  # Full DAG builder
-│   ├── agents/                      # Specialist agents (17 modules)
+│   ├── agents/                      # Specialist agents (19 modules)
 │   │   ├── planning.py              # Scope & industry direction planning
 │   │   ├── collection.py            # Evidence collection orchestration
 │   │   ├── knowledge_structuring.py # Rule-based fact extraction
@@ -152,10 +152,12 @@ rivalens/
 │   │   ├── evidence_collector.py    # ResearchEngineEvidenceCollector
 │   │   ├── modes.py                 # ResearchMode definitions
 │   │   ├── source_cache.py          # ScrapedSourceCache (SQLite)
-│   │   ├── retrievers/              # Search retrievers
+│   │   ├── retrievers/              # 18 search retrievers
 │   │   ├── scraper/                 # Page scraping & content cleaning
 │   │   ├── context/                 # Context compression
 │   │   ├── skills/                  # Research skills
+│   │   ├── mcp/                     # MCP client & tool selector
+│   │   ├── llm_provider/            # LLM provider abstraction
 │   │   └── utils/                   # Enums, helpers
 │   ├── schema/                      # Pydantic models
 │   │   └── competitive.py           # State, evidence, claims, knowledge
@@ -180,7 +182,7 @@ rivalens/
 │   ├── chat/                        # Chat agent with memory
 │   ├── memory/                      # Draft & research memory
 │   └── report_type/                 # Report type definitions
-├── frontend/                        # Static HTML frontend
+├── frontend/                        # Static HTML + Next.js app
 │   ├── index.html                   # Main page
 │   └── nextjs/                      # Next.js 14 application
 │       ├── app/                     # App router pages
@@ -189,12 +191,12 @@ rivalens/
 │       ├── helpers/                 # Utility functions
 │       └── config/                  # Frontend configuration
 ├── tests/                           # Test suite (8 test files)
-├── docs/                            # Architecture & design docs (7 docs)
+├── docs/                            # Architecture & design docs
 ├── scripts/                         # Utility scripts
 │   ├── run_agent_flow.py            # Agent-only local run
 │   └── langsmith_smoke.py           # LangSmith connectivity test
 └── alembic/                         # Database migrations
-    └── versions/                    # Migration scripts (5 versions)
+    └── versions/                    # Migration scripts
 ```
 
 ## Tech Stack
@@ -209,9 +211,9 @@ rivalens/
 | **Cache / queue** | Redis 7, Celery |
 | **Migrations** | Alembic |
 | **Package management** | Poetry |
-| **LLM providers** | OpenAI, Anthropic, Ollama, Groq, Google GenAI, XAI, Mistral, Cohere, Together, Fireworks, DashScope, GigaChat (via LangChain adapters) |
-| **Search retrievers** | Tavily, UniFuncs DeepSearch, Serper, Exa, DuckDuckGo, Arxiv, MCP |
-| **Scraping** | BeautifulSoup4, lxml, Playwright, Selenium, Scrapy, PyMuPDF |
+| **LLM providers** | OpenAI, Anthropic (via LangChain adapters) |
+| **Search retrievers** | Tavily, UniFuncs DeepSearch, Serper, Exa, DuckDuckGo, Arxiv, Bing, Bocha, Google, PubMed Central, SearchAPI, Searx, Semantic Scholar, SerpAPI, MCP, Xquik, Custom |
+| **Scraping** | BeautifulSoup4, lxml, Playwright, PyMuPDF, Firecrawl, Tavily Extract |
 | **Export formats** | Markdown, HTML, PDF (WeasyPrint), DOCX |
 | **Tracing** | LangSmith |
 | **Containerization** | Docker, Docker Compose |
@@ -293,7 +295,7 @@ LANGSMITH_PROJECT=rivalens-local
 docker compose up -d
 ```
 
-This starts all five services:
+This starts five services:
 - `rivalens` API server on port 8000
 - `rivalens-worker` Celery worker for background report generation
 - `rivalens-nextjs` frontend on port 3000
@@ -324,17 +326,17 @@ npm run dev
 With explicit competitor scope:
 
 ```bash
-.venv/bin/python scripts/run_agent_flow.py "分析飞书和钉钉的企业协同竞争格局" \
-  --competitor 飞书 \
-  --competitor 钉钉
+.venv/bin/python scripts/run_agent_flow.py "Analyze Feishu vs DingTalk competitive landscape" \
+  --competitor Feishu \
+  --competitor DingTalk
 ```
 
-Options: `--full-budget` for normal collection budget, `--print-report` to print the final report in the terminal. Output lands in `outputs/agent_runs/`.
+Options: `--full-budget` for normal collection budget, `--print-report` to print the final report. Output lands in `outputs/agent_runs/`.
 
 **Standalone CLI research report:**
 
 ```bash
-python cli.py "Your research query" --report_type detailed_report --tone objective
+python cli.py "Your research query" --report_type research_report --tone objective
 ```
 
 ### Test
@@ -382,7 +384,7 @@ All routes are defined in `backend/server/app.py`. The backend uses FastAPI with
 | POST | `/api/sessions` | Create a new session |
 | GET | `/api/sessions/{session_id}` | Get session details |
 | PATCH | `/api/sessions/{session_id}` | Update session metadata (title) |
-| PUT | `/api/sessions/{session_id}/memory` | Update session memory (message history) |
+| PUT | `/api/sessions/{session_id}/memory` | Update session memory |
 | POST | `/api/sessions/{session_id}/messages` | Append a message to session |
 | DELETE | `/api/sessions/{session_id}` | Delete a session |
 
@@ -390,7 +392,7 @@ All routes are defined in `backend/server/app.py`. The backend uses FastAPI with
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/trace/runs/{run_id}` | Retrieve visualization-ready workflow graph and provenance bundle |
+| GET | `/api/trace/runs/{run_id}` | Retrieve workflow graph and provenance bundle |
 
 ### Analysis
 
@@ -414,59 +416,57 @@ All routes are defined in `backend/server/app.py`. The backend uses FastAPI with
 
 ### Agent Roles
 
-`scope_planner` (PlanningAgent) owns planning end-to-end: normalizes competitor inputs, selects an industry using GICS sector matching with L0/L1/L2 facet templates, composes confirmed analysis directions, and emits a `research_plan` handoff to `source_collection`. When the top rule score is below the configured threshold, it falls back to the LLM configured by `INDUSTRY_FALLBACK_LLM`.
+**scope_planner** (PlanningAgent) owns planning end-to-end: normalizes competitor inputs, selects an industry using GICS sector matching with L0/L1/L2 facet templates, composes confirmed analysis directions, and emits a `research_plan` handoff to `source_collection`. When the top rule score is below the configured threshold, it falls back to the LLM configured by `INDUSTRY_FALLBACK_LLM`.
 
-`source_collection` (CollectionAgent) expands confirmed analysis dimensions into competitor × dimension collection branches and runs them concurrently through `ResearchEngineEvidenceCollector`. It creates a `competitor_profile` task for each selected competitor so report information cards are backed by explicit public profile evidence. Collection branches carry one clean seed query while preserving competitor, dimension, source hints, success criteria, and task context as structured fields.
+**source_collection** (CollectionAgent) expands confirmed analysis dimensions into competitor × dimension collection branches and runs them concurrently through `ResearchEngineEvidenceCollector`. It creates a `competitor_profile` task for each selected competitor so report information cards are backed by explicit public profile evidence.
 
-`knowledge_structuring` (KnowledgeStructuringAgent) uses deterministic rules to normalize and deduplicate accepted evidence into `KnowledgeFact` atoms that cite accepted `EvidenceItem` IDs. Pricing evidence is atomized into free-tier, plan-price, quote-only, usage-based-billing, and annual-discount facts when those signals are present.
+**knowledge_structuring** (KnowledgeStructuringAgent) uses deterministic rules to normalize and deduplicate accepted evidence into `KnowledgeFact` atoms that cite accepted `EvidenceItem` IDs. Pricing evidence is atomized into free-tier, plan-price, quote-only, usage-based-billing, and annual-discount facts when those signals are present.
 
-`dimension_analysis` (AnalysisAgent) groups facts by competitor, dimension, claim type, subject, predicate, and normalized fact key before generating traceable `AnalysisClaim` records. An optional LLM mode (`RIVALENS_ANALYSIS_LLM`) can organize claim candidates from KnowledgeFact packages.
+**dimension_analysis** (AnalysisAgent) groups facts by competitor, dimension, claim type, subject, predicate, and normalized fact key before generating traceable `AnalysisClaim` records. An optional LLM mode (`RIVALENS_ANALYSIS_LLM`) can organize claim candidates from KnowledgeFact packages.
 
-`claim_support_review` (ClaimSupportReviewer) checks claim-level citation support before writing. When wording is too broad or too strong, it asks `AnalysisAgent` to tighten the claim to the cited evidence; claims without traceable bindings are suppressed.
+**claim_support_review** (ClaimSupportReviewer) checks claim-level citation support before writing. When wording is too broad or too strong, it asks `AnalysisAgent` to tighten the claim to the cited evidence; claims without traceable bindings are suppressed.
 
-`report_writer` (ReportWriterAgent) adapts Rivalens claims, `CompetitorKnowledge`, and accepted `EvidenceItem` records into the shared `ReportGenerator` writing path. It uses a fixed report contract with SWOT/TOWS matrix skeletons and dynamically derives analysis chapter dimensions from supported claims and accepted evidence.
+**report_writer** (ReportWriterAgent) adapts Rivalens claims, `CompetitorKnowledge`, and accepted `EvidenceItem` records into the shared `ReportGenerator` writing path, with SWOT/TOWS matrix skeletons.
 
-`publisher` (PublisherAgent) exports the final report as Markdown, HTML, PDF, and DOCX artifacts.
+**publisher** (PublisherAgent) exports the final report as Markdown, HTML, PDF, and DOCX artifacts.
 
 ### Structured Agent Messages
 
-Agents exchange validated JSON messages through `CompetitorAnalysisState.messages`. Each `AgentMessage` contains `sender`, `receiver`, `type`, `payload`, `artifact_ids`, `evidence_ids`, and `created_at`. The payload is validated against Pydantic models before appending to state:
+Agents exchange validated JSON messages through `CompetitorAnalysisState.messages`. Each `AgentMessage` contains `sender`, `receiver`, `type`, `payload`, `artifact_ids`, `evidence_ids`, and `created_at`. Message payloads are validated against Pydantic models:
 
 ```
-research_plan  -> ResearchPlanMessagePayload
-evidence       -> EvidenceMessagePayload
-schema         -> SchemaMessagePayload
-analysis       -> AnalysisMessagePayload
-claim_support  -> ClaimSupportMessagePayload
-report         -> ReportMessagePayload
-publish        -> PublishMessagePayload
+research_plan  → ResearchPlanMessagePayload
+evidence       → EvidenceMessagePayload
+schema         → SchemaMessagePayload
+analysis       → AnalysisMessagePayload
+claim_support  → ClaimSupportMessagePayload
+report         → ReportMessagePayload
+publish        → PublishMessagePayload
 ```
-
-Downstream agents consume the latest validated message addressed to them with `latest_message_for(...)`, making each DAG edge behave like a typed function-calling contract.
 
 ## Evidence Collection
 
-Search is intentionally owned by `CollectionAgent`. Other agents consume structured state and messages; they do not call the research engine directly.
+Search is owned by `CollectionAgent`. Other agents consume structured state and messages — they do not call the research engine directly.
 
 ```
 CollectionAgent
-  -> ResearchBranch frontier
-  -> ResearchBrief / ResearchTask queue with success criteria
-  -> ResearchEngineEvidenceCollector (explicit ResearchMode)
-  -> ResearchEngine
-  -> EvidenceItem[]
-  -> EvidenceQualityReviewer (source-level accepted/rejected evidence)
-  -> SourceMetricsBuilder (accepted evidence source independence metrics)
-  -> CoverageReviewer (criterion coverage gaps, LLM-advised source gaps)
-  -> BranchCoverageStateBuilder (root branch/group coverage ledger)
+  → ResearchBranch frontier
+  → ResearchBrief / ResearchTask queue with success criteria
+  → ResearchEngineEvidenceCollector (explicit ResearchMode)
+  → ResearchEngine
+  → EvidenceItem[]
+  → EvidenceQualityReviewer (source-level accepted/rejected)
+  → SourceMetricsBuilder (source independence metrics)
+  → CoverageReviewer (criterion coverage gaps)
+  → BranchCoverageStateBuilder (root branch coverage ledger)
 ```
 
 ### Collection Quality Loop
 
-- **EvidenceQualityReviewer** runs immediately after each standard search and produces `EvidenceReviewResult` records with accepted/rejected evidence IDs, success-criterion matches, findings, score, and required action.
-- **SourceMetricsBuilder** computes deterministic accepted-source metrics: `accepted_evidence_count`, `unique_canonical_url_count`, `unique_domain_count`, `independent_source_count`, `primary_source_count`, and duplicate source groups.
-- **CoverageReviewer** consumes the review result and controls branch-level coverage: source-type gaps, satisfied/partial/missing criteria, missing guiding questions, and gap-driven follow-up task specs. An LLM source-gap advisor (`LLMSourceGapAdvisor`) decides whether the accepted evidence source mix needs targeted follow-up.
-- **BranchCoverageStateBuilder** aggregates each root branch and its follow-up children into `branch_coverage_states`, recording gap codes, resolved/blocked gap records, parent/child improvement assessments, and final coverage status.
+- **EvidenceQualityReviewer** produces `EvidenceReviewResult` records with accepted/rejected evidence IDs, success-criterion matches, findings, score, and required action.
+- **SourceMetricsBuilder** computes deterministic accepted-source metrics: unique canonical URLs, unique domains, independent source count, primary source count, and duplicate source groups.
+- **CoverageReviewer** controls branch-level coverage: source-type gaps, satisfied/partial/missing criteria, and gap-driven follow-up task specs. An LLM source-gap advisor judges whether the accepted evidence source mix needs targeted follow-up.
+- **BranchCoverageStateBuilder** aggregates each root branch and its follow-up children into `branch_coverage_states`.
 
 ### Collection Limits
 
@@ -480,7 +480,7 @@ RIVALENS_MAX_SUBQUERY_CONCURRENCY=2  # per-branch sub-query processing
 
 ### Scraped Source Cache
 
-`ScrapedSourceCache` (SQLite) canonicalizes search results by URL (fragments and common tracking parameters removed). Cache hits return the same raw scraped-page shape as a live scrape, but cached pages still pass through `EvidenceQualityReviewer` and `CoverageReviewer` normally. Evidence items carry `canonical_url`, `source_domain`, `scraped_content_sha256`, and `source_cache.status` metadata.
+`ScrapedSourceCache` (SQLite) canonicalizes search results by URL (fragments and common tracking parameters removed). Cache hits return the same raw scraped-page shape as a live scrape, but cached pages still pass through `EvidenceQualityReviewer` and `CoverageReviewer` normally.
 
 ```env
 RIVALENS_SCRAPED_SOURCE_CACHE_ENABLED=true
@@ -506,37 +506,23 @@ UNIFUNCS_DEEPSEARCH_LANGUAGE=zh
 TAVILY_API_KEY=tvly-your-tavily-key
 ```
 
-`CollectionAgent` localizes deterministic branch `search_queries` before they reach retrievers. If the original task uses Chinese competitors (e.g. 飞书, 钉钉), planned sub-queries use Chinese source terms (官网、定价、文档、评价、新闻) to bias discovery toward Chinese-language sources.
-
 ## PostgreSQL Data
 
-PostgreSQL stores user authentication and durable business provenance. LangSmith handles detailed execution observability (model/tool spans, prompts, outputs, latency, token usage, cost). PostgreSQL stores domain relationships needed to replay and visualize why a report contains a claim.
-
-### User Table
-
-The `users` table is created at startup via `backend/server/user_store.py` (SQL: `backend/server/sql_table_create/001_users.sql`):
-
-- `id` — stable UUID identity
-- `email` — normalized lowercase login identifier (unique index)
-- `display_name` — user-facing name
-- `password_hash` — salted scrypt digest (plaintext never stored)
-- `role` and `status` — authorization role and account availability
-- `email_verified_at`, `last_login_at` — verification and login audit
-- `created_at`, `updated_at` — account audit timestamps
+PostgreSQL stores user authentication and durable business provenance. LangSmith handles detailed execution observability (model/tool spans, prompts, outputs, latency, token usage, cost).
 
 ### Traceability Chain
 
-`backend/server/trace_store.py` creates the traceability tables (SQL: `backend/server/sql_table_create/002_traceability.sql`). Each Rivalens run receives a `running` record before execution; completed runs are stored transactionally at the workflow boundary; failed runs retain an auditable `analysis_runs` status.
+`backend/server/trace_store.py` manages traceability tables. Each Rivalens run receives a `running` record before execution; completed runs are stored transactionally at the workflow boundary.
 
 ```
 analysis_runs
-  -> workflow_step_executions / workflow_transitions / agent_messages
-  -> analysis_dimensions -> research_branches -> research_tasks
-  -> evidence_items -> knowledge_facts -> analysis_claims
-  -> report_sections -> artifacts
+  → workflow_step_executions / workflow_transitions / agent_messages
+  → analysis_dimensions → research_branches → research_tasks
+  → evidence_items → knowledge_facts → analysis_claims
+  → report_sections → artifacts
 ```
 
-Critical many-to-many provenance tables:
+Key many-to-many provenance tables:
 
 - `knowledge_fact_evidence` — facts to source evidence
 - `claim_evidence` — claims to source evidence
@@ -551,11 +537,9 @@ The `evidence_embeddings` table indexes compact `EvidenceItem` text plus metadat
 RIVALENS_ENABLE_EVIDENCE_RAG=true
 ```
 
-The database must have the pgvector extension available; Alembic runs `CREATE EXTENSION IF NOT EXISTS vector` during startup migrations.
-
 ## LangSmith Tracing
 
-Rivalens uses LangGraph and LangChain components, so LangSmith tracing is available with the standard `LANGSMITH_*` environment variables:
+Rivalens uses LangGraph and LangChain components, so LangSmith tracing is available with standard `LANGSMITH_*` environment variables:
 
 ```env
 LANGSMITH_TRACING=true
@@ -566,28 +550,11 @@ LANGSMITH_WORKSPACE_ID=
 LANGCHAIN_CALLBACKS_BACKGROUND=false
 ```
 
-Top-level LangGraph runs are tagged with `rivalens`, `competitive-analysis`, and metadata for retriever, branch budget, competitor count, and collection ownership.
-
-Key spans to inspect: `rivalens_scope_planner` (competitor scope, industry, directions), `rivalens_collect_evidence`, `rivalens_process_subquery`, `rivalens_retriever_search`, `rivalens_scrape_url`, `rivalens_evidence_quality_review`, `rivalens_coverage_review`.
-
 Smoke test:
 
 ```bash
 .venv/bin/python scripts/langsmith_smoke.py
 ```
-
-## Knowledge Fact Rule Extraction
-
-`KnowledgeStructuringAgent` extracts structured `KnowledgeFact` atoms from accepted evidence with deterministic rules:
-
-- Skips semantic noise, trims context windows, keeps source title and URL in qualifiers
-- Cites accepted input `EvidenceItem.id`
-- Atomizes pricing evidence into free-tier, plan-price, quote-only, usage-based-billing, and annual-discount facts
-- Agent events record rule input count, skipped count, semantic-noise count, context-trimmed count, fact count, and atomization counts
-
-Before `EvidenceItem` records are built, `ResearchEngineEvidenceCollector` cleans scraped source content: removes HTML navigation chrome, JavaScript fallback text, invalid date noise (`NaN-NaN-NaN`), and AI keyword-match notices. The original scraped content hash remains in `scraped_content_sha256`; only the EvidenceItem excerpt is cleaned for downstream review.
-
-`KnowledgeStructuringAgent` also enriches accepted evidence with top-k `evidence_snippets` (sentence-level support for matched success criteria) before fact extraction.
 
 ## Optional LLM Analysis
 
@@ -600,7 +567,7 @@ RIVALENS_ANALYSIS_LLM_MAX_TOKENS=900
 RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
 ```
 
-The LLM runs one request per competitor × dimension `KnowledgeFact` package. It may choose which `knowledge_fact_ids` support each claim, but `evidence_ids`, risk level, normalized keys, and report routing are still bound locally. Failed packages fall back to rule-generated claims.
+Failed packages fall back to rule-generated claims.
 
 ## Report Export
 
@@ -611,11 +578,11 @@ Reports are exported in multiple formats via `backend/report_type/` and `rivalen
 - **PDF** — via WeasyPrint (Linux) or alternative renderer
 - **DOCX** — via python-docx
 
-Report types (configured via `report_type` in API requests): `research_report` (summary, ~2 min), `detailed_report` (in-depth, ~5 min), `deep_research`, `rivalens` (full multi-agent workflow), and more.
+Report types (configured via `report_type` in API requests): `research_report` (summary), `custom_report` (customizable template-based report).
 
 ## Security and Privacy
 
-Default configuration documents the structure needed to run the project. Production model keys, database passwords, graph database passwords, and tracing credentials should be injected through environment variables or private configuration, not committed to the repository.
+Default configuration documents the structure needed to run the project. Production model keys, database passwords, and tracing credentials should be injected through environment variables or private configuration, not committed to the repository.
 
 The system processes competitor research queries, public web evidence, and generated analysis. Demonstrations, tests, and screenshots should use non-confidential competitor scenarios. If tracing or third-party model services are enabled, review data retention and audit requirements for your deployment context.
 

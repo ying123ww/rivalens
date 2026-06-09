@@ -1104,7 +1104,7 @@ function IndustryDirectionDialog({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/80 px-4 py-6 backdrop-blur-sm">
-      <div className="w-full max-w-3xl rounded-lg border border-gray-700 bg-gray-900 shadow-2xl shadow-black/40">
+      <div className="w-full max-w-3xl rounded-lg border border-gray-700 bg-gray-950 shadow-2xl shadow-black/40">
         <div className="border-b border-gray-800 px-5 py-4 sm:px-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>

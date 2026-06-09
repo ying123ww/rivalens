@@ -605,6 +605,18 @@ async def handle_start_command(
                 ),
             },
         })
+        # Send predicted artifact paths immediately so the frontend
+        # renders Print/View/Download buttons without waiting for
+        # file generation (PDF rendering is slow).
+        predicted_paths = {
+            "markdown": f"outputs/{research_id}.md",
+            "pdf": f"outputs/{research_id}.pdf",
+            "docx": f"outputs/{research_id}.docx",
+            "html": f"outputs/{research_id}.html",
+            "md": f"outputs/{research_id}.md",
+            "research_id": research_id,
+        }
+        await send_file_paths(logs_handler, predicted_paths)
         file_paths = await generate_report_files(
             report,
             research_id,
@@ -612,7 +624,6 @@ async def handle_start_command(
             include_legacy_md_key=True,
         )
         file_paths["research_id"] = research_id
-        await send_file_paths(logs_handler, file_paths)
         await upsert_run_report(
             "completed",
             report=report,

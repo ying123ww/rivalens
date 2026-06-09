@@ -75,7 +75,7 @@ const AccessReport: React.FC<AccessReportProps> = ({ accessData, chatBoxSettings
   }
 
   return (
-    <div className="container rounded-lg border border-solid border-gray-700/30 bg-black/30 backdrop-blur-md shadow-lg p-5 my-5">
+    <div className="container rounded-lg border border-solid border-gray-700/30 bg-gray-950/60 backdrop-blur-md shadow-lg p-5 my-5">
       <div className="flex flex-col items-center">
         <h3 className="text-lg font-bold mb-4 text-white">Access Your Research Report</h3>
 

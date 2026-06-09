@@ -145,7 +145,7 @@ const buildWeakReviewItems = (claims: GenericRecord[], reviews: GenericRecord[])
 const statusClassName = (status: TimelineStatus) => {
   if (status === "completed") return "border-emerald-400 bg-emerald-400";
   if (status === "active") return "border-sky-300 bg-sky-300";
-  return "border-gray-600 bg-gray-900";
+  return "border-gray-600 bg-gray-950";
 };
 
 const metricAccentClassName = (index: number) => {
@@ -326,7 +326,7 @@ const LogsSection = ({
       : "no structured evidence";
 
   return (
-    <section className="container mt-5 h-auto w-full shrink-0 rounded-lg border border-solid border-gray-700/40 bg-black/30 p-5 shadow-lg backdrop-blur-md">
+    <section className="container mt-5 h-auto w-full shrink-0 rounded-lg border border-solid border-gray-700/40 bg-gray-950/60 p-5 shadow-lg backdrop-blur-md">
       <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-4">
           <img src="/img/chat-check.svg" alt="logs" width={24} height={24} />
@@ -336,7 +336,7 @@ const LogsSection = ({
             </h3>
           </div>
         </div>
-        <span className="w-fit rounded-full border border-gray-700 bg-gray-900 px-3 py-1 text-xs font-medium uppercase tracking-wide text-gray-300">
+        <span className="w-fit rounded-full border border-gray-700 bg-gray-950 px-3 py-1 text-xs font-medium uppercase tracking-wide text-gray-300">
           {panelStatus}
         </span>
       </div>
@@ -451,7 +451,7 @@ const LogsSection = ({
                       {statusLabel(item.status)}
                     </span>
                     {item.claimId && (
-                      <span className="truncate rounded-sm bg-gray-900 px-2 py-0.5 text-[11px] text-gray-400">
+                      <span className="truncate rounded-sm bg-gray-950 px-2 py-0.5 text-[11px] text-gray-400">
                         {item.claimId}
                       </span>
                     )}
