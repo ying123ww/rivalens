@@ -22,6 +22,7 @@ langchain = "^1.0.0"
 langchain-classic = "^1.0.0"
 langchain_community = "^0.4.0"
 langchain-core = "^1.0.0"
+langchain-anthropic = "^1.0.0"
 langchain-openai = "^1.0.0"
 langchain-text-splitters = "^1.0.0"
 langgraph = ">=0.2.73,<0.3"
@@ -109,7 +110,6 @@ dependencies = [
     "httpx>=0.28.1",
     "httpx-aiohttp>=0.1.4",
     "httpx-sse>=0.4.0",
-    "huggingface-hub>=0.32.0",
     "idna>=3.10",
     "importlib-metadata>=8.7.0",
     "jinja2>=3.1.6",
@@ -126,7 +126,7 @@ dependencies = [
     "langchain-classic>=1.0.0",
     "langchain-community>=0.4.0",
     "langchain-core>=1.0.0",
-    "langchain-ollama>=1.0.0",
+    "langchain-anthropic>=1.0.0",
     "langchain-openai>=1.0.0",
     "langchain-text-splitters>=1.0.0",
     "langdetect>=1.0.9",
@@ -135,7 +135,6 @@ dependencies = [
     "langgraph-cli>=0.2.10",
     "langgraph-sdk>=0.1.70",
     "langsmith>=0.3.42",
-    "litellm>=1.71.0",
     "loguru>=0.7.3",
     "lxml>=5.4.0",
     "markdown>=3.8",
@@ -151,7 +150,6 @@ dependencies = [
     "nltk>=3.9.1",
     "numpy>=2.0.0,<2.3.0",
     "olefile>=0.47",
-    "ollama>=0.4.8",
     "openai>=1.82.0",
     "orjson>=3.10.18",
     "ormsgpack>=1.10.0",
@@ -224,17 +222,6 @@ requirements-txt = [
     "exa_py",
     "firecrawl",
     "langchain-anthropic",
-    "langchain-cohere",
-    "langchain-dashscope",
-    "langchain-fireworks",
-    "langchain-gigachat",
-    "langchain-google-genai",
-    "langchain-google-vertexai",
-    "langchain-groq",
-    "langchain-huggingface",
-    "langchain-mistralai",
-    "langchain-together",
-    "langchain-xai",
     "playwright",
     "scrapy",
     "selenium",

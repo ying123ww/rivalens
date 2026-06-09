@@ -2,7 +2,7 @@ from .base import BaseConfig
 
 DEFAULT_CONFIG: BaseConfig = {
     "RETRIEVER": "tavily",
-    "EMBEDDING": "openai:text-embedding-v4",
+    "EMBEDDING": "openai:text-embedding-3-small",
     "SIMILARITY_THRESHOLD": 0.42,
     "FAST_LLM": "openai:gpt-4o-mini",
     "SMART_LLM": "openai:gpt-4.1",  # Has support for long responses (2k+ words).
@@ -44,11 +44,4 @@ DEFAULT_CONFIG: BaseConfig = {
     "MCP_STRATEGY": "fast",  # MCP execution strategy: "fast", "deep", "disabled"
     "REASONING_EFFORT": "medium",
     
-    # Image generation settings (optional - requires GOOGLE_API_KEY)
-    # Free tier models: gemini-2.5-flash-image, gemini-2.0-flash-exp-image-generation
-    # Paid tier models: imagen-4.0-generate-001, imagen-4.0-fast-generate-001
-    "IMAGE_GENERATION_MODEL": "models/gemini-2.5-flash-image",
-    "IMAGE_GENERATION_MAX_IMAGES": 3,  # Maximum number of images to generate per report
-    "IMAGE_GENERATION_ENABLED": False,  # Master switch for inline image generation
-    "IMAGE_GENERATION_STYLE": "dark",  # Image style: "dark" (matches app theme), "light", or "auto"
 }
