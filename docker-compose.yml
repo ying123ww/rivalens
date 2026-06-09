@@ -17,11 +17,7 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-true}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-rivalens-local}
       LOGGING_LEVEL: INFO
-      # Image generation (optional - set to enable inline images in reports)
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      IMAGE_GENERATION_ENABLED: ${IMAGE_GENERATION_ENABLED:-false}
-      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-gemini-2.0-flash-preview-image-generation}
-      IMAGE_GENERATION_MAX_IMAGES: ${IMAGE_GENERATION_MAX_IMAGES:-3}
       DATABASE_URL: postgresql://${POSTGRES_USER:-rivalens}:${POSTGRES_PASSWORD:-123456}@postgres:5432/rivalens
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-rivalens-local-development-secret-change-before-production}
       AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-86400}
@@ -66,9 +62,6 @@ services:
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-rivalens-local}
       LOGGING_LEVEL: INFO
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      IMAGE_GENERATION_ENABLED: ${IMAGE_GENERATION_ENABLED:-false}
-      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-gemini-2.0-flash-preview-image-generation}
-      IMAGE_GENERATION_MAX_IMAGES: ${IMAGE_GENERATION_MAX_IMAGES:-3}
       DATABASE_URL: postgresql://${POSTGRES_USER:-rivalens}:${POSTGRES_PASSWORD:-123456}@postgres:5432/rivalens
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-rivalens-local-development-secret-change-before-production}
       AUTH_ACCESS_TOKEN_TTL_SECONDS: ${AUTH_ACCESS_TOKEN_TTL_SECONDS:-86400}

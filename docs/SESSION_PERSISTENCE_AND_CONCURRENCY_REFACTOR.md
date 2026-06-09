@@ -167,7 +167,7 @@ WHERE session_id = $1;
 
 ### 3.1 LLM 全局限流令牌桶
 
-**问题**：deep research 用 `asyncio.gather` 并发 LLM 调用，无全局限流，可能打爆 API quota。
+**问题**：并发 research session 用 `asyncio.gather` 并发 LLM 调用，无全局限流，可能打爆 API quota。
 
 **文件**：`rivalens/research/utils/llm_rate_limiter.py`（新建）
 

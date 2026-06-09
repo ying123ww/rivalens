@@ -2,7 +2,7 @@ from .base import BaseConfig
 
 DEFAULT_CONFIG: BaseConfig = {
     "RETRIEVER": "tavily",
-    "EMBEDDING": "openai:text-embedding-v4",
+    "EMBEDDING": "openai:text-embedding-3-small",
     "SIMILARITY_THRESHOLD": 0.42,
     "FAST_LLM": "openai:gpt-4o-mini",
     "SMART_LLM": "openai:gpt-4.1",  # Has support for long responses (2k+ words).
@@ -11,7 +11,6 @@ DEFAULT_CONFIG: BaseConfig = {
     "SMART_TOKEN_LIMIT": 6000,
     "STRATEGIC_TOKEN_LIMIT": 4000,
     "BROWSE_CHUNK_MAX_LENGTH": 8192,
-    "CURATE_SOURCES": False,
     "SUMMARY_TOKEN_LIMIT": 700,
     "TEMPERATURE": 0.4,
     "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
@@ -24,7 +23,6 @@ DEFAULT_CONFIG: BaseConfig = {
     "SCRAPER": "bs",
     "MAX_SCRAPER_WORKERS": 15,
     "SCRAPER_RATE_LIMIT_DELAY": 0.0,  # Minimum seconds between scraper requests (0 = no limit, useful for API rate limiting)
-    "MAX_SUBTOPICS": 3,
     "LANGUAGE": "english",
     "REPORT_SOURCE": "web",
     "DOC_PATH": "./my-docs",
@@ -32,10 +30,6 @@ DEFAULT_CONFIG: BaseConfig = {
     "LLM_KWARGS": {},
     "EMBEDDING_KWARGS": {},
     "VERBOSE": False,
-    # Deep research specific settings
-    "DEEP_RESEARCH_BREADTH": 3,
-    "DEEP_RESEARCH_DEPTH": 2,
-    "DEEP_RESEARCH_CONCURRENCY": 4,
     
     # MCP retriever specific settings
     "MCP_SERVERS": [],  # List of predefined MCP server configurations
@@ -44,11 +38,4 @@ DEFAULT_CONFIG: BaseConfig = {
     "MCP_STRATEGY": "fast",  # MCP execution strategy: "fast", "deep", "disabled"
     "REASONING_EFFORT": "medium",
     
-    # Image generation settings (optional - requires GOOGLE_API_KEY)
-    # Free tier models: gemini-2.5-flash-image, gemini-2.0-flash-exp-image-generation
-    # Paid tier models: imagen-4.0-generate-001, imagen-4.0-fast-generate-001
-    "IMAGE_GENERATION_MODEL": "models/gemini-2.5-flash-image",
-    "IMAGE_GENERATION_MAX_IMAGES": 3,  # Maximum number of images to generate per report
-    "IMAGE_GENERATION_ENABLED": False,  # Master switch for inline image generation
-    "IMAGE_GENERATION_STYLE": "dark",  # Image style: "dark" (matches app theme), "light", or "auto"
 }

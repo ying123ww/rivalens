@@ -4,9 +4,6 @@ const ResearchEngine = (() => {
   let conversationHistory = [];
   let isInitialLoad = true; // Flag to track initial page load
   let cookiesEnabled = true; // Flag to track if cookies are enabled
-  let allReports = ''; // Store all reports cumulatively
-  let currentReport = ''; // Store the current report (will be overwritten)
-  let isFirstReport = true; // Flag to track if this is the first report
   let chatContainer = null; // Global reference to chat container
   let lastRequestData = null; // Store the last request data for reconnection
 
@@ -619,7 +616,11 @@ const ResearchEngine = (() => {
     
     // Check if report_type, report_source, and tone are in entry, otherwise use defaults or skip
     const reportTypeSelect = document.querySelector('select[name="report_type"]');
-    if (reportTypeSelect && entry.reportType) {
+    if (
+        reportTypeSelect &&
+        entry.reportType &&
+        Array.from(reportTypeSelect.options).some((option) => option.value === entry.reportType)
+    ) {
         reportTypeSelect.value = entry.reportType;
     } else if (reportTypeSelect) {
         reportTypeSelect.value = reportTypeSelect.options[0].value; // Default to first option
@@ -783,11 +784,6 @@ const ResearchEngine = (() => {
     document.getElementById('reportContainer').innerHTML = ''
     dispose_socket?.() // Call previous dispose function if it exists
 
-    // Reset report variables
-    allReports = '';
-    currentReport = '';
-    isFirstReport = true;
-
     // Hide the download bar
     const stickyDownloadsBar = document.getElementById('stickyDownloadsBar');
     if (stickyDownloadsBar) {
@@ -881,34 +877,11 @@ const ResearchEngine = (() => {
         // Add to reportContent for history
         reportContent += data.output;
 
-        // Get the current report_type
-        const report_type = document.querySelector('select[name="report_type"]').value;
-
-        // Determine if we're using detailed_report
-        const isDetailedReport = report_type === 'detailed_report';
-
-        if (isDetailedReport) {
-          allReports += data.output; // Accumulate raw markdown
-          // Always render the HTML of *all accumulated markdown* for detailed reports during streaming.
-          // writeReport will replace the container's content.
-          writeReport({ output: allReports, type: 'report' }, converter, false, false);
-        } else {
-          // For all other report types, append HTML of current chunk to the container.
-          writeReport({ output: data.output, type: 'report' }, converter, false, true); // append = true
-        }
+        writeReport({ output: data.output, type: 'report' }, converter, false, true);
       } else if (data.type === 'path') {
         updateState('finished')
         downloadLinkData = updateDownloadLink(data)
         isResearchActive = false;
-
-        // Get the current report_type
-        const report_type = document.querySelector('select[name="report_type"]').value;
-
-        // Only for detailed_report, show the complete accumulated report at the end
-        if (report_type === 'detailed_report' && allReports) {
-          const finalData = { output: allReports, type: 'report' };
-          writeReport(finalData, converter, true, false); // isFinal=true, append=false
-        }
 
         // Save to history now that research is complete
         if (reportContent && downloadLinkData) {
@@ -916,9 +889,6 @@ const ResearchEngine = (() => {
 
           // Reset variables for next research session
           reportContent = '';
-          allReports = '';
-          currentReport = '';
-          isFirstReport = true;
         }
 
         // Update WebSocket status

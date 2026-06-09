@@ -1,9 +1,8 @@
 """
 Tool-enabled LLM utilities for Rivalens
 
-This module provides provider-agnostic tool calling functionality using LangChain's
-unified interface. It allows any LLM provider that supports function calling to use
-tools seamlessly.
+This module provides tool calling for the supported OpenAI and Anthropic
+providers through LangChain's unified interface.
 """
 
 import asyncio
@@ -30,10 +29,10 @@ async def create_chat_completion_with_tools(
     **kwargs
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
-    Create a chat completion with tool calling support across all LLM providers.
+    Create a chat completion with tool calling support.
     
-    This function uses LangChain's bind_tools() to enable function calling in a 
-    provider-agnostic way. The AI decides autonomously when and how to use tools.
+    This function uses LangChain's bind_tools() to enable function calling.
+    The AI decides autonomously when and how to use tools.
     
     Args:
         messages: List of chat messages with role and content
@@ -293,15 +292,9 @@ def get_available_providers_with_tools() -> List[str]:
     Returns:
         List of provider names that support function calling
     """
-    # These are the providers known to support function calling in LangChain
     return [
         "openai",
-        "anthropic", 
-        "google_genai",
-        "azure_openai",
-        "fireworks",
-        "groq",
-        # Note: This list may expand as more providers add function calling support
+        "anthropic",
     ]
 
 

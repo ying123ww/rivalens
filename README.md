@@ -197,6 +197,12 @@ small local-test collection budget and disables backend/session persistence. Use
 `--full-budget` for the normal workflow collection budget, or `--print-report`
 to print the final report in the terminal.
 
+### LLM Provider Scope
+
+Rivalens chat generation supports only `openai:*` and `anthropic:*` provider
+strings. Embeddings use OpenAI only, with `openai:text-embedding-3-small` as
+the default.
+
 `scope_planner` owns the planning phase end to end: it normalizes competitor
 inputs, selects an industry, composes the confirmed analysis directions from
 reusable industry facets, then emits one `research_plan` handoff to

@@ -158,8 +158,6 @@ class ResearchConductor:
             search_results=search_results,
             agent_role_prompt=self.researcher.role,
             cfg=self.researcher.cfg,
-            parent_query=self.researcher.parent_query,
-            report_type=self.researcher.report_type,
             cost_callback=self.researcher.add_costs,
             retriever_names=retriever_names,  # Pass retriever names for MCP optimization
             trace_context=trace_context_from_conductor(self),
@@ -313,7 +311,6 @@ class ResearchConductor:
             self.researcher.agent, self.researcher.role = await choose_agent(
                 query=self.researcher.query,
                 cfg=self.researcher.cfg,
-                parent_query=self.researcher.parent_query,
                 cost_callback=self.researcher.add_costs,
                 headers=self.researcher.headers,
                 prompt_family=self.researcher.prompt_family
@@ -383,11 +380,7 @@ class ResearchConductor:
         elif self.researcher.report_source == ReportSource.LangChainVectorStore.value:
             research_data = await self._get_context_by_vectorstore(self.researcher.query, self.researcher.vector_store_filter)
 
-        # Rank and curate the sources
         self.researcher.context = research_data
-        if self.researcher.cfg.curate_sources:
-            self.logger.info("Curating sources")
-            self.researcher.context = await self.researcher.source_curator.curate_sources(research_data)
 
         if self.researcher.verbose:
             await stream_output(
@@ -433,9 +426,7 @@ class ResearchConductor:
         context = []
         # Generate Sub-Queries including original query
         sub_queries = self._dedupe_search_queries(await self.plan_research(query))
-        # If this is not part of a sub researcher, add original query to research for better results
-        if self.researcher.report_type != "subtopic_report":
-            sub_queries = self._dedupe_search_queries([*sub_queries, query])
+        sub_queries = self._dedupe_search_queries([*sub_queries, query])
 
         if self.researcher.verbose:
             await stream_output(
@@ -529,9 +520,7 @@ class ResearchConductor:
         )
         self.logger.info(f"Generated sub-queries: {sub_queries}")
         
-        # If this is not part of a sub researcher, add original query to research for better results
-        if self.researcher.report_type != "subtopic_report":
-            sub_queries = self._dedupe_search_queries([*sub_queries, query])
+        sub_queries = self._dedupe_search_queries([*sub_queries, query])
 
         if self.researcher.verbose:
             await stream_output(
