@@ -4,7 +4,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { ResearchHistoryItem, Data, ChatMessage } from '../types/data';
 
 const RESEARCH_HISTORY_STORAGE_KEY = 'researchHistory';
+const RESEARCH_HISTORY_META_KEY = 'researchHistoryMeta';  // 仅存轻量元数据
 const DELETED_RESEARCH_IDS_STORAGE_KEY = 'deletedResearchIds';
+const LOCALSTORAGE_MAX_ITEMS = 20;  // 最多保留最近 20 条
 
 const loadDeletedResearchIdsFromStorage = () => {
   const deletedIdsStr = localStorage.getItem(DELETED_RESEARCH_IDS_STORAGE_KEY);
@@ -35,6 +37,37 @@ const rememberDeletedResearchId = (id: string) => {
   const deletedIds = loadDeletedResearchIdsFromStorage();
   deletedIds.add(id);
   saveDeletedResearchIdsToStorage(deletedIds);
+};
+
+// 从完整 history item 提取仅含标识信息的轻量元数据
+const toMeta = (item: ResearchHistoryItem) => ({
+  id: item.id,
+  question: item.question,
+  timestamp: item.timestamp,
+  status: item.status,
+});
+
+const safeSetItem = (key: string, value: string): boolean => {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+      console.warn(`localStorage quota exceeded for "${key}", attempting cleanup...`);
+      // 清掉旧的历史数据腾空间
+      localStorage.removeItem(RESEARCH_HISTORY_STORAGE_KEY);
+      localStorage.removeItem(RESEARCH_HISTORY_META_KEY);
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch {
+        console.error('localStorage still full after cleanup');
+        return false;
+      }
+    }
+    console.error(`localStorage.setItem("${key}") failed:`, e);
+    return false;
+  }
 };
 
 // 本地删除优先于服务端同步，避免重启后旧报告重新出现。
@@ -92,26 +125,36 @@ export const useResearchHistory = () => {
       }
     };
     
-    // Helper to load from localStorage
-    const loadFromLocalStorage = () => {
+    // Helper to load from localStorage（仅元数据，完整内容走服务端）
+    const loadFromLocalStorage = (): ResearchHistoryItem[] => {
+      // 优先读轻量元数据
+      const metaStr = localStorage.getItem(RESEARCH_HISTORY_META_KEY);
+      if (metaStr) {
+        try {
+          const metaList = JSON.parse(metaStr);
+          if (Array.isArray(metaList)) {
+            console.log('Loaded research history meta from localStorage:', metaList.length, 'items');
+            return metaList.slice(0, LOCALSTORAGE_MAX_ITEMS);
+          }
+        } catch { /* fall through */ }
+      }
+      // 兼容旧格式（完整对象存储）
       const localHistoryStr = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
       if (localHistoryStr) {
         try {
           const parsedHistory = JSON.parse(localHistoryStr);
           if (Array.isArray(parsedHistory)) {
-            console.log('Loaded research history from localStorage:', parsedHistory.length, 'items');
-            return parsedHistory;
-          } else {
-            console.warn('localStorage history is not an array');
-            return [];
+            console.log('Loaded research history (legacy) from localStorage:', parsedHistory.length, 'items');
+            // 迁移到轻量格式
+            const metas = parsedHistory.slice(0, LOCALSTORAGE_MAX_ITEMS).map(toMeta);
+            safeSetItem(RESEARCH_HISTORY_META_KEY, JSON.stringify(metas));
+            // 清除旧格式的大数据
+            localStorage.removeItem(RESEARCH_HISTORY_STORAGE_KEY);
+            return parsedHistory.slice(0, LOCALSTORAGE_MAX_ITEMS);
           }
-        } catch (error) {
-          console.error('Error parsing localStorage history:', error);
-          return [];
-        }
-      } else {
-        return [];
+        } catch { /* fall through */ }
       }
+      return [];
     };
 
     // Helper to sync local history with server
@@ -178,9 +221,10 @@ export const useResearchHistory = () => {
       });
       
       setHistory(sortedHistory);
-      
-      // Update localStorage with the complete merged set
-      localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(sortedHistory));
+
+      // 只存轻量元数据到 localStorage，避免 QuotaExceededError
+      const metas = sortedHistory.slice(0, LOCALSTORAGE_MAX_ITEMS).map(toMeta);
+      safeSetItem(RESEARCH_HISTORY_META_KEY, JSON.stringify(metas));
       
       console.log('History sync complete, total items:', sortedHistory.length);
     };
@@ -224,15 +268,11 @@ export const useResearchHistory = () => {
         };
         
         setHistory(prev => [newResearch, ...prev]);
-        
-        // Also save to localStorage as fallback
-        const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-        const parsedHistory = localHistory ? JSON.parse(localHistory) : [];
-        localStorage.setItem(
-          RESEARCH_HISTORY_STORAGE_KEY,
-          JSON.stringify([newResearch, ...parsedHistory])
-        );
-        
+
+        // 仅存轻量元数据
+        const metas = [newResearch, ...prev].slice(0, LOCALSTORAGE_MAX_ITEMS).map(toMeta);
+        safeSetItem(RESEARCH_HISTORY_META_KEY, JSON.stringify(metas));
+
         return newId;
       } else {
         throw new Error(`API error: ${response.status}`);
@@ -240,7 +280,7 @@ export const useResearchHistory = () => {
     } catch (error) {
       console.error('Error saving research:', error);
       toast.error('Failed to save research to server. Saved locally only.');
-      
+
       // Fallback: save to localStorage only
       const newResearch = {
         id: uuidv4(),
@@ -250,18 +290,14 @@ export const useResearchHistory = () => {
         chatMessages: [],
         timestamp: Date.now(),
       };
-      
-      // Update local state
+
       setHistory(prev => [newResearch, ...prev]);
-      
-      // Save to localStorage
-      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-      const parsedHistory = localHistory ? JSON.parse(localHistory) : [];
-      localStorage.setItem(
-        RESEARCH_HISTORY_STORAGE_KEY,
-        JSON.stringify([newResearch, ...parsedHistory])
-      );
-      
+
+      const metaStr = localStorage.getItem(RESEARCH_HISTORY_META_KEY);
+      const existingMetas = metaStr ? (() => { try { return JSON.parse(metaStr); } catch { return []; } })() : [];
+      const metas = [newResearch, ...existingMetas].slice(0, LOCALSTORAGE_MAX_ITEMS).map(toMeta);
+      safeSetItem(RESEARCH_HISTORY_META_KEY, JSON.stringify(metas));
+
       return newResearch.id;
     }
   };
@@ -286,43 +322,35 @@ export const useResearchHistory = () => {
       }
       
       // Update local state
-      setHistory(prev => 
-        prev.map(item => 
+      setHistory(prev =>
+        prev.map(item =>
           item.id === id ? { ...item, answer, orderedData, timestamp: Date.now() } : item
         )
       );
-      
-      // Also update localStorage as fallback
-      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        const updatedHistory = parsedHistory.map((item: any) => 
-          item.id === id ? { ...item, answer, orderedData, timestamp: Date.now() } : item
-        );
-        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
+
+      // 仅更新元数据的时间戳
+      const metaStr = localStorage.getItem(RESEARCH_HISTORY_META_KEY);
+      if (metaStr) {
+        try {
+          const metas = JSON.parse(metaStr);
+          const updated = metas.map((m: any) =>
+            m.id === id ? { ...m, timestamp: Date.now() } : m
+          );
+          safeSetItem(RESEARCH_HISTORY_META_KEY, JSON.stringify(updated));
+        } catch { /* ignore */ }
       }
-      
+
       return true;
     } catch (error) {
       console.error('Error updating research:', error);
-      
+
       // Update local state anyway
-      setHistory(prev => 
-        prev.map(item => 
+      setHistory(prev =>
+        prev.map(item =>
           item.id === id ? { ...item, answer, orderedData, timestamp: Date.now() } : item
         )
       );
-      
-      // Update localStorage
-      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        const updatedHistory = parsedHistory.map((item: any) => 
-          item.id === id ? { ...item, answer, orderedData, timestamp: Date.now() } : item
-        );
-        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
-      }
-      
+
       return false;
     }
   };
@@ -339,25 +367,12 @@ export const useResearchHistory = () => {
         const data = await response.json();
         return data.report;
       } else if (response.status === 404) {
-        // If not found on server, try localStorage
-        const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-        if (localHistory) {
-          const parsedHistory = JSON.parse(localHistory);
-          return parsedHistory.find((item: any) => item.id === id) || null;
-        }
+        return null;
       } else {
         throw new Error(`API error: ${response.status}`);
       }
     } catch (error) {
       console.error('Error getting research by ID:', error);
-      
-      // Try localStorage as fallback
-      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        return parsedHistory.find((item: any) => item.id === id) || null;
-      }
-      
       return null;
     }
   };
@@ -367,11 +382,12 @@ export const useResearchHistory = () => {
     rememberDeletedResearchId(id);
     setHistory(prev => prev.filter(item => item.id !== id));
 
-    const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-    if (localHistory) {
-      const parsedHistory = JSON.parse(localHistory);
-      const filteredHistory = parsedHistory.filter((item: any) => item.id !== id);
-      localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(filteredHistory));
+    const metaStr = localStorage.getItem(RESEARCH_HISTORY_META_KEY);
+    if (metaStr) {
+      try {
+        const metas = JSON.parse(metaStr);
+        safeSetItem(RESEARCH_HISTORY_META_KEY, JSON.stringify(metas.filter((m: any) => m.id !== id)));
+      } catch { /* ignore */ }
     }
 
     try {
@@ -406,8 +422,8 @@ export const useResearchHistory = () => {
         throw new Error(`API error: ${response.status}`);
       }
       
-      // Update local state
-      setHistory(prev => 
+      // Update local state (localStorage 不再存 chatMessages 全量，仅服务端持久化)
+      setHistory(prev =>
         prev.map(item => {
           if (item.id === id) {
             const chatMessages = item.chatMessages || [];
@@ -416,27 +432,13 @@ export const useResearchHistory = () => {
           return item;
         })
       );
-      
-      // Also update localStorage
-      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        const updatedHistory = parsedHistory.map((item: any) => {
-          if (item.id === id) {
-            const chatMessages = item.chatMessages || [];
-            return { ...item, chatMessages: [...chatMessages, message] };
-          }
-          return item;
-        });
-        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
-      }
-      
+
       return true;
     } catch (error) {
       console.error('Error adding chat message:', error);
-      
+
       // Update local state anyway
-      setHistory(prev => 
+      setHistory(prev =>
         prev.map(item => {
           if (item.id === id) {
             const chatMessages = item.chatMessages || [];
@@ -445,29 +447,14 @@ export const useResearchHistory = () => {
           return item;
         })
       );
-      
-      // Update localStorage
-      const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-      if (localHistory) {
-        const parsedHistory = JSON.parse(localHistory);
-        const updatedHistory = parsedHistory.map((item: any) => {
-          if (item.id === id) {
-            const chatMessages = item.chatMessages || [];
-            return { ...item, chatMessages: [...chatMessages, message] };
-          }
-          return item;
-        });
-        localStorage.setItem(RESEARCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
-      }
-      
+
       return false;
     }
   };
 
   // Get chat messages
   const getChatMessages = (id: string) => {
-    // First try to get from local state
-    // Add defensive check to ensure history is an array before using find
+    // 从内存中的 history 获取（完整数据来自服务端，localStorage 不再存全量）
     if (Array.isArray(history)) {
       const research = history.find(item => item.id === id);
       if (research && research.chatMessages) {
@@ -476,26 +463,7 @@ export const useResearchHistory = () => {
     } else {
       console.warn('History is not an array when getting chat messages');
     }
-    
-    // Fallback to localStorage
-    const localHistory = localStorage.getItem(RESEARCH_HISTORY_STORAGE_KEY);
-    if (localHistory) {
-      try {
-        const parsedHistory = JSON.parse(localHistory);
-        // Check if parsedHistory is an array
-        if (Array.isArray(parsedHistory)) {
-          const research = parsedHistory.find((item: any) => item.id === id);
-          if (research && research.chatMessages) {
-            return research.chatMessages;
-          }
-        } else {
-          console.warn('Parsed history from localStorage is not an array');
-        }
-      } catch (error) {
-        console.error('Error parsing history from localStorage:', error);
-      }
-    }
-    
+
     return [];
   };
 
@@ -512,7 +480,8 @@ export const useResearchHistory = () => {
       
       // 清空本地列表，并用 tombstone 阻止服务端旧记录重新同步回来。
       setHistory([]);
-      localStorage.removeItem(RESEARCH_HISTORY_STORAGE_KEY);
+      localStorage.removeItem(RESEARCH_HISTORY_META_KEY);
+      localStorage.removeItem(RESEARCH_HISTORY_STORAGE_KEY);  // 清理旧格式
       
       return true;
     } catch (error) {
