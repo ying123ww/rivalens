@@ -1,2 +1,46 @@
+# Git
 .git
-output/
+.gitignore
+
+# 敏感配置
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+*.egg-info
+.venv
+venv
+env
+
+# Node
+node_modules
+.next
+frontend/nextjs/.next
+frontend/nextjs/node_modules
+
+# 运行时输出
+outputs
+logs
+*.log
+my-docs
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# 临时文件
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

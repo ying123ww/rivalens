@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Image from "next/image";
 import Link from "next/link";
 import Modal from './Settings/Modal';
@@ -10,6 +10,8 @@ interface FooterProps {
 }
 
 const Footer: React.FC<FooterProps> = ({ chatBoxSettings, setChatBoxSettings }) => {
+  const [showPhone, setShowPhone] = useState(false);
+
   // Add domain filtering from URL parameters
   if (typeof window !== 'undefined') {
     const urlParams = new URLSearchParams(window.location.search);
@@ -55,15 +57,32 @@ const Footer: React.FC<FooterProps> = ({ chatBoxSettings, setChatBoxSettings }) 
               className="w-6 h-6 sm:w-7 sm:h-7"
             />{" "}
           </Link>
-          <Link href={"https://discord.gg/QgZXvJAccX"} target="_blank" className="p-1">
-              <img
-                src={"/img/discord.svg"}
-                alt="discord"
-                width={24}
-                height={24}
-                className="w-6 h-6 sm:w-7 sm:h-7"
-              />{" "}
-          </Link>
+          <div className="relative">
+            <button
+              onClick={() => setShowPhone(!showPhone)}
+              className="p-1"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-6 h-6 sm:w-7 sm:h-7 text-white hover:text-[#0cdbb6] transition-colors duration-300"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                />
+              </svg>
+            </button>
+            {showPhone && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-[50px] bg-white px-5 py-2.5 text-[16px] font-[480] leading-[1.40] -tracking-[0.10px] text-black shadow-lg">
+                +86 15312339659
+              </div>
+            )}
+          </div>
           <Link href={"https://hub.docker.com/r/rivalens/rivalens"} target="_blank" className="p-1">
               <img
                 src={"/img/docker.svg"}

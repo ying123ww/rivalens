@@ -59,7 +59,7 @@ export default function ImageModal({ imageSrc, isOpen, onClose, onNext, onPrev }
 
     return (
         <div
-            className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4 overflow-auto"
+            className="fixed inset-0 bg-gray-950/75 z-50 flex items-center justify-center p-4 overflow-auto"
             onClick={handleClose}
             onTouchStart={handleTouchStart as unknown as TouchEventHandler<HTMLDivElement>}
             onTouchEnd={handleTouchEnd as unknown as TouchEventHandler<HTMLDivElement>}
@@ -67,7 +67,7 @@ export default function ImageModal({ imageSrc, isOpen, onClose, onNext, onPrev }
             <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center">
                 <button
                         onClick={onPrev}
-                    className="absolute left-4 z-10 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-75"
+                    className="absolute left-4 z-10 bg-gray-950/50 text-white p-2 rounded-full hover:bg-opacity-75"
                 >
                     ←
                 </button>
@@ -78,13 +78,13 @@ export default function ImageModal({ imageSrc, isOpen, onClose, onNext, onPrev }
                 />
                 <button
                     onClick={onNext}
-                    className="absolute right-4 z-10 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-75"
+                    className="absolute right-4 z-10 bg-gray-950/50 text-white p-2 rounded-full hover:bg-opacity-75"
                 >
                     →
                 </button>
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 z-10 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-75"
+                    className="absolute top-4 right-4 z-10 bg-gray-950/50 text-white p-2 rounded-full hover:bg-opacity-75"
                 >
                     ×
                 </button>

@@ -19,7 +19,7 @@ export default function Report({ answer, researchId }: { answer: string, researc
     }, [answer]);
     
     return (
-      <div className="container flex h-auto w-full shrink-0 gap-4 bg-black/30 backdrop-blur-md shadow-lg rounded-lg border border-solid border-gray-700/40 p-5">
+      <div className="container flex h-auto w-full shrink-0 gap-4 bg-gray-950/60 backdrop-blur-md shadow-lg rounded-lg border border-solid border-gray-700/40 p-5">
         <div className="w-full">
           <div className="flex items-center justify-between pb-3">
             <div className="flex items-center gap-3">

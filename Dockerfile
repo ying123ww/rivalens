@@ -1,62 +1,52 @@
-# Stage 1: Browser and build tools installation
-# Python 3.12+ required for LangChain v1
-FROM python:3.12-slim-bookworm AS install-browser
+# =============================================================================
+# Rivalens — 竞品分析系统 Docker 镜像
+# =============================================================================
+# 用法:
+#   docker compose up -d                        # 全栈启动
+#   docker build -t rivalens .                  # 仅构建
+#   docker run --env-file .env rivalens          # 仅 API 服务
+# =============================================================================
 
-# Install Chromium, Chromedriver, Firefox, Geckodriver, and build tools in one layer
-RUN apt-get update \
-    && apt-get install -y gnupg wget ca-certificates --no-install-recommends \
+# ── Stage 1: 浏览器依赖 ─────────────────────────────────────────────
+FROM python:3.12-slim-bookworm AS browser-deps
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gnupg wget ca-certificates curl \
     && ARCH=$(dpkg --print-architecture) \
-    && wget -qO - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=${ARCH}] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y chromium chromium-driver \
-    && chromium --version && chromedriver --version \
-    && apt-get install -y --no-install-recommends firefox-esr build-essential \
-    && GECKO_ARCH=$(case ${ARCH} in amd64) echo "linux64" ;; arm64) echo "linux-aarch64" ;; *) echo "linux64" ;; esac) \
-    && wget https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-${GECKO_ARCH}.tar.gz \
-    && tar -xvzf geckodriver-v0.36.0-${GECKO_ARCH}.tar.gz \
-    && chmod +x geckodriver \
-    && mv geckodriver /usr/local/bin/ \
-    && rm geckodriver-v0.36.0-${GECKO_ARCH}.tar.gz \
-    && rm -rf /var/lib/apt/lists/*  # Clean up apt lists to reduce image size
+    && wget -qO - https://dl.google.com/linux/linux_signing_key.pub | \
+       gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg \
+    && echo "deb [arch=${ARCH}] http://dl.google.com/linux/chrome/deb/ stable main" \
+       > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       chromium chromium-driver firefox-esr \
+    && rm -rf /var/lib/apt/lists/*
 
-# Stage 2: Python dependencies installation
-FROM install-browser AS rivalens-install
+# ── Stage 2: Python 依赖 ────────────────────────────────────────────
+FROM browser-deps AS python-deps
 
 ENV PIP_ROOT_USER_ACTION=ignore
 WORKDIR /usr/src/app
 
-# Copy and install Python dependencies in a single layer to optimize cache usage
-COPY ./requirements.txt ./requirements.txt
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt --upgrade --prefer-binary
+# ── Stage 3: 应用镜像 ───────────────────────────────────────────────
+FROM python-deps AS rivalens
 
-# Stage 3: Final stage with non-root user and app
-FROM rivalens-install AS rivalens
-
-# Basic server configuration
-ARG HOST=0.0.0.0
-ENV HOST=${HOST}
-ARG PORT=8000
-ENV PORT=${PORT}
-EXPOSE ${PORT}
-
-# Uvicorn parameters used in CMD
-ARG WORKERS=1
-ENV WORKERS=${WORKERS}
-
-# Create a non-root user for security
-# NOTE: Don't use this if you are relying on `_check_pkg` to pip install packages dynamically.
-RUN useradd -ms /bin/bash rivalens && \
-    chown -R rivalens:rivalens /usr/src/app && \
-    # Add these lines to create and set permissions for outputs directory
-    mkdir -p /usr/src/app/outputs && \
-    chown -R rivalens:rivalens /usr/src/app/outputs && \
-    chmod 777 /usr/src/app/outputs
-USER rivalens
 WORKDIR /usr/src/app
 
-# Copy the rest of the application files with proper ownership
-COPY --chown=rivalens:rivalens ./ ./
-CMD uvicorn main:app --host ${HOST} --port ${PORT} --workers ${WORKERS}
+# 复制应用代码
+COPY . .
+
+# 创建非 root 用户并设置目录权限
+RUN useradd -m -s /bin/bash rivalens \
+    && mkdir -p /usr/src/app/outputs /usr/src/app/logs /usr/src/app/my-docs \
+    && chown -R rivalens:rivalens /usr/src/app
+
+USER rivalens
+
+EXPOSE 8000
+
+# 默认启动 API 服务；Celery Worker 通过 docker-compose command 覆盖
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

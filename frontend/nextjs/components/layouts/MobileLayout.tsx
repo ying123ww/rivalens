@@ -60,7 +60,7 @@ export default function MobileLayout({
   };
   
   return (
-    <main className="flex flex-col min-h-screen bg-gray-900">
+    <main className="flex flex-col min-h-screen bg-gray-950">
       <Toaster 
         position="bottom-center" 
         toastOptions={toastOptions}
@@ -228,7 +228,7 @@ export default function MobileLayout({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Report Type</label>
-                <div className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300">
+                <div className="w-full bg-gray-950 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300">
                   Rivalens Report
                 </div>
               </div>
@@ -236,7 +236,7 @@ export default function MobileLayout({
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Research Source</label>
                 <select 
-                  className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
+                  className="w-full bg-gray-950 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
                   value={chatBoxSettings.report_source}
                   onChange={(e) => setChatBoxSettings({...chatBoxSettings, report_source: e.target.value})}
                 >
@@ -248,7 +248,7 @@ export default function MobileLayout({
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Research Tone</label>
                 <select 
-                  className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
+                  className="w-full bg-gray-950 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
                   value={chatBoxSettings.tone}
                   onChange={(e) => setChatBoxSettings({...chatBoxSettings, tone: e.target.value})}
                 >
@@ -265,7 +265,7 @@ export default function MobileLayout({
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Layout</label>
                 <select 
-                  className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
+                  className="w-full bg-gray-950 border border-gray-700 rounded-md py-1.5 px-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500"
                   value={chatBoxSettings.layoutType}
                   onChange={(e) => setChatBoxSettings({...chatBoxSettings, layoutType: e.target.value})}
                 >

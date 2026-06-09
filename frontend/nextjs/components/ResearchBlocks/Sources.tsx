@@ -49,7 +49,7 @@ export default function Sources({
 
   // Full version for research results
   return (
-    <div className="container h-auto w-full shrink-0 rounded-lg border border-solid border-gray-700/40 bg-black/30 backdrop-blur-md shadow-lg p-5">
+    <div className="container h-auto w-full shrink-0 rounded-lg border border-solid border-gray-700/40 bg-gray-950/60 backdrop-blur-md shadow-lg p-5">
       <div className="flex items-start gap-4 pb-3 lg:pb-3.5">
         <img src="/img/browser.svg" alt="sources" width={24} height={24} />
         <h3 className="text-base font-bold uppercase leading-[152.5%] text-white">

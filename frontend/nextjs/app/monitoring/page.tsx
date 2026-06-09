@@ -36,7 +36,7 @@ const SOURCE_TYPE_COLORS: Record<string, string> = {
   docs: "#f87171",
   financial_filing: "#34d399",
   public_registry: "#a78bfa",
-  other: "#6b7280",
+  other: "#60a5fa",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -128,7 +128,7 @@ export default function MonitoringPage() {
                       className={`w-full rounded-md border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                         isActive
                           ? "border-teal-500/60 bg-teal-500/10"
-                          : "border-gray-800 bg-gray-950/30 hover:border-gray-700 hover:bg-gray-900"
+                          : "border-gray-800 bg-gray-950/30 hover:border-gray-700 hover:bg-gray-950/60"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">

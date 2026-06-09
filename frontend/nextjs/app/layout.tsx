@@ -63,7 +63,7 @@ export default function RootLayout({
 }>) {
 
   return (
-    <html className="rivalens-root" lang="en" suppressHydrationWarning>
+    <html className="rivalens-root bg-gray-950" lang="en" suppressHydrationWarning>
       <head>
         <PlausibleProvider domain="localhost:3000" />
         <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID!} />
