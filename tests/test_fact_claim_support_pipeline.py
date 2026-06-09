@@ -981,6 +981,174 @@ def test_analysis_pricing_claim_includes_specific_price():
     assert any("¥80/人/月" in claim["claim"] for claim in claims)
 
 
+def test_analysis_fact_object_preview_strips_page_chrome_for_non_pricing_facts():
+    agent = AnalysisAgent()
+
+    feishu_preview = agent._fact_object_preview(
+        {
+            "fact_type": "target_user_signal",
+            "object": (
+                "合作与支持 飞行社 定价 飞书项目 下载飞书 "
+                "飞书项目面向企业团队，支持项目管理、任务协作和进度跟踪场景。"
+            ),
+        }
+    )
+    dingtalk_preview = agent._fact_object_preview(
+        {
+            "fact_type": "target_user_signal",
+            "object": (
+                "DingTalk - Google Play 應用程式 DingTalk DingTalk "
+                "(Singapore) Private Limited. 2.8 star 2.93K 則評論 所有人 "
+                "info 500K+ 次下載 安裝 分享 加入願望清單 所有人 使用者互動 "
+                "瞭解詳情 DingTalk —— 團隊的AI辦公平台，面向團隊提供協作場景。"
+            ),
+        }
+    )
+    article_preview = agent._fact_object_preview(
+        {
+            "fact_type": "target_user_signal",
+            "object": (
+                "飞书——多维表格产品分析 | 人人都是产品经理 飞书——多维表格产品分析 "
+                "文艺至死 2023-11-07 2 评论 13552 浏览 71 收藏 30 分钟 "
+                "飞书多维表格属于飞书云文档的一种，那么使用起来体验如何？"
+                "官方描述：先进团队的业务管理工具，是一个表格，也是无数个应用。"
+            ),
+        }
+    )
+
+    assert "合作与支持 飞行社 定价" not in feishu_preview
+    assert "下载飞书" not in feishu_preview
+    assert "飞书项目面向企业团队" in feishu_preview
+    assert "Google Play" not in dingtalk_preview
+    assert "加入願望清單" not in dingtalk_preview
+    assert "使用者互動" not in dingtalk_preview
+    assert "DingTalk" in dingtalk_preview
+    assert "人人都是产品经理" not in article_preview
+    assert "浏览" not in article_preview
+    assert "收藏" not in article_preview
+    assert "先进团队的业务管理工具" in article_preview
+
+
+def test_analysis_fact_object_preview_drops_source_chrome_only_text():
+    preview = AnalysisAgent()._fact_object_preview(
+        {
+            "fact_type": "target_user_signal",
+            "object": (
+                "DingTalk - Google Play 應用程式 2.8 star 2.93K 則評論 "
+                "500K+ 次下載 安裝 分享 加入願望清單 所有人 使用者互動 瞭解詳情"
+            ),
+        }
+    )
+
+    assert preview == ""
+
+
+def test_analysis_adds_supplementary_claims_for_unclaimed_accepted_evidence():
+    agent = AnalysisAgent()
+    existing_claims = [
+        {
+            "id": "claim_existing",
+            "analysis_dimension_id": "core_product_supply",
+            "claim": "Acme already has one covered product claim.",
+            "competitors": ["Acme"],
+            "evidence_ids": ["ev_claimed"],
+        }
+    ]
+    state = {
+        "analysis_dimensions": [
+            {"id": "core_product_supply", "name": "Core Product Supply"},
+        ],
+        "research_branches": [
+            {
+                "id": "branch_core",
+                "competitor": "Acme",
+                "dimension_id": "core_product_supply",
+                "dimension_name": "Core Product Supply",
+            }
+        ],
+        "evidence_reviews": [
+            {
+                "id": "review_core",
+                "branch_id": "branch_core",
+                "accepted_evidence_ids": ["ev_claimed", "ev_unclaimed"],
+                "rejected_evidence_ids": [],
+                "score": 0.9,
+            }
+        ],
+        "evidence_items": [
+            {
+                "id": "ev_claimed",
+                "competitor": "Acme",
+                "analysis_dimension_id": "core_product_supply",
+                "title": "Acme workflow",
+                "excerpt": "Acme describes workflow automation for enterprise teams.",
+                "url": "https://acme.example/workflow",
+                "confidence": 0.8,
+            },
+            {
+                "id": "ev_unclaimed",
+                "competitor": "Acme",
+                "analysis_dimension_id": "core_product_supply",
+                "title": "Acme AI assistant",
+                "excerpt": "Acme describes an AI assistant that extracts action items from meeting summaries.",
+                "url": "https://acme.example/ai",
+                "confidence": 0.86,
+            },
+        ],
+    }
+
+    supplementary_claims = agent._supplementary_claims_from_unclaimed_accepted_evidence(
+        state,
+        existing_claims,
+    )
+
+    assert len(supplementary_claims) == 1
+    claim = supplementary_claims[0]
+    assert claim["id"] == "claim_2"
+    assert claim["claim_source"] == "supplementary_claim"
+    assert claim["claim_type"] == "coverage_claim"
+    assert claim["knowledge_fact_ids"] == []
+    assert claim["analysis_dimension_id"] == "core_product_supply"
+    assert claim["evidence_ids"] == ["ev_unclaimed"]
+    assert "AI assistant" in claim["claim"]
+    assert "ev_claimed" not in claim["evidence_ids"]
+
+
+def test_analysis_supplementary_claim_preview_strips_source_chrome():
+    agent = AnalysisAgent()
+    claim = agent._supplementary_claim_candidate(
+        {
+            "id": "ev_dingtalk",
+            "competitor": "DingTalk",
+            "analysis_dimension_id": "target_segments",
+            "dimension_name": "Target Segments",
+            "title": "DingTalk - Google Play",
+            "excerpt": (
+                "DingTalk - Google Play 應用程式 DingTalk DingTalk "
+                "(Singapore) Private Limited. 2.8 star 2.93K 則評論 所有人 "
+                "info 500K+ 次下載 安裝 分享 加入願望清單 所有人 使用者互動 "
+                "瞭解詳情 DingTalk —— 團隊的AI辦公平台，面向團隊提供協作場景。"
+            ),
+            "url": "https://play.google.com/store/apps/details?id=com.alibaba.android.rimet",
+        },
+        "ev_dingtalk",
+        {"id": "review_target", "score": 0.8},
+        {
+            "id": "branch_target",
+            "competitor": "DingTalk",
+            "dimension_id": "target_segments",
+            "dimension_name": "Target Segments",
+        },
+        {"target_segments": {"id": "target_segments", "name": "Target Segments"}},
+    )
+
+    assert claim is not None
+    assert "Google Play" not in claim["claim"]
+    assert "加入願望清單" not in claim["claim"]
+    assert "使用者互動" not in claim["claim"]
+    assert "團隊的AI辦公平台" in claim["claim"]
+
+
 def test_claim_support_accepts_supported_fact_bound_claim():
     reviewer = ClaimSupportReviewer()
     state = {
@@ -1563,6 +1731,46 @@ def test_evidence_only_medium_claim_is_limited_and_not_written():
     assert review["suggested_revision"]
     assert result["messages"][0]["payload"]["supported_with_limitations_count"] == 1
     assert ReportWriterAgent()._supported_claims([claim], [review]) == []
+
+
+def test_claim_support_accepts_supplementary_coverage_claim_and_writer_keeps_it():
+    reviewer = ClaimSupportReviewer()
+    claim = {
+        "id": "claim_supplementary",
+        "analysis_dimension_id": "core_product_supply",
+        "claim_source": "supplementary_claim",
+        "claim_type": "coverage_claim",
+        "claim_risk_level": "medium",
+        "claim": "Acme Core Product Supply: Acme describes an AI assistant that extracts action items from meeting summaries.",
+        "competitors": ["Acme"],
+        "knowledge_fact_ids": [],
+        "evidence_ids": ["ev_1"],
+        "confidence": 0.86,
+    }
+    state = {
+        "analysis_claims": [claim],
+        "evidence_items": [
+            {
+                "id": "ev_1",
+                "competitor": "Acme",
+                "analysis_dimension_id": "core_product_supply",
+                "title": "Acme AI assistant",
+                "excerpt": "Acme describes an AI assistant that extracts action items from meeting summaries.",
+                "url": "https://acme.example/ai",
+            }
+        ],
+    }
+
+    result = reviewer.review(state)
+    review = result["claim_support_reviews"][0]
+    supported_claims = ReportWriterAgent()._supported_claims([claim], [review])
+
+    assert review["support_status"] == "supported"
+    assert review["recommended_action"] == "accept"
+    assert review["knowledge_fact_ids"] == []
+    assert result["messages"][0]["payload"]["supported_count"] == 1
+    assert len(supported_claims) == 1
+    assert supported_claims[0]["id"] == "claim_supplementary"
 
 
 def test_claim_support_suppresses_claim_without_evidence_binding():

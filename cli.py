@@ -17,8 +17,7 @@ import os
 from dotenv import load_dotenv
 
 from rivalens.research import ResearchEngine
-from rivalens.research.utils.enum import ReportType, ReportSource, Tone
-from backend.report_type import DetailedReport
+from rivalens.research.utils.enum import ReportType, Tone
 from backend.utils import write_md_to_pdf, write_md_to_word
 
 # =============================================================================
@@ -48,12 +47,7 @@ choices = [report_type.value for report_type in ReportType]
 
 report_type_descriptions = {
     ReportType.ResearchReport.value: "Summary - Short and fast (~2 min)",
-    ReportType.DetailedReport.value: "Detailed - In depth and longer (~5 min)",
-    ReportType.ResourceReport.value: "",
-    ReportType.OutlineReport.value: "",
     ReportType.CustomReport.value: "",
-    ReportType.SubtopicReport.value: "",
-    ReportType.DeepResearch.value: "Deep Research"
 }
 
 cli.add_argument(
@@ -142,47 +136,37 @@ async def main(args):
     """
     query_domains = args.query_domains.split(",") if args.query_domains else []
 
-    if args.report_type == 'detailed_report':
-        detailed_report = DetailedReport(
-            query=args.query,
-            query_domains=query_domains,
-            report_type="research_report",
-            report_source="web_search",
-        )
+    # Convert the simple keyword to the full Tone enum value
+    tone_map = {
+        "objective": Tone.Objective,
+        "formal": Tone.Formal,
+        "analytical": Tone.Analytical,
+        "persuasive": Tone.Persuasive,
+        "informative": Tone.Informative,
+        "explanatory": Tone.Explanatory,
+        "descriptive": Tone.Descriptive,
+        "critical": Tone.Critical,
+        "comparative": Tone.Comparative,
+        "speculative": Tone.Speculative,
+        "reflective": Tone.Reflective,
+        "narrative": Tone.Narrative,
+        "humorous": Tone.Humorous,
+        "optimistic": Tone.Optimistic,
+        "pessimistic": Tone.Pessimistic
+    }
 
-        report = await detailed_report.run()
-    else:
-        # Convert the simple keyword to the full Tone enum value
-        tone_map = {
-            "objective": Tone.Objective,
-            "formal": Tone.Formal,
-            "analytical": Tone.Analytical,
-            "persuasive": Tone.Persuasive,
-            "informative": Tone.Informative,
-            "explanatory": Tone.Explanatory,
-            "descriptive": Tone.Descriptive,
-            "critical": Tone.Critical,
-            "comparative": Tone.Comparative,
-            "speculative": Tone.Speculative,
-            "reflective": Tone.Reflective,
-            "narrative": Tone.Narrative,
-            "humorous": Tone.Humorous,
-            "optimistic": Tone.Optimistic,
-            "pessimistic": Tone.Pessimistic
-        }
+    researcher = ResearchEngine(
+        query=args.query,
+        query_domains=query_domains,
+        report_type=args.report_type,
+        report_source=args.report_source,
+        tone=tone_map[args.tone],
+        encoding=args.encoding
+    )
 
-        researcher = ResearchEngine(
-            query=args.query,
-            query_domains=query_domains,
-            report_type=args.report_type,
-            report_source=args.report_source,
-            tone=tone_map[args.tone],
-            encoding=args.encoding
-        )
+    await researcher.conduct_research()
 
-        await researcher.conduct_research()
-
-        report = await researcher.write_report()
+    report = await researcher.write_report()
 
     # Write the report to markdown file
     task_id = str(uuid4())

@@ -108,28 +108,13 @@ class Config:
             )
 
             embedding_provider = os.environ["EMBEDDING_PROVIDER"]
-            if embedding_provider == "ollama":
-                self.embedding_model = os.environ["OLLAMA_EMBEDDING_MODEL"]
-            elif embedding_provider == "custom":
-                self.embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "custom")
-            elif embedding_provider == "openai":
+            if embedding_provider == "openai":
                 self.embedding_model = os.getenv(
                     "OPENAI_EMBEDDING_MODEL",
-                    "text-embedding-v4",
+                    "text-embedding-3-small",
                 )
-            elif embedding_provider == "azure_openai":
-                self.embedding_model = os.getenv(
-                    "OPENAI_EMBEDDING_MODEL",
-                    "text-embedding-v4",
-                )
-            elif embedding_provider == "huggingface":
-                self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
-            elif embedding_provider == "gigachat":
-                self.embedding_model = "Embeddings"
-            elif embedding_provider == "google_genai":
-                self.embedding_model = "text-embedding-004"
             else:
-                raise Exception("Embedding provider not found.")
+                raise ValueError("Only openai embeddings are supported.")
 
         _deprecation_warning = (
             "LLM_PROVIDER, FAST_LLM_MODEL and SMART_LLM_MODEL are deprecated and "
@@ -137,11 +122,20 @@ class Config:
         )
         if os.getenv("LLM_PROVIDER") is not None:
             warnings.warn(_deprecation_warning, FutureWarning, stacklevel=2)
+            from rivalens.research.llm_provider.generic.base import _SUPPORTED_PROVIDERS
+
+            llm_provider = os.environ["LLM_PROVIDER"]
+            if llm_provider and llm_provider not in _SUPPORTED_PROVIDERS:
+                supported = ", ".join(sorted(_SUPPORTED_PROVIDERS))
+                raise ValueError(
+                    f"Unsupported LLM_PROVIDER {llm_provider}. "
+                    f"Supported providers are: {supported}"
+                )
             self.fast_llm_provider = (
-                os.environ["LLM_PROVIDER"] or self.fast_llm_provider
+                llm_provider or self.fast_llm_provider
             )
             self.smart_llm_provider = (
-                os.environ["LLM_PROVIDER"] or self.smart_llm_provider
+                llm_provider or self.smart_llm_provider
             )
         if os.getenv("FAST_LLM_MODEL") is not None:
             warnings.warn(_deprecation_warning, FutureWarning, stacklevel=2)
@@ -252,7 +246,7 @@ class Config:
         except ValueError:
             raise ValueError(
                 "Set EMBEDDING = '<embedding_provider>:<embedding_model>' "
-                "Eg 'openai:text-embedding-v4'"
+                "Eg 'openai:text-embedding-3-small'"
             )
 
     def validate_doc_path(self):

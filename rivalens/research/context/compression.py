@@ -11,7 +11,6 @@ The compression pipeline:
 Classes:
     VectorstoreCompressor: Retrieves context from a vector store.
     ContextCompressor: Compresses raw documents using embedding similarity.
-    WrittenContentCompressor: Compresses previously written content sections.
 """
 
 import asyncio
@@ -30,7 +29,7 @@ from ..memory.embeddings import OPENAI_EMBEDDING_MODEL
 from ..prompts import PromptFamily
 from ..utils.costs import estimate_embedding_cost
 from ..vector_store import VectorStoreWrapper
-from .retriever import SearchAPIRetriever, SectionRetriever
+from .retriever import SearchAPIRetriever
 
 
 class VectorstoreCompressor:
@@ -176,80 +175,3 @@ class ContextCompressor:
             cost_callback(estimate_embedding_cost(model=OPENAI_EMBEDDING_MODEL, docs=self.documents))
         relevant_docs = await asyncio.to_thread(compressed_docs.invoke, query, **self.kwargs)
         return self.prompt_family.pretty_print_docs(relevant_docs, max_results)
-
-
-class WrittenContentCompressor:
-    """Compresses previously written content sections.
-
-    Specialized compressor for finding relevant sections from
-    previously written report content, preserving section titles
-    and structure.
-
-    Attributes:
-        documents: List of written content sections.
-        embeddings: Embedding model for similarity calculation.
-        similarity_threshold: Minimum similarity score for inclusion.
-    """
-
-    def __init__(self, documents, embeddings, similarity_threshold: float, **kwargs):
-        """Initialize the WrittenContentCompressor.
-
-        Args:
-            documents: List of written content sections.
-            embeddings: Embedding model instance.
-            similarity_threshold: Minimum similarity score for inclusion.
-            **kwargs: Additional keyword arguments.
-        """
-        self.documents = documents
-        self.kwargs = kwargs
-        self.embeddings = embeddings
-        self.similarity_threshold = similarity_threshold
-
-    def __get_contextual_retriever(self):
-        """Build the contextual compression retriever for sections.
-
-        Returns:
-            A ContextualCompressionRetriever configured for section retrieval.
-        """
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-        relevance_filter = EmbeddingsFilter(embeddings=self.embeddings,
-                                            similarity_threshold=self.similarity_threshold)
-        pipeline_compressor = DocumentCompressorPipeline(
-            transformers=[splitter, relevance_filter]
-        )
-        base_retriever = SectionRetriever(
-            sections=self.documents
-        )
-        contextual_retriever = ContextualCompressionRetriever(
-            base_compressor=pipeline_compressor, base_retriever=base_retriever
-        )
-        return contextual_retriever
-
-    def __pretty_docs_list(self, docs, top_n: int) -> list[str]:
-        """Format documents as a list of title/content strings.
-
-        Args:
-            docs: List of documents to format.
-            top_n: Maximum number of documents to include.
-
-        Returns:
-            List of formatted document strings.
-        """
-        return [f"Title: {d.metadata.get('section_title')}\nContent: {d.page_content}\n" for i, d in enumerate(docs) if i < top_n]
-
-    async def async_get_context(self, query: str, max_results: int = 5, cost_callback=None) -> list[str]:
-        """Get relevant written content sections asynchronously.
-
-        Args:
-            query: The search query.
-            max_results: Maximum number of results to return.
-            cost_callback: Optional callback for tracking embedding costs.
-
-        Returns:
-            List of formatted section strings.
-        """
-        compressed_docs = self.__get_contextual_retriever()
-        if cost_callback:
-            cost_callback(estimate_embedding_cost(model=OPENAI_EMBEDDING_MODEL, docs=self.documents))
-        relevant_docs = await asyncio.to_thread(compressed_docs.invoke, query, **self.kwargs)
-        return self.__pretty_docs_list(relevant_docs, max_results)

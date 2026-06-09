@@ -19,7 +19,7 @@ class WorkerPool:
 
         Note:
             The rate_limit_delay is enforced GLOBALLY using a singleton rate limiter.
-            This means if you have multiple ResearchEngine instances (e.g., in deep research),
+            This means if you have multiple concurrent ResearchEngine instances,
             they will all share the same rate limit, preventing API overload.
         """
         self.max_workers = max_workers
@@ -40,8 +40,8 @@ class WorkerPool:
         - Semaphore controls concurrent operations within THIS pool (how many at once)
         - Global rate limiter controls request frequency ACROSS ALL POOLS (global timing)
 
-        This ensures that even with multiple concurrent ResearchEngine instances
-        (e.g., in deep research), the total request rate stays within limits.
+        This ensures that even with multiple concurrent ResearchEngine instances,
+        the total request rate stays within limits.
         """
         async with self.semaphore:
             # Use global rate limiter (shared across all WorkerPools)

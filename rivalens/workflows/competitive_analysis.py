@@ -81,7 +81,6 @@ def _workflow_run_config(
             "custom_analysis_direction_count": len(
                 task.get("custom_analysis_directions") or []
             ),
-            "deep_research": bool(task.get("deep_research")),
             "retriever": os.getenv("RETRIEVER", ""),
             "scraper": os.getenv("SCRAPER", ""),
             "max_branch_depth": _int_budget(
@@ -237,7 +236,6 @@ async def run_competitive_analysis_task(
             "industry_directions_confirmed",
             False,
         ),
-        "deep_research": kwargs.get("deep_research", False),
         "verbose": kwargs.get("verbose", True),
     }
     graph = build_competitive_analysis_graph(

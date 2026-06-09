@@ -287,6 +287,16 @@ class ClaimSupportReviewer:
                 round(max(0.0, min(1.0, base_score * 0.75)), 2),
             )
 
+        if self._is_supplementary_coverage_claim(claim) and overlap:
+            return (
+                "supported",
+                "accept",
+                [],
+                "",
+                "Supplementary coverage claim is directly anchored in accepted evidence.",
+                round(min(1.0, max(0.0, base_score * 0.92)), 2),
+            )
+
         if not claim.get("knowledge_fact_ids"):
             if claim_risk_level == "high":
                 return (
@@ -333,7 +343,13 @@ class ClaimSupportReviewer:
             suggested_revision,
             "Evidence is traceable but the claim should be tightened to match cited facts.",
             round(max(0.0, min(1.0, base_score * 0.8)), 2),
-            )
+        )
+
+    def _is_supplementary_coverage_claim(self, claim: dict[str, Any]) -> bool:
+        return (
+            claim.get("claim_source") == "supplementary_claim"
+            and claim.get("claim_type") == "coverage_claim"
+        )
 
     def _support_terms(self, text: str) -> list[str]:
         normalized = text.lower()
