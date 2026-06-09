@@ -586,7 +586,10 @@ use a competitor-by-dimension Markdown matrix whose first column is `对比维�
 and whose remaining columns are competitor names, with citation refs inside the
 corresponding competitor cells. The writer rejects old long-table subsection
 layouts such as `竞品/对象 / 结论 / 引用` and falls back to a deterministic
-matrix renderer. The
+matrix renderer. Dynamic analysis subsections are generated concurrently with
+`RIVALENS_WRITER_LLM_CONCURRENCY` (default `4`); each subsection still performs
+its own repair attempts sequentially and the final chapter is assembled in
+section order. The
 previous end-of-pipeline `QualityAgent` and `RevisionAgent` have been removed
 because they created a late, claim-deletion-oriented pseudo loop.
 `EvidenceQualityReviewer` now runs immediately after each standard search and

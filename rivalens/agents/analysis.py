@@ -33,7 +33,7 @@ class AnalysisClaimLLMWriter:
         self.temperature = temperature
         self.max_tokens = max_tokens or self._env_int(
             "RIVALENS_ANALYSIS_LLM_MAX_TOKENS",
-            900,
+            4096,
             minimum=300,
         )
         self.max_fact_chars = max_fact_chars or self._env_int(
@@ -1479,6 +1479,15 @@ class AnalysisAgent:
             "跳转到内容",
             "维基百科",
             "skip to main content",
+            "账号设置",
+            "我的关注",
+            "我的收藏",
+            "退出登录",
+            "36氪auto",
+            "36kr研究院",
+            "36kr创新咨询",
+            "职场bonus",
+            "后浪研究所",
             "排行榜 好课秒杀",
             "人人都是产品经理",
             "悟空 超级服务",
@@ -1486,6 +1495,13 @@ class AnalysisAgent:
             "钉钉体验中心",
             "模版中心",
             "模板中心",
+            "础能力 专属版",
+            "专属版 10 万元起",
+            "专有版 100 万元起",
+            "超级简历",
+            "简历模板",
+            "扫码下载app",
+            "校招信息汇总",
             "welcome to",
             "立即追踪工时",
         )

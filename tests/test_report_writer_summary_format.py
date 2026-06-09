@@ -1359,6 +1359,139 @@ def test_dynamic_section_generation_retries_invalid_output_before_fallback():
     assert "第 1/3 次修复机会" in FakeSectionGenerator.prompts[1]
 
 
+def test_dynamic_analysis_sections_run_concurrently_and_keep_report_order():
+    class DummyConfig:
+        prompt_family = "default"
+        smart_llm_model = "fake"
+        smart_token_limit = 4096
+
+    class FakeConcurrentSectionGenerator:
+        active_sections = 0
+        max_active_sections = 0
+
+        def __init__(self, researcher):
+            self.researcher = researcher
+
+        async def write_report(self, custom_prompt: str = "") -> str:
+            segment_id = self.researcher.query.split("Segment: ", 1)[1]
+            if segment_id == "analysis_overview":
+                return (
+                    "### 分析维度总览\n\n"
+                    "| 章节 | 动态维度 | 证据覆盖 | 主要竞品 | 主要引用 |\n"
+                    "| --- | --- | --- | --- | --- |\n"
+                    "| 3.1 | A 维度 | 1 条可追溯 claim | 飞书 | [1] |"
+                )
+
+            FakeConcurrentSectionGenerator.active_sections += 1
+            FakeConcurrentSectionGenerator.max_active_sections = max(
+                FakeConcurrentSectionGenerator.max_active_sections,
+                FakeConcurrentSectionGenerator.active_sections,
+            )
+            try:
+                if segment_id == "analysis_dim_a":
+                    await asyncio.sleep(0.03)
+                else:
+                    await asyncio.sleep(0.01)
+                payload = json.loads(self.researcher.context)
+                matrix = payload["matrix_template"]
+                refs = []
+                cells = []
+                for row in matrix.get("rows", []):
+                    for cell in row.get("cells", []):
+                        candidates = cell.get("claim_candidates", [])
+                        if candidates:
+                            candidate = candidates[0]
+                            candidate_refs = candidate.get("citation_refs", [])
+                            refs.extend(candidate_refs)
+                            text = f"{candidate['text']}{''.join(candidate_refs)}"
+                        else:
+                            text = "公开证据不足"
+                        cells.append(
+                            {
+                                "row_key": row["row_key"],
+                                "competitor": cell["competitor"],
+                                "text": text,
+                            }
+                        )
+                return json.dumps(
+                    {
+                        "cells": cells,
+                        "analysis": (
+                            f"{payload['section']['title']} 有可追溯结论。"
+                            f"{''.join(refs[:1])}"
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            finally:
+                FakeConcurrentSectionGenerator.active_sections -= 1
+
+    writer = ReportWriterAgent(
+        report_generator_factory=FakeConcurrentSectionGenerator,
+        max_concurrent_dynamic_sections=2,
+    )
+    claims = [
+        {
+            "id": "claim_a",
+            "analysis_dimension_id": "dim_a",
+            "claim": "飞书在 A 维度有明确能力。",
+            "claim_type": "capability_signal",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_a"],
+        },
+        {
+            "id": "claim_b",
+            "analysis_dimension_id": "dim_b",
+            "claim": "飞书在 B 维度有明确能力。",
+            "claim_type": "capability_signal",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_b"],
+        },
+        {
+            "id": "claim_c",
+            "analysis_dimension_id": "dim_c",
+            "claim": "飞书在 C 维度有明确能力。",
+            "claim_type": "capability_signal",
+            "competitors": ["飞书"],
+            "evidence_ids": ["ev_c"],
+        },
+    ]
+    evidence_items = [
+        {"id": "ev_a", "analysis_dimension_id": "dim_a", "competitor": "飞书"},
+        {"id": "ev_b", "analysis_dimension_id": "dim_b", "competitor": "飞书"},
+        {"id": "ev_c", "analysis_dimension_id": "dim_c", "competitor": "飞书"},
+    ]
+    dimensions = [
+        {"id": "dim_a", "name": "A 维度", "description": "比较 A。"},
+        {"id": "dim_b", "name": "B 维度", "description": "比较 B。"},
+        {"id": "dim_c", "name": "C 维度", "description": "比较 C。"},
+    ]
+    generation = writer._empty_generation_metadata()
+
+    chapter = asyncio.run(
+        writer._generate_dynamic_analysis_chapter_segmented(
+            state={"task": {"query": "分析飞书"}, "analysis_dimensions": dimensions},
+            query="分析飞书",
+            cfg=DummyConfig(),
+            claims=claims,
+            evidence_items=evidence_items,
+            analysis_dimensions=dimensions,
+            citation_refs_by_evidence_id={
+                "ev_a": "[1]",
+                "ev_b": "[2]",
+                "ev_c": "[3]",
+            },
+            generation=generation,
+        )
+    )
+
+    assert FakeConcurrentSectionGenerator.max_active_sections == 2
+    assert chapter.index("### 3.1 A 维度") < chapter.index("### 3.2 B 维度")
+    assert chapter.index("### 3.2 B 维度") < chapter.index("### 3.3 C 维度")
+    assert generation["segment_count"] == 4
+    assert not generation["fallback_used"]
+
+
 def test_dynamic_section_body_rejects_single_row_when_claims_have_multiple_aspects():
     writer = ReportWriterAgent()
     claims = [

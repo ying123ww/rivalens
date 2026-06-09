@@ -1,6 +1,8 @@
 """Report writer for structured competitor analysis output."""
 
+import asyncio
 import json
+import os
 from typing import Any, Callable
 
 import json_repair
@@ -78,9 +80,32 @@ class ReportWriterAgent:
         self,
         config: Config | None = None,
         report_generator_factory: Callable[[Any], Any] = ReportGenerator,
+        max_concurrent_dynamic_sections: int | None = None,
     ) -> None:
         self.config = config
         self.report_generator_factory = report_generator_factory
+        self.max_concurrent_dynamic_sections = self._env_int(
+            max_concurrent_dynamic_sections,
+            "RIVALENS_WRITER_LLM_CONCURRENCY",
+            4,
+            minimum=1,
+        )
+
+    def _env_int(
+        self,
+        value: int | None,
+        env_name: str,
+        default: int,
+        minimum: int = 0,
+    ) -> int:
+        raw_value = value if value is not None else os.getenv(env_name)
+        if raw_value in (None, ""):
+            return default
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, parsed)
 
     async def run(self, state: CompetitorAnalysisState) -> CompetitorAnalysisState:
         claims = state.get("analysis_claims", [])
@@ -193,6 +218,9 @@ class ReportWriterAgent:
                             default=0,
                         ),
                         "segment_count": generation["segment_count"],
+                        "dynamic_section_concurrency": (
+                            self.max_concurrent_dynamic_sections
+                        ),
                         "segment_context_char_limits": {
                             "opening": OPENING_CONTEXT_CHAR_LIMIT,
                             "dynamic_overview": ANALYSIS_OVERVIEW_CONTEXT_CHAR_LIMIT,
@@ -330,17 +358,7 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
         analysis_dimensions: list[dict[str, Any]],
         citation_refs_by_evidence_id: dict[str, str],
     ) -> dict[str, Any]:
-        generation = {
-            "report": "",
-            "errors": [],
-            "cost": 0.0,
-            "step_costs": {},
-            "segment_context_lengths": [],
-            "segment_count": 0,
-            "fallback_used": False,
-            "repair_attempts": {},
-            "repair_feedback": {},
-        }
+        generation = self._empty_generation_metadata()
 
         opening_context = self._build_opening_context(
             state,
@@ -397,6 +415,45 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
             if segment.strip()
         )
         return generation
+
+    def _empty_generation_metadata(self) -> dict[str, Any]:
+        return {
+            "report": "",
+            "errors": [],
+            "cost": 0.0,
+            "step_costs": {},
+            "segment_context_lengths": [],
+            "segment_count": 0,
+            "fallback_used": False,
+            "repair_attempts": {},
+            "repair_feedback": {},
+        }
+
+    def _merge_generation_metadata(
+        self,
+        target: dict[str, Any],
+        source: dict[str, Any],
+    ) -> None:
+        target.setdefault("errors", []).extend(source.get("errors", []))
+        target["cost"] = float(target.get("cost", 0.0)) + float(source.get("cost", 0.0))
+        target.setdefault("segment_context_lengths", []).extend(
+            source.get("segment_context_lengths", []),
+        )
+        target["segment_count"] = int(target.get("segment_count", 0)) + int(
+            source.get("segment_count", 0),
+        )
+        if source.get("fallback_used"):
+            target["fallback_used"] = True
+        for step, cost in source.get("step_costs", {}).items():
+            step_costs = target.setdefault("step_costs", {})
+            step_costs[step] = step_costs.get(step, 0.0) + cost
+        target.setdefault("repair_attempts", {}).update(
+            source.get("repair_attempts", {}),
+        )
+        for key, feedback in source.get("repair_feedback", {}).items():
+            target.setdefault("repair_feedback", {}).setdefault(key, []).extend(
+                feedback,
+            )
 
     async def _generate_opening_segment_with_retries(
         self,
@@ -548,32 +605,79 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                 citation_refs_by_evidence_id,
             )
         )
-        for section in sections:
-            section_claims = self._claims_for_dynamic_section(
-                claims,
-                section,
-                SECTION_CLAIM_LIMIT,
-            )
-            section_evidence = [
-                evidence
-                for evidence in evidence_items
-                if self._matches_dynamic_section(evidence, section)
+
+        semaphore = asyncio.Semaphore(self.max_concurrent_dynamic_sections)
+        section_results = await asyncio.gather(
+            *[
+                self._generate_dynamic_section_segment(
+                    semaphore=semaphore,
+                    state=state,
+                    section=section,
+                    query=query,
+                    cfg=cfg,
+                    claims=claims,
+                    evidence_items=evidence_items,
+                    citation_refs_by_evidence_id=citation_refs_by_evidence_id,
+                )
+                for section in sections
             ]
-            matrix_spec = self._section_matrix_spec(
-                section,
-                section_claims,
-                section_evidence,
-                citation_refs_by_evidence_id,
-            )
-            section_context = self._build_dynamic_section_context(
-                state,
-                section,
-                section_claims,
-                citation_refs_by_evidence_id,
-                matrix_spec=matrix_spec,
-            )
-            section_body = ""
-            if section_claims:
+        )
+        for result in section_results:
+            self._merge_generation_metadata(generation, result["generation"])
+            section = result["section"]
+            section_body = result["body"]
+            if section_body:
+                lines.extend(
+                    [
+                        "",
+                        f"### {section['number']} {section['title']}",
+                        "",
+                        section_body,
+                    ]
+                )
+            else:
+                lines.extend(["", *result["fallback_lines"]])
+        return "\n".join(lines)
+
+    async def _generate_dynamic_section_segment(
+        self,
+        *,
+        semaphore: asyncio.Semaphore,
+        state: CompetitorAnalysisState,
+        section: dict[str, Any],
+        query: str,
+        cfg: Config,
+        claims: list[dict[str, Any]],
+        evidence_items: list[dict[str, Any]],
+        citation_refs_by_evidence_id: dict[str, str],
+    ) -> dict[str, Any]:
+        section_generation = self._empty_generation_metadata()
+        section_claims = self._claims_for_dynamic_section(
+            claims,
+            section,
+            SECTION_CLAIM_LIMIT,
+        )
+        section_evidence = [
+            evidence
+            for evidence in evidence_items
+            if self._matches_dynamic_section(evidence, section)
+        ]
+        matrix_spec = self._section_matrix_spec(
+            section,
+            section_claims,
+            section_evidence,
+            citation_refs_by_evidence_id,
+        )
+        section_context = self._build_dynamic_section_context(
+            state,
+            section,
+            section_claims,
+            citation_refs_by_evidence_id,
+            matrix_spec=matrix_spec,
+        )
+        section_body = ""
+        if section_claims:
+            async with semaphore:
                 section_body = await self._generate_dynamic_section_body_with_retries(
                     state=state,
                     section=section,
@@ -584,22 +688,25 @@ S 和 O 可直接从 claim/evidence 中归纳。W 和 T 的推导方法：
                     query=query,
                     context=section_context,
                     cfg=cfg,
-                    generation=generation,
+                    generation=section_generation,
                 )
 
-            if not section_body:
-                if section_claims:
-                    generation["fallback_used"] = True
-                section_lines = self._dynamic_analysis_section_lines(
-                    section,
-                    section_claims,
-                    section_evidence,
-                    citation_refs_by_evidence_id,
-                )
-                lines.extend(["", *section_lines])
-            else:
-                lines.extend(["", f"### {section['number']} {section['title']}", "", section_body])
-        return "\n".join(lines)
+        fallback_lines: list[str] = []
+        if not section_body:
+            if section_claims:
+                section_generation["fallback_used"] = True
+            fallback_lines = self._dynamic_analysis_section_lines(
+                section,
+                section_claims,
+                section_evidence,
+                citation_refs_by_evidence_id,
+            )
+        return {
+            "section": section,
+            "body": section_body,
+            "fallback_lines": fallback_lines,
+            "generation": section_generation,
+        }
 
     async def _generate_dynamic_section_body_with_retries(
         self,
