@@ -5,13 +5,14 @@
 #   1. cp .env.example .env
 #   2. 编辑 .env 填入你的 API Key 和密码
 #   3. docker compose up -d
+#   4. 宿主机 Nginx 反代 80 → 内部端口（详见 nginx-server.conf）
 #
 # 服务:
-#   rivalens         — FastAPI 后端 (端口 8000)
+#   rivalens         — FastAPI 后端 (内部 8000)
 #   rivalens-worker  — Celery 后台报告生成
-#   rivalens-frontend— Next.js 前端 (端口 3000)
-#   postgres         — PostgreSQL 16 + pgvector (端口 ${POSTGRES_PORT:-5433})
-#   redis            — Redis 7 (端口 ${REDIS_PORT:-6380})
+#   rivalens-frontend— Next.js 前端 (内部 3000)
+#   postgres         — PostgreSQL 16 + pgvector
+#   redis            — Redis 7
 # =============================================================================
 
 services:
@@ -20,8 +21,8 @@ services:
     image: rivalens/rivalens
     build: .
     restart: unless-stopped
-    ports:
-      - "${PORT:-8000}:8000"
+    expose:
+      - "8000"
     environment:
       # LLM
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -162,8 +163,8 @@ services:
       context: ./frontend/nextjs
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+    expose:
+      - "3000"
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_RIVALENS_API_URL: ${NEXT_PUBLIC_RIVALENS_API_URL:-http://localhost:8000}
