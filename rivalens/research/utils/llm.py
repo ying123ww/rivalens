@@ -10,20 +10,15 @@ import os
 from typing import Any
 import asyncio
 
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.prompts import PromptTemplate
-
 from rivalens.research.llm_provider.generic.base import (
     SUPPORT_REASONING_EFFORT_MODELS,
     ReasoningEfforts,
     is_no_support_temperature_model,
 )
 
-from ..prompts import PromptFamily
 from ..trace_context import RIVALENS_TRACE_CONTEXT_KEY, compact_trace_context
 from .costs import estimate_llm_cost
 from .llm_rate_limiter import get_llm_rate_limiter
-from .validators import Subtopics
 
 
 def _provider_runtime_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -191,68 +186,3 @@ async def create_chat_completion(
 
     logging.error(f"Failed to get response from {llm_provider} API{log_suffix}")
     raise RuntimeError(f"Failed to get response from {llm_provider} API") from last_exception
-
-
-async def construct_subtopics(
-    task: str,
-    data: str,
-    config,
-    subtopics: list = [],
-    prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
-    **kwargs
-) -> list:
-    """
-    Construct subtopics based on the given task and data.
-
-    Args:
-        task (str): The main task or topic.
-        data (str): Additional data for context.
-        config: Configuration settings.
-        subtopics (list, optional): Existing subtopics. Defaults to [].
-        prompt_family (PromptFamily): Family of prompts
-        **kwargs: Additional keyword arguments.
-
-    Returns:
-        list: A list of constructed subtopics.
-    """
-    try:
-        parser = PydanticOutputParser(pydantic_object=Subtopics)
-
-        prompt = PromptTemplate(
-            template=prompt_family.generate_subtopics_prompt(),
-            input_variables=["task", "data", "subtopics", "max_subtopics"],
-            partial_variables={
-                "format_instructions": parser.get_format_instructions()},
-        )
-
-        provider_kwargs = {'model': config.smart_llm_model}
-
-        if config.llm_kwargs:
-            provider_kwargs.update(config.llm_kwargs)
-
-        if config.smart_llm_model in SUPPORT_REASONING_EFFORT_MODELS:
-            provider_kwargs['reasoning_effort'] = ReasoningEfforts.High.value
-
-        if not is_no_support_temperature_model(config.smart_llm_model):
-            provider_kwargs['temperature'] = config.temperature
-            provider_kwargs['max_tokens'] = config.smart_token_limit
-
-        provider = get_llm(config.smart_llm_provider, **provider_kwargs)
-
-        model = provider.llm
-
-        chain = prompt | model | parser
-
-        output = await chain.ainvoke({
-            "task": task,
-            "data": data,
-            "subtopics": subtopics,
-            "max_subtopics": config.max_subtopics
-        }, **_provider_runtime_kwargs(kwargs))
-
-        return output
-
-    except Exception as e:
-        print("Exception in parsing subtopics : ", e)
-        logging.getLogger(__name__).error("Exception in parsing subtopics : \n {e}")
-        return subtopics

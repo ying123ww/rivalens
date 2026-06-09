@@ -26,7 +26,6 @@ def default_agent() -> tuple[str, str]:
 async def choose_agent(
     query,
     cfg,
-    parent_query=None,
     cost_callback: callable = None,
     headers=None,
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
@@ -35,8 +34,6 @@ async def choose_agent(
     """
     Chooses the agent automatically
     Args:
-        parent_query: In some cases the research is conducted on a subtopic from the main query.
-            The parent query allows the agent to know the main context for better reasoning.
         query: original query
         cfg: Config
         cost_callback: callback for calculating llm costs
@@ -46,7 +43,6 @@ async def choose_agent(
         agent: Agent name
         agent_role_prompt: Agent role prompt
     """
-    query = f"{parent_query} - {query}" if parent_query else f"{query}"
     response = None  # Initialize response to ensure it's defined
     kwargs.setdefault("rivalens_operation", "choose_agent")
 

@@ -190,8 +190,6 @@ async def get_search_results(
 
 async def generate_sub_queries(
     query: str,
-    parent_query: str,
-    report_type: str,
     context: List[Dict[str, Any]],
     cfg: Config,
     cost_callback: callable = None,
@@ -204,8 +202,6 @@ async def generate_sub_queries(
 
     Args:
         query: The original query
-        parent_query: The parent query
-        report_type: The type of report
         max_iterations: Maximum number of research iterations
         context: Search results context
         cfg: Configuration object
@@ -217,8 +213,6 @@ async def generate_sub_queries(
     """
     gen_queries_prompt = prompt_family.generate_search_queries_prompt(
         query,
-        parent_query,
-        report_type,
         max_iterations=cfg.max_iterations or 3,
         context=context,
     )
@@ -253,8 +247,6 @@ async def plan_research_outline(
     search_results: List[Dict[str, Any]],
     agent_role_prompt: str,
     cfg: Config,
-    parent_query: str,
-    report_type: str,
     cost_callback: callable = None,
     retriever_names: List[str] = None,
     trace_context: dict[str, Any] | None = None,
@@ -268,8 +260,6 @@ async def plan_research_outline(
         search_results: Initial search results
         agent_role_prompt: Agent role prompt
         cfg: Configuration object
-        parent_query: Parent query
-        report_type: Report type
         cost_callback: Callback for cost calculation
         retriever_names: Names of the retrievers being used
 
@@ -298,8 +288,6 @@ async def plan_research_outline(
     # Generate sub-queries for research outline
     sub_queries = await generate_sub_queries(
         query,
-        parent_query,
-        report_type,
         search_results,
         cfg,
         cost_callback,

@@ -9,13 +9,9 @@ import os
 from typing import Any
 
 from .actions import (
-    add_references,
     choose_agent,
-    extract_headers,
-    extract_sections,
     get_retrievers,
     get_search_results,
-    table_of_contents,
 )
 from .config import Config
 from .memory import Memory
@@ -68,13 +64,10 @@ class ResearchEngine:
         websocket=None,
         agent=None,
         role=None,
-        parent_query: str = "",
-        subtopics: list | None = None,
         visited_urls: set | None = None,
         verbose: bool = True,
         context=None,
         headers: dict | None = None,
-        max_subtopics: int = 5,
         log_handler=None,
         prompt_family: str | None = None,
         mcp_configs: list[dict] | None = None,
@@ -101,13 +94,10 @@ class ResearchEngine:
             websocket: WebSocket for streaming output.
             agent: Pre-defined agent type.
             role: Pre-defined agent role.
-            parent_query: Parent query for subtopic reports.
-            subtopics: List of subtopics to research.
             visited_urls: Set of already visited URLs.
             verbose (bool): Whether to output verbose logs.
             context: Pre-loaded research context.
             headers (dict, optional): Additional headers for requests and configuration.
-            max_subtopics (int): Maximum number of subtopics to generate.
             log_handler: Handler for logging events.
             prompt_family: Family of prompts to use.
             mcp_configs (list[dict], optional): List of MCP server configurations.
@@ -147,7 +137,6 @@ class ResearchEngine:
         self.cfg.set_verbose(verbose)
         self.report_source = report_source if report_source else getattr(self.cfg, 'report_source', None)
         self.report_format = report_format
-        self.max_subtopics = max_subtopics
         self.tone = tone if isinstance(tone, Tone) else Tone.Objective
         self.source_urls = source_urls
         self.document_urls = document_urls
@@ -161,8 +150,6 @@ class ResearchEngine:
         self.websocket = websocket
         self.agent = agent
         self.role = role
-        self.parent_query = parent_query
-        self.subtopics = subtopics or []
         self.visited_urls = visited_urls or set()
         self.verbose = verbose
         self.context = context or []
@@ -316,7 +303,6 @@ class ResearchEngine:
             self.agent, self.role = await choose_agent(
                 query=self.query,
                 cfg=self.cfg,
-                parent_query=self.parent_query,
                 cost_callback=self.add_costs,
                 headers=self.headers,
                 prompt_family=self.prompt_family,
@@ -343,16 +329,12 @@ class ResearchEngine:
 
     async def write_report(
         self,
-        existing_headers: list = [],
-        relevant_written_contents: list = [],
         ext_context=None,
         custom_prompt="",
     ) -> str:
         """Write the research report.
 
         Args:
-            existing_headers: List of existing headers to avoid duplication.
-            relevant_written_contents: List of previously written content for context.
             ext_context: External context to use instead of internal context.
             custom_prompt: Custom prompt to guide report generation.
 
@@ -361,13 +343,10 @@ class ResearchEngine:
         """
         self._current_step = "report_writing"
         await self._log_event("research", step="writing_report", details={
-            "existing_headers": existing_headers,
             "context_source": "external" if ext_context else "internal",
         })
 
         report = await self.report_generator.write_report(
-            existing_headers=existing_headers,
-            relevant_written_contents=relevant_written_contents,
             ext_context=ext_context or self.context,
             custom_prompt=custom_prompt,
         )
@@ -376,31 +355,6 @@ class ResearchEngine:
             "report_length": len(report),
         })
         return report
-
-    async def write_report_conclusion(self, report_body: str) -> str:
-        """Write the conclusion section of the report.
-
-        Args:
-            report_body: The main body of the report to conclude.
-
-        Returns:
-            The generated conclusion text.
-        """
-        await self._log_event("research", step="writing_conclusion")
-        conclusion = await self.report_generator.write_report_conclusion(report_body)
-        await self._log_event("research", step="conclusion_completed")
-        return conclusion
-
-    async def write_introduction(self) -> str:
-        """Write the introduction section of the report.
-
-        Returns:
-            The generated introduction text.
-        """
-        await self._log_event("research", step="writing_introduction")
-        intro = await self.report_generator.write_introduction()
-        await self._log_event("research", step="introduction_completed")
-        return intro
 
     async def quick_search(self, query: str, query_domains: list[str] = None, aggregated_summary: bool = False) -> list[Any] | str:
         """Perform a quick search without full research workflow.
@@ -437,49 +391,6 @@ class ResearchEngine:
 
         return summary
 
-    async def get_subtopics(self):
-        """Generate subtopics for the research query.
-
-        Returns:
-            List of generated subtopics.
-        """
-        return await self.report_generator.get_subtopics()
-
-    async def get_draft_section_titles(self, current_subtopic: str) -> list[str]:
-        """Generate draft section titles for a subtopic.
-
-        Args:
-            current_subtopic: The subtopic to generate sections for.
-
-        Returns:
-            List of section title strings.
-        """
-        return await self.report_generator.get_draft_section_titles(current_subtopic)
-
-    async def get_similar_written_contents_by_draft_section_titles(
-        self,
-        current_subtopic: str,
-        draft_section_titles: list[str],
-        written_contents: list[dict],
-        max_results: int = 10
-    ) -> list[str]:
-        """Find similar previously written contents based on section titles.
-
-        Args:
-            current_subtopic: The current subtopic being written.
-            draft_section_titles: List of draft section titles.
-            written_contents: Previously written content to search through.
-            max_results: Maximum number of results to return.
-
-        Returns:
-            List of similar content strings.
-        """
-        return await self.context_manager.get_similar_written_contents_by_draft_section_titles(
-            current_subtopic,
-            draft_section_titles,
-            written_contents,
-            max_results
-        )
 
     # Utility methods
     def get_research_images(self, top_k: int = 10) -> list[dict[str, Any]]:
@@ -516,51 +427,6 @@ class ResearchEngine:
             sources: List of source dictionaries to add.
         """
         self.research_sources.extend(sources)
-
-    def add_references(self, report_markdown: str, visited_urls: set) -> str:
-        """Add reference section to a markdown report.
-
-        Args:
-            report_markdown: The markdown report text.
-            visited_urls: Set of URLs to include as references.
-
-        Returns:
-            The report with references appended.
-        """
-        return add_references(report_markdown, visited_urls)
-
-    def extract_headers(self, markdown_text: str) -> list[dict]:
-        """Extract headers from markdown text.
-
-        Args:
-            markdown_text: The markdown text to parse.
-
-        Returns:
-            List of header dictionaries.
-        """
-        return extract_headers(markdown_text)
-
-    def extract_sections(self, markdown_text: str) -> list[dict]:
-        """Extract sections from markdown text.
-
-        Args:
-            markdown_text: The markdown text to parse.
-
-        Returns:
-            List of section dictionaries.
-        """
-        return extract_sections(markdown_text)
-
-    def table_of_contents(self, markdown_text: str) -> str:
-        """Generate a table of contents for markdown text.
-
-        Args:
-            markdown_text: The markdown text to generate TOC for.
-
-        Returns:
-            The table of contents as markdown string.
-        """
-        return table_of_contents(markdown_text)
 
     def get_source_urls(self) -> list:
         """Get all visited source URLs.

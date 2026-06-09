@@ -26,7 +26,7 @@ def _get_llm_executor() -> ThreadPoolExecutor:
     """Dedicated thread pool for LLM API calls.
 
     Using a separate pool avoids the process-default executor (``min(32, cpu+4)``
-    threads) becoming a bottleneck when deep research fires many concurrent
+    threads) becoming a bottleneck when concurrent research sessions fire many
     ``asyncio.gather``-ed LLM calls.
     """
     return _llm_executor

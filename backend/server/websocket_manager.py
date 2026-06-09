@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from fastapi import WebSocket
 
-from report_type import BasicReport, DetailedReport
+from report_type import BasicReport
 
 from rivalens.research.utils.enum import ReportType, Tone
 from rivalens.research.actions import stream_output  # Import stream_output
@@ -212,24 +212,6 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
             fallback_run_id=run_id,
         )
 
-    elif report_type == ReportType.DetailedReport.value:
-        researcher = DetailedReport(
-            query=task,
-            query_domains=query_domains,
-            report_type=report_type,
-            report_source=report_source,
-            source_urls=source_urls,
-            document_urls=document_urls,
-            tone=tone,
-            config_path=config_path,
-            websocket=logs_handler,  # Use logs_handler instead of raw websocket
-            headers=headers,
-            mcp_configs=mcp_configs if mcp_enabled else None,
-            mcp_strategy=mcp_strategy if mcp_enabled else None,
-            max_search_results=max_search_results,
-        )
-        report = await researcher.run()
-        
     else:
         researcher = BasicReport(
             query=task,

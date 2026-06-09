@@ -4,25 +4,9 @@ from enum import Enum
 
 
 class ReportType(Enum):
-    """Enumeration of available report types for research output.
-
-    Defines the different types of reports that can be generated
-    by the Rivalens agent.
-
-    Attributes:
-        ResearchReport: Standard research report with comprehensive analysis.
-        ResourceReport: Report focused on listing and describing resources.
-        OutlineReport: Report providing a structured outline of the topic.
-        CustomReport: User-defined custom report format.
-        DetailedReport: In-depth detailed analysis report.
-        SubtopicReport: Report focused on a specific subtopic.
-    """
+    """Supported report types for the Rivalens research adapter."""
     ResearchReport = "research_report"
-    ResourceReport = "resource_report"
-    OutlineReport = "outline_report"
     CustomReport = "custom_report"
-    DetailedReport = "detailed_report"
-    SubtopicReport = "subtopic_report"
 
 
 class ReportSource(Enum):
