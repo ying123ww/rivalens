@@ -339,6 +339,8 @@ Options: `--full-budget` for normal collection budget, `--print-report` to print
 python cli.py "Your research query" --report_type research_report --tone objective
 ```
 
+> **Deployment**: This project uses Docker Compose with Nginx reverse proxy. See `nginx-server.conf` and `docker-compose.yml`.
+
 ### Test
 
 ```bash

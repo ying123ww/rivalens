@@ -339,6 +339,8 @@ npm run dev
 python cli.py "你的研究问题" --report_type research_report --tone objective
 ```
 
+> **部署**：使用 Docker Compose + Nginx 反向代理，详见 `nginx-server.conf` 和 `docker-compose.yml`。
+
 ### 测试
 
 ```bash
