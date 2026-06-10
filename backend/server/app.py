@@ -135,18 +135,20 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Frontend directory not found: {frontend_path}")
 
     # Apply any pending database migrations before starting the API.
-    try:
-        from alembic.config import Config as AlembicConfig
-        from alembic.command import upgrade as alembic_upgrade
+    # Set RIVALENS_AUTO_MIGRATE=false to skip.
+    if os.getenv("RIVALENS_AUTO_MIGRATE", "true").strip().lower() not in {"0", "false", "no", "off"}:
+        try:
+            from alembic.config import Config as AlembicConfig
+            from alembic.command import upgrade as alembic_upgrade
 
-        alembic_cfg = AlembicConfig(
-            os.path.join(os.path.dirname(__file__), "..", "..", "alembic.ini")
-        )
-        alembic_upgrade(alembic_cfg, "head")
-        logger.info("Database migrations applied")
-    except Exception:
-        logger.exception("Database migration failed")
-        raise
+            alembic_cfg = AlembicConfig(
+                os.path.join(os.path.dirname(__file__), "..", "..", "alembic.ini")
+            )
+            alembic_upgrade(alembic_cfg, "head")
+            logger.info("Database migrations applied")
+        except Exception:
+            logger.exception("Database migration failed")
+            raise
 
     # 按需一次性导入旧 JSON 报告；默认关闭，避免已删除报告在重启后被回填。
     try:
