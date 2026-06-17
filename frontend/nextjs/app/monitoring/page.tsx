@@ -21,6 +21,76 @@ type StatusSegment = {
   color: string;
 };
 
+type RunDiffData = {
+  previousRun: ReportRecord | null;
+  summaries: Array<{
+    label: string;
+    value: string;
+    detail: string;
+    tone: "teal" | "blue" | "amber" | "gray";
+  }>;
+  addedSources: SourceDiffItem[];
+  addedClaims: ClaimDiffItem[];
+  changedClaims: ClaimChangeItem[];
+};
+
+type SourceDiffItem = {
+  key: string;
+  title: string;
+  url: string;
+  sourceType: string;
+};
+
+type ClaimDiffItem = {
+  key: string;
+  text: string;
+  dimension: string;
+  competitors: string[];
+};
+
+type ClaimChangeItem = ClaimDiffItem & {
+  previousStatus: string;
+  currentStatus: string;
+  previousConfidence: number | null;
+  currentConfidence: number | null;
+};
+
+type ClaimExplorerItem = {
+  id: string;
+  text: string;
+  dimension: string;
+  competitors: string[];
+  status: string;
+  statusLabel: string;
+  confidence: number | null;
+  evidenceCount: number;
+  sourceCount: number;
+};
+
+type TraceGraphEvidence = {
+  id: string;
+  title: string;
+  url: string;
+  sourceType: string;
+};
+
+type TraceGraphClaim = {
+  id: string;
+  text: string;
+  statusLabel: string;
+  evidence: TraceGraphEvidence[];
+};
+
+type TraceGraphDimension = {
+  dimension: string;
+  claims: TraceGraphClaim[];
+};
+
+type TraceGraphGroup = {
+  competitor: string;
+  dimensions: TraceGraphDimension[];
+};
+
 const SOURCE_COLORS = [
   "#2dd4bf",
   "#60a5fa",
@@ -57,6 +127,24 @@ const STATUS_LABELS: Record<string, string> = {
   unreviewed: "未复核",
 };
 
+const DIRECTION_LABELS: Record<string, string> = {
+  strategic_positioning: "战略定位与差异化",
+  target_users_segments: "目标用户与细分场景",
+  core_product_supply: "核心产品与供给能力",
+  product_experience: "交互与产品体验",
+  ai_capability_application: "AI 能力与应用",
+  business_model_pricing: "商业模式与定价",
+  growth_channels: "增长渠道",
+  operations_fulfillment: "运营与交付",
+  baseline_trust_security_compliance: "基础信任、安全与合规",
+  user_reputation: "用户口碑",
+  moat_resources_team: "护城河、资源与团队",
+  market_trends_opportunities: "市场趋势与机会",
+  integrations_ecosystem: "集成与生态",
+  migration_switching_cost: "迁移与切换成本",
+  sla_reliability: "服务稳定性与可靠性",
+};
+
 const PIPELINE_STEPS = [
   "Planning",
   "Collection",
@@ -83,6 +171,25 @@ export default function MonitoringPage() {
 
   const dashboard = useMemo(
     () => (selectedRun ? buildDashboard(selectedRun) : null),
+    [selectedRun],
+  );
+  const previousRun = useMemo(
+    () =>
+      selectedRun
+        ? findPreviousRun(history as ReportRecord[], selectedRun)
+        : null,
+    [history, selectedRun],
+  );
+  const runDiff = useMemo(
+    () => (selectedRun ? buildRunDiff(selectedRun, previousRun) : null),
+    [previousRun, selectedRun],
+  );
+  const claimExplorerItems = useMemo(
+    () => (selectedRun ? buildClaimExplorerItems(selectedRun) : []),
+    [selectedRun],
+  );
+  const traceGraphGroups = useMemo(
+    () => (selectedRun ? buildTraceGraphGroups(selectedRun) : []),
     [selectedRun],
   );
 
@@ -158,6 +265,8 @@ export default function MonitoringPage() {
                 ))}
               </section>
 
+              {runDiff && <RunDiffPanel diff={runDiff} />}
+
               <section className="grid gap-5 xl:grid-cols-[1.4fr_0.9fr]">
                 <EvidenceStackedBars dashboard={dashboard} />
                 <ClaimStatusDonut dashboard={dashboard} />
@@ -167,6 +276,9 @@ export default function MonitoringPage() {
                 <ConfidenceHeatmap dashboard={dashboard} />
                 <PipelineFunnel dashboard={dashboard} />
               </section>
+
+              <ClaimExplorer items={claimExplorerItems} />
+              <EvidenceTraceGraph groups={traceGraphGroups} />
             </section>
           </div>
         )}
@@ -292,6 +404,333 @@ function PipelineFunnel({ dashboard }: { dashboard: DashboardData }) {
     >
       <EChart option={option} height={320} />
     </ChartPanel>
+  );
+}
+
+function RunDiffPanel({ diff }: { diff: RunDiffData }) {
+  return (
+    <section className="rounded-lg border border-gray-800 bg-gray-900/60 p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-100">运行对比 Diff</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            自动对比上一轮运行，查看新增来源、结论变化和可信度波动。
+          </p>
+        </div>
+        <span className="w-fit rounded-full border border-gray-700 px-2.5 py-1 text-xs text-gray-400">
+          {diff.previousRun ? `对比 ${formatRunReference(diff.previousRun.id)}` : "暂无上一轮"}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {diff.summaries.map((item) => (
+          <div
+            key={item.label}
+            className={`rounded-lg border p-4 ${diffToneClassName(item.tone)}`}
+          >
+            <p className="text-xs font-medium text-gray-400">{item.label}</p>
+            <p className="mt-2 text-2xl font-semibold text-gray-100">{item.value}</p>
+            <p className="mt-1 text-xs text-gray-500">{item.detail}</p>
+          </div>
+        ))}
+      </div>
+
+      {!diff.previousRun ? (
+        <div className="mt-5">
+          <EmptyPanelText text="至少需要两次运行后，才能生成运行对比。" />
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 xl:grid-cols-3">
+          <DiffList
+            title="新增来源"
+            emptyText="本轮没有新增来源。"
+            items={diff.addedSources.slice(0, 6).map((item) => ({
+              key: item.key,
+              title: item.title,
+              meta: item.sourceType,
+              detail: sourceNameFromUrl(item.url),
+            }))}
+          />
+          <DiffList
+            title="新增结论"
+            emptyText="本轮没有新增结论。"
+            items={diff.addedClaims.slice(0, 6).map((item) => ({
+              key: item.key,
+              title: item.text,
+              meta: item.dimension,
+              detail: item.competitors.join("、") || "整体",
+            }))}
+          />
+          <DiffList
+            title="变化结论"
+            emptyText="未发现明显状态或信心变化。"
+            items={diff.changedClaims.slice(0, 6).map((item) => ({
+              key: item.key,
+              title: item.text,
+              meta: `${item.previousStatus} → ${item.currentStatus}`,
+              detail: confidenceChangeText(item.previousConfidence, item.currentConfidence),
+            }))}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DiffList({
+  title,
+  emptyText,
+  items,
+}: {
+  title: string;
+  emptyText: string;
+  items: Array<{ key: string; title: string; meta: string; detail: string }>;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-gray-800 bg-gray-950/40 p-4">
+      <h3 className="text-sm font-semibold text-gray-100">{title}</h3>
+      {items.length === 0 ? (
+        <p className="mt-4 rounded-md border border-dashed border-gray-800 px-3 py-4 text-sm text-gray-500">
+          {emptyText}
+        </p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {items.map((item) => (
+            <article key={item.key} className="min-w-0 rounded-md bg-gray-900/70 p-3">
+              <p className="line-clamp-2 text-sm font-medium leading-5 text-gray-100">
+                {item.title}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-400">
+                  {item.meta}
+                </span>
+                <span className="truncate text-[11px] text-gray-500">{item.detail}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClaimExplorer({ items }: { items: ClaimExplorerItem[] }) {
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [dimension, setDimension] = useState("all");
+  const dimensions = useMemo(
+    () => uniqueStrings(items.map((item) => item.dimension)).slice(0, 18),
+    [items],
+  );
+  const statuses = useMemo(
+    () =>
+      Array.from(
+        new Map(items.map((item) => [item.status, item.statusLabel])).entries(),
+      ),
+    [items],
+  );
+  const filteredItems = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesQuery =
+        !keyword ||
+        [item.text, item.dimension, item.statusLabel, ...item.competitors]
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword);
+      const matchesStatus = status === "all" || item.status === status;
+      const matchesDimension = dimension === "all" || item.dimension === dimension;
+      return matchesQuery && matchesStatus && matchesDimension;
+    });
+  }, [dimension, items, query, status]);
+
+  return (
+    <section className="rounded-lg border border-gray-800 bg-gray-900/60 p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-100">Claim Explorer 结论库</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            查看全部结论，按竞品、维度、证据状态和关键词快速筛选。
+          </p>
+        </div>
+        <span className="w-fit rounded-full border border-gray-700 px-2.5 py-1 text-xs text-gray-400">
+          {filteredItems.length}/{items.length} 条结论
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_180px_220px]">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="搜索结论、竞品或维度"
+          className="h-10 rounded-md border border-gray-800 bg-gray-950/70 px-3 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-600 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+        />
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="h-10 rounded-md border border-gray-800 bg-gray-950/70 px-3 text-sm text-gray-200 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+        >
+          <option value="all">全部状态</option>
+          {statuses.map(([key, label]) => (
+            <option key={key} value={key}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={dimension}
+          onChange={(event) => setDimension(event.target.value)}
+          className="h-10 rounded-md border border-gray-800 bg-gray-950/70 px-3 text-sm text-gray-200 outline-none transition-colors focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+        >
+          <option value="all">全部维度</option>
+          {dimensions.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="mt-5">
+          <EmptyPanelText text="当前运行暂无可浏览的分析结论。" />
+        </div>
+      ) : (
+        <div className="mt-5 max-h-[520px] overflow-y-auto pr-1">
+          <div className="grid gap-3">
+            {filteredItems.slice(0, 80).map((item) => (
+              <article
+                key={item.id}
+                className="rounded-lg border border-gray-800 bg-gray-950/40 p-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-teal-500/40 bg-teal-500/10 px-2.5 py-1 text-[11px] text-teal-200">
+                    {item.statusLabel}
+                  </span>
+                  <span className="rounded-full border border-gray-700 px-2.5 py-1 text-[11px] text-gray-400">
+                    {item.dimension}
+                  </span>
+                  <span className="text-[11px] text-gray-500">
+                    {item.competitors.join("、") || "整体"}
+                  </span>
+                </div>
+                <p className="mt-3 line-clamp-3 text-sm leading-6 text-gray-100">
+                  {item.text}
+                </p>
+                <div className="mt-3 grid gap-2 text-xs text-gray-500 sm:grid-cols-3">
+                  <span>信心：{formatConfidence(item.confidence)}</span>
+                  <span>关联证据：{item.evidenceCount} 条</span>
+                  <span>来源站点：{item.sourceCount} 个</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EvidenceTraceGraph({ groups }: { groups: TraceGraphGroup[] }) {
+  return (
+    <section className="rounded-lg border border-gray-800 bg-gray-900/60 p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-100">证据关系图谱</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            从竞品到维度、结论和来源，展示一条结论背后的可追溯路径。
+          </p>
+        </div>
+        <span className="w-fit rounded-full border border-gray-700 px-2.5 py-1 text-xs text-gray-400">
+          {groups.length} 个竞品节点
+        </span>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="mt-5">
+          <EmptyPanelText text="当前运行缺少结论与证据的关联数据，暂无法绘制关系图谱。" />
+        </div>
+      ) : (
+        <div className="mt-5 overflow-x-auto">
+          <div className="min-w-[960px] space-y-4">
+            <div className="grid grid-cols-[150px_180px_1fr_230px] gap-3 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <span>竞品</span>
+              <span>分析维度</span>
+              <span>结论</span>
+              <span>证据来源</span>
+            </div>
+            {groups.map((group) => (
+              <div
+                key={group.competitor}
+                className="grid grid-cols-[150px_180px_1fr_230px] gap-3 rounded-lg border border-gray-800 bg-gray-950/40 p-3"
+              >
+                <div className="flex items-center">
+                  <div className="w-full rounded-md border border-teal-500/40 bg-teal-500/10 px-3 py-3 text-sm font-semibold text-teal-100">
+                    {group.competitor}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {group.dimensions.map((dimension) => (
+                    <div
+                      key={`${group.competitor}-${dimension.dimension}`}
+                      className="rounded-md border border-gray-800 bg-gray-900/70 px-3 py-3 text-sm text-gray-200"
+                    >
+                      {dimension.dimension}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  {group.dimensions.map((dimension) => (
+                    <div key={`${dimension.dimension}-claims`} className="space-y-2">
+                      {dimension.claims.map((claim) => (
+                        <div
+                          key={claim.id}
+                          className="rounded-md border border-gray-800 bg-gray-900/70 p-3"
+                        >
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-400">
+                              {claim.statusLabel}
+                            </span>
+                            <span className="text-[11px] text-gray-600">
+                              {formatClaimReference(claim.id)}
+                            </span>
+                          </div>
+                          <p className="line-clamp-2 text-sm leading-5 text-gray-100">
+                            {claim.text}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  {group.dimensions.map((dimension) => (
+                    <div key={`${dimension.dimension}-evidence`} className="space-y-2">
+                      {dimension.claims.flatMap((claim) => claim.evidence).slice(0, 4).map((evidence) => (
+                        <a
+                          key={`${dimension.dimension}-${evidence.id}-${evidence.url}`}
+                          href={evidence.url || undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block rounded-md border border-gray-800 bg-gray-900/70 p-3 transition-colors hover:border-teal-500/50 hover:bg-gray-900"
+                        >
+                          <p className="line-clamp-2 text-xs font-medium leading-5 text-gray-200">
+                            {evidence.title}
+                          </p>
+                          <p className="mt-1 truncate text-[11px] text-gray-500">
+                            {evidence.sourceType}
+                          </p>
+                        </a>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -605,6 +1044,302 @@ function buildPipelineOption(dashboard: DashboardData): EChartsOption {
   };
 }
 
+function diffToneClassName(tone: "teal" | "blue" | "amber" | "gray") {
+  const classes = {
+    teal: "border-teal-500/30 bg-teal-500/10",
+    blue: "border-sky-500/30 bg-sky-500/10",
+    amber: "border-amber-500/30 bg-amber-500/10",
+    gray: "border-gray-800 bg-gray-950/40",
+  };
+  return classes[tone];
+}
+
+function findPreviousRun(history: ReportRecord[], selectedRun: ReportRecord) {
+  const hasTimestamps = history.some((item) => typeof item.timestamp === "number");
+  const ordered = hasTimestamps
+    ? [...history].sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    : history;
+  const index = ordered.findIndex((item) => item.id === selectedRun.id);
+  if (index < 0) {
+    return ordered.find((item) => item.id !== selectedRun.id) ?? null;
+  }
+  return (ordered[index + 1] as ReportRecord | undefined) ?? null;
+}
+
+function buildRunDiff(currentRun: ReportRecord, previousRun: ReportRecord | null): RunDiffData {
+  const currentSources = buildSourceDiffItems(currentRun);
+  const currentClaims = buildNormalizedClaimMap(currentRun);
+
+  if (!previousRun) {
+    return {
+      previousRun: null,
+      summaries: [
+        {
+          label: "当前来源",
+          value: String(currentSources.length),
+          detail: "等待下一次运行后对比",
+          tone: "teal",
+        },
+        {
+          label: "当前结论",
+          value: String(currentClaims.size),
+          detail: "等待下一次运行后对比",
+          tone: "blue",
+        },
+        {
+          label: "变化结论",
+          value: "0",
+          detail: "暂无历史基线",
+          tone: "gray",
+        },
+        {
+          label: "平均信心变化",
+          value: "--",
+          detail: "暂无历史基线",
+          tone: "gray",
+        },
+      ],
+      addedSources: [],
+      addedClaims: [],
+      changedClaims: [],
+    };
+  }
+
+  const previousSources = new Map(
+    buildSourceDiffItems(previousRun).map((source) => [source.key, source]),
+  );
+  const previousClaims = buildNormalizedClaimMap(previousRun);
+  const addedSources = currentSources.filter((source) => !previousSources.has(source.key));
+  const addedClaims = Array.from(currentClaims.values())
+    .filter((claim) => !previousClaims.has(claim.key))
+    .map(toClaimDiffItem);
+  const changedClaims = Array.from(currentClaims.values()).flatMap((claim) => {
+    const previous = previousClaims.get(claim.key);
+    if (!previous) {
+      return [];
+    }
+    const confidenceChanged =
+      claim.confidence !== null &&
+      previous.confidence !== null &&
+      Math.abs(claim.confidence - previous.confidence) >= 0.05;
+    const statusChanged = claim.status !== previous.status;
+    const evidenceChanged = claim.evidenceCount !== previous.evidenceCount;
+    if (!confidenceChanged && !statusChanged && !evidenceChanged) {
+      return [];
+    }
+    return [
+      {
+        ...toClaimDiffItem(claim),
+        previousStatus: statusLabel(previous.status),
+        currentStatus: statusLabel(claim.status),
+        previousConfidence: previous.confidence,
+        currentConfidence: claim.confidence,
+      },
+    ];
+  });
+  const currentAvgConfidence = average(Array.from(currentClaims.values()).map((claim) => claim.confidence));
+  const previousAvgConfidence = average(Array.from(previousClaims.values()).map((claim) => claim.confidence));
+  const confidenceDelta =
+    currentAvgConfidence !== null && previousAvgConfidence !== null
+      ? currentAvgConfidence - previousAvgConfidence
+      : null;
+
+  return {
+    previousRun,
+    summaries: [
+      {
+        label: "新增来源",
+        value: `+${addedSources.length}`,
+        detail: `${currentSources.length} 条当前来源`,
+        tone: "teal",
+      },
+      {
+        label: "新增结论",
+        value: `+${addedClaims.length}`,
+        detail: `${currentClaims.size} 条当前结论`,
+        tone: "blue",
+      },
+      {
+        label: "变化结论",
+        value: String(changedClaims.length),
+        detail: "状态、信心或证据数量变化",
+        tone: changedClaims.length ? "amber" : "gray",
+      },
+      {
+        label: "平均信心变化",
+        value: confidenceDelta === null ? "--" : formatSignedPercent(confidenceDelta),
+        detail: previousAvgConfidence === null ? "上一轮缺少信心数据" : "相对上一轮",
+        tone: confidenceDelta !== null && confidenceDelta < 0 ? "amber" : "teal",
+      },
+    ],
+    addedSources,
+    addedClaims,
+    changedClaims,
+  };
+}
+
+function buildClaimExplorerItems(report: ReportRecord): ClaimExplorerItem[] {
+  const { claims, dimensions, reviews, evidenceById } = collectTraceableRows(report);
+  const reviewByClaimId = buildReviewByClaimId(reviews);
+
+  return claims.map((claim, index) => {
+    const claimId = getClaimId(claim) || `claim-${index}`;
+    const review = reviewByClaimId.get(claimId);
+    const evidenceIds = getClaimEvidenceIds(claim, review);
+    const sourceUrls = uniqueStrings(
+      evidenceIds
+        .map((id) => evidenceById.get(id))
+        .map((evidence) => getEvidenceUrl(evidence || {})),
+    );
+    const status = getClaimStatus(claim, review);
+    return {
+      id: claimId,
+      text: getClaimText(claim),
+      dimension: toDisplayDimension(getDimensionName(claim, dimensions)),
+      competitors: getClaimCompetitors(claim),
+      status,
+      statusLabel: statusLabel(status),
+      confidence: getClaimConfidence(claim, review),
+      evidenceCount: evidenceIds.length,
+      sourceCount: sourceUrls.length,
+    };
+  });
+}
+
+function buildTraceGraphGroups(report: ReportRecord): TraceGraphGroup[] {
+  const { claims, dimensions, reviews, evidence, evidenceById } = collectTraceableRows(report);
+  const reviewByClaimId = buildReviewByClaimId(reviews);
+  const grouped = new Map<string, Map<string, TraceGraphClaim[]>>();
+
+  claims.forEach((claim, index) => {
+    const claimId = getClaimId(claim) || `claim-${index}`;
+    const review = reviewByClaimId.get(claimId);
+    const competitors = getClaimCompetitors(claim);
+    const competitor = competitors[0] || "整体";
+    const dimension = toDisplayDimension(getDimensionName(claim, dimensions));
+    const evidenceIds = getClaimEvidenceIds(claim, review);
+    const relatedEvidence = evidenceIds
+      .map((id) => evidenceById.get(id))
+      .filter((item): item is Row => Boolean(item));
+    const fallbackEvidence = relatedEvidence.length
+      ? []
+      : evidence
+          .filter(
+            (item) =>
+              getCompetitor(item) === competitor &&
+              toDisplayDimension(getDimensionName(item, dimensions)) === dimension,
+          )
+          .slice(0, 2);
+    const graphClaim: TraceGraphClaim = {
+      id: claimId,
+      text: getClaimText(claim),
+      statusLabel: statusLabel(getClaimStatus(claim, review)),
+      evidence: [...relatedEvidence, ...fallbackEvidence].slice(0, 3).map(toTraceGraphEvidence),
+    };
+    const dimensionMap = grouped.get(competitor) ?? new Map<string, TraceGraphClaim[]>();
+    const dimensionClaims = dimensionMap.get(dimension) ?? [];
+    dimensionClaims.push(graphClaim);
+    dimensionMap.set(dimension, dimensionClaims);
+    grouped.set(competitor, dimensionMap);
+  });
+
+  return Array.from(grouped.entries())
+    .slice(0, 5)
+    .map(([competitor, dimensionMap]) => ({
+      competitor,
+      dimensions: Array.from(dimensionMap.entries())
+        .slice(0, 4)
+        .map(([dimension, dimensionClaims]) => ({
+          dimension,
+          claims: dimensionClaims.slice(0, 3),
+        })),
+    }));
+}
+
+function collectTraceableRows(report: ReportRecord) {
+  const evidence = collectRows(report, ["evidence_index", "evidence_items"]);
+  const claims = collectRows(report, ["analysis_claims"]);
+  const reviews = collectRows(report, ["claim_support_reviews"]);
+  const dimensions = collectRows(report, ["analysis_dimensions"]);
+  const evidenceById = new Map(
+    evidence.map((item, index) => [getEvidenceId(item) || `evidence-${index}`, item]),
+  );
+
+  return { evidence, claims, reviews, dimensions, evidenceById };
+}
+
+function buildSourceDiffItems(report: ReportRecord): SourceDiffItem[] {
+  const evidence = collectRows(report, ["evidence_index", "evidence_items"]);
+  const items = evidence.map((item, index) => {
+    const url = getEvidenceUrl(item);
+    const key = normalizeKey(url || getEvidenceId(item) || String(index));
+    return {
+      key,
+      title: getEvidenceTitle(item),
+      url,
+      sourceType: formatSourceType(getSourceType(item)),
+    };
+  });
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.key)) {
+      return false;
+    }
+    seen.add(item.key);
+    return true;
+  });
+}
+
+function buildNormalizedClaimMap(report: ReportRecord) {
+  const { claims, dimensions, reviews } = collectTraceableRows(report);
+  const reviewByClaimId = buildReviewByClaimId(reviews);
+  const result = new Map<
+    string,
+    ClaimDiffItem & {
+      status: string;
+      confidence: number | null;
+      evidenceCount: number;
+    }
+  >();
+
+  claims.forEach((claim, index) => {
+    const claimId = getClaimId(claim) || `claim-${index}`;
+    const review = reviewByClaimId.get(claimId);
+    const text = getClaimText(claim);
+    const key = normalizeClaimKey(text);
+    result.set(key, {
+      key,
+      text,
+      dimension: toDisplayDimension(getDimensionName(claim, dimensions)),
+      competitors: getClaimCompetitors(claim),
+      status: getClaimStatus(claim, review),
+      confidence: getClaimConfidence(claim, review),
+      evidenceCount: getClaimEvidenceIds(claim, review).length,
+    });
+  });
+
+  return result;
+}
+
+function toClaimDiffItem(
+  item: ClaimDiffItem & { status?: string; confidence?: number | null; evidenceCount?: number },
+): ClaimDiffItem {
+  return {
+    key: item.key,
+    text: item.text,
+    dimension: item.dimension,
+    competitors: item.competitors,
+  };
+}
+
+function buildReviewByClaimId(reviews: Row[]) {
+  return new Map(
+    reviews
+      .map((review) => [stringValue(review.claim_id || review.claimId), review] as const)
+      .filter(([claimId]) => Boolean(claimId)),
+  );
+}
+
 function buildDashboard(report: ReportRecord): DashboardData {
   const evidence = collectRows(report, ["evidence_index", "evidence_items"]);
   const claims = collectRows(report, ["analysis_claims"]);
@@ -867,6 +1602,144 @@ function getDimensionName(item: Row, dimensions: Row[]) {
       stringValue(candidate.direction_id) === dimensionId,
   );
   return stringValue(dimension?.name || dimension?.direction_name || dimensionId);
+}
+
+function getClaimId(claim: Row) {
+  return stringValue(claim.id || claim.claim_id || claim.claimId);
+}
+
+function getClaimText(claim: Row) {
+  return (
+    stringValue(claim.claim || claim.text || claim.statement || claim.title || claim.summary) ||
+    "未命名结论"
+  );
+}
+
+function getClaimCompetitors(claim: Row) {
+  if (Array.isArray(claim.competitors)) {
+    return uniqueStrings(claim.competitors.map((item) => String(item || ""))).slice(0, 4);
+  }
+  return uniqueStrings([
+    stringValue(claim.competitor),
+    stringValue(claim.competitor_name),
+    stringValue(claim.company),
+  ]).slice(0, 4);
+}
+
+function getClaimEvidenceIds(claim: Row, review?: Row) {
+  const values = [
+    ...(Array.isArray(claim.evidence_ids) ? claim.evidence_ids : []),
+    ...(Array.isArray(claim.evidenceIds) ? claim.evidenceIds : []),
+    ...(Array.isArray(review?.evidence_ids) ? review?.evidence_ids : []),
+    ...(Array.isArray(review?.evidenceIds) ? review?.evidenceIds : []),
+  ];
+  return uniqueStrings(values.map((value) => String(value || "")));
+}
+
+function getClaimStatus(claim: Row, review?: Row) {
+  return stringValue(review?.support_status || review?.status || claim.support_status || claim.status || "unreviewed").toLowerCase();
+}
+
+function getClaimConfidence(claim: Row, review?: Row) {
+  return toScore(claim.confidence) ?? toScore(review?.confidence);
+}
+
+function getEvidenceId(evidence: Row) {
+  return stringValue(evidence.id || evidence.evidence_id || evidence.evidenceId);
+}
+
+function getEvidenceUrl(evidence: Row) {
+  return stringValue(evidence.url || evidence.source_url || evidence.canonical_url || evidence.metadata?.url);
+}
+
+function getEvidenceTitle(evidence: Row) {
+  const url = getEvidenceUrl(evidence);
+  return (
+    stringValue(evidence.title || evidence.source_title || evidence.name || evidence.snippet) ||
+    sourceNameFromUrl(url) ||
+    formatEvidenceReference(getEvidenceId(evidence))
+  );
+}
+
+function toTraceGraphEvidence(evidence: Row): TraceGraphEvidence {
+  return {
+    id: getEvidenceId(evidence) || getEvidenceTitle(evidence),
+    title: getEvidenceTitle(evidence),
+    url: getEvidenceUrl(evidence),
+    sourceType: formatSourceType(getSourceType(evidence)),
+  };
+}
+
+function statusLabel(status: string) {
+  const normalized = stringValue(status).toLowerCase();
+  return STATUS_LABELS[normalized] || normalized.replace(/_/g, " ") || "未复核";
+}
+
+function formatSourceType(sourceType: string) {
+  const labels: Record<string, string> = {
+    official_site: "官网",
+    pricing_page: "价格页",
+    docs: "产品文档",
+    financial_filing: "财务披露",
+    public_registry: "公开登记",
+    news: "新闻报道",
+    social: "社交媒体",
+    review: "用户评价",
+    other: "其他来源",
+  };
+  const normalized = sourceType.toLowerCase();
+  return labels[normalized] || normalized.replace(/_/g, " ") || "其他来源";
+}
+
+function sourceNameFromUrl(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function toDisplayDimension(value: string) {
+  const normalized = stringValue(value);
+  return DIRECTION_LABELS[normalized] || normalized.replace(/_/g, " ") || "未归类";
+}
+
+function normalizeKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeClaimKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, 220);
+}
+
+function formatConfidence(value: number | null) {
+  return value === null ? "暂无" : `${Math.round(value * 100)}%`;
+}
+
+function formatSignedPercent(value: number) {
+  const rounded = Math.round(value * 100);
+  return `${rounded >= 0 ? "+" : ""}${rounded}%`;
+}
+
+function confidenceChangeText(previous: number | null, current: number | null) {
+  if (previous === null || current === null) {
+    return "信心数据不完整";
+  }
+  return `${formatConfidence(previous)} → ${formatConfidence(current)}`;
+}
+
+function formatClaimReference(claimId: string) {
+  const numericId = claimId.match(/\d+/)?.[0];
+  return numericId ? `第 ${numericId} 条` : "结论";
+}
+
+function formatEvidenceReference(evidenceId: string) {
+  const numericId = evidenceId.match(/\d+/)?.[0];
+  return numericId ? `第 ${numericId} 条来源` : "未命名来源";
 }
 
 function countBy(items: string[]) {
