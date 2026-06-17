@@ -1009,10 +1009,7 @@ function IndustryDirectionDialog({
     ? []
     : plan.planner_added_directions || [];
   const directions = [...visibleBaseDirections, ...plannerAddedDirections];
-  const [isEditingDirections, setIsEditingDirections] = useState(false);
-  const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>(
-    directions.map((direction) => direction.direction_id)
-  );
+  const selectedDirectionIds = directions.map((direction) => direction.direction_id);
   const selectedDirections = directions.filter((direction) =>
     selectedDirectionIds.includes(direction.direction_id)
   );
@@ -1027,19 +1024,6 @@ function IndustryDirectionDialog({
   const detectedCompetitors = plan.detected_competitors || [];
   const suggestedCompetitors = plan.suggested_competitors || [];
   const shouldSuggestCompetitors = detectedCompetitors.length < 2;
-
-  const toggleDirection = (directionId: string) => {
-    const direction = directions.find(
-      (item) => item.direction_id === directionId
-    );
-    if (direction?.required) return;
-
-    setSelectedDirectionIds((current) =>
-      current.includes(directionId)
-        ? current.filter((item) => item !== directionId)
-        : [...current, directionId]
-    );
-  };
 
   const renderDirectionCards = (
     items: AnalysisDirection[],
@@ -1060,24 +1044,9 @@ function IndustryDirectionDialog({
             className="rounded-md border border-gray-800 bg-gray-950/40 p-4"
           >
             <div className="flex items-start justify-between gap-3">
-              <label className="flex min-w-0 items-start gap-2">
-                {isEditingDirections && (
-                  <input
-                    type="checkbox"
-                    checked={selectedDirectionIds.includes(
-                      direction.direction_id
-                    )}
-                    disabled={direction.required}
-                    onChange={() =>
-                      toggleDirection(direction.direction_id)
-                    }
-                    className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-950 text-teal-500 disabled:opacity-50"
-                  />
-                )}
-                <span className="text-sm font-semibold text-gray-100">
-                  {direction.name}
-                </span>
-              </label>
+              <span className="min-w-0 text-sm font-semibold text-gray-100">
+                {direction.name}
+              </span>
               <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
                 {direction.origin === "planner_suggested"
                   ? "Agent补充"
@@ -1108,10 +1077,17 @@ function IndustryDirectionDialog({
                 确认行业与搜索方向
               </h2>
             </div>
-            <div className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-sm text-teal-100">
+            <div
+              className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-sm text-teal-100"
+              title={
+                plan.industry.signals?.length
+                  ? `匹配线索：${plan.industry.signals.join("、")}`
+                  : "行业匹配度来自系统对输入内容和竞品名称的规则识别"
+              }
+            >
               {plan.detected_industry || plan.industry.name}
               <span className="ml-2 text-teal-300">
-                {Math.round((plan.industry.confidence || 0) * 100)}%
+                匹配度 {Math.round((plan.industry.confidence || 0) * 100)}%
               </span>
             </div>
           </div>
@@ -1227,11 +1203,11 @@ function IndustryDirectionDialog({
         <div className="flex flex-col gap-3 border-t border-gray-800 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
           <button
             type="button"
-            onClick={() => setIsEditingDirections(true)}
+            onClick={onCancel}
             className="rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 transition hover:border-gray-500 hover:text-gray-100"
             disabled={isPreparingPlan}
           >
-            修改分析方向
+            返回首页重新输入
           </button>
           <button
             type="button"
