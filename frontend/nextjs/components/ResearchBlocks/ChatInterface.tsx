@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from '../../types/data';
 import ChatInput from './elements/ChatInput';
 import { markdownToHtml } from '../../helpers/markdownHelper';
+import { formatTraceTextForDisplay } from '../../helpers/displayText';
 import '../../styles/markdown.css';
 
 interface ChatInterfaceProps {
@@ -27,7 +28,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const renderMessages = async () => {
       const rendered = await Promise.all(
         messages.map(async (msg) => {
-          const html = await markdownToHtml(msg.content);
+          const html = await markdownToHtml(formatTraceTextForDisplay(msg.content));
           return {
             content: msg.content,
             html,

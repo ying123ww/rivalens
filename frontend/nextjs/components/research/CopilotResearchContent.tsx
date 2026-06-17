@@ -3,6 +3,12 @@ import ResearchPanel from "@/components/research/ResearchPanel";
 import CopilotPanel from "@/components/research/CopilotPanel";
 import { ChatBoxSettings, Data, ResearchHistoryItem } from "@/types/data";
 
+type HomeAction = {
+  label?: string;
+  title?: string;
+  onClick: () => void;
+};
+
 interface CopilotResearchContentProps {
   orderedData: Data[];
   answer: string;
@@ -24,6 +30,7 @@ interface CopilotResearchContentProps {
   onNewResearch?: () => void;
   toggleSidebar?: () => void;
   reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
+  homeAction?: HomeAction;
 }
 
 export default function CopilotResearchContent({
@@ -46,7 +53,8 @@ export default function CopilotResearchContent({
   isProcessingChat = false,
   onNewResearch,
   toggleSidebar,
-  reportContext
+  reportContext,
+  homeAction
 }: CopilotResearchContentProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   // Initialize copilot as hidden when loading
@@ -204,6 +212,7 @@ export default function CopilotResearchContent({
           loading={loading}
           toggleSidebar={toggleSidebar}
           reportContext={reportContext}
+          homeAction={homeAction}
         />
       </div>
 

@@ -2,6 +2,7 @@ import Image from "next/image";
 import React, { useState, useEffect } from 'react';
 import { toast } from "react-hot-toast";
 import { markdownToHtml } from '../../helpers/markdownHelper';
+import { formatTraceTextForDisplay } from '../../helpers/displayText';
 import '../../styles/markdown.css';
 import { useResearchHistoryContext } from '../../hooks/ResearchHistoryContext';
 import { ChatMessage } from '../../types/data';
@@ -14,7 +15,7 @@ export default function Report({ answer, researchId }: { answer: string, researc
 
     useEffect(() => {
       if (answer) {
-        markdownToHtml(answer).then((html) => setHtmlContent(html));
+        markdownToHtml(formatTraceTextForDisplay(answer)).then((html) => setHtmlContent(html));
       }
     }, [answer]);
     

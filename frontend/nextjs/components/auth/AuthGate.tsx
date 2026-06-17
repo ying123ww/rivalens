@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,18 +9,100 @@ import { useAuth } from "./AuthProvider";
 
 type AuthMode = "login" | "register";
 
+const AVATAR_STORAGE_PREFIX = "rivalens:user-avatar:";
+
+function avatarStorageKey(userId: string) {
+  return `${AVATAR_STORAGE_PREFIX}${userId}`;
+}
+
+function getUserInitials(user: Pick<AuthUser, "display_name" | "email">) {
+  const source = user.display_name || user.email || "R";
+  const letters = source
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2);
+  return letters || "R";
+}
+
+function UserAvatar({
+  user,
+  avatarDataUrl,
+  size = "md",
+}: {
+  user: Pick<AuthUser, "display_name" | "email">;
+  avatarDataUrl?: string | null;
+  size?: "sm" | "md" | "lg";
+}) {
+  const sizeClass =
+    size === "lg"
+      ? "h-32 w-32 text-3xl"
+      : size === "sm"
+        ? "h-9 w-9 text-sm"
+        : "h-10 w-10 text-sm";
+
+  return (
+    <span
+      className={`relative inline-grid shrink-0 place-items-center overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f766e,#34d399)] font-semibold text-white shadow-inner shadow-white/10 ${sizeClass}`}
+    >
+      {avatarDataUrl ? (
+        <img
+          src={avatarDataUrl}
+          alt={`${user.display_name} 的头像`}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span>{getUserInitials(user)}</span>
+      )}
+    </span>
+  );
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { user, loading, refreshUser, logout } = useAuth();
   const pathname = usePathname();
   const isMonitoring = pathname === "/monitoring";
   const [profileOpen, setProfileOpen] = useState(false);
   const [showAuthForm, setShowAuthForm] = useState(pathname !== "/");
+  const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (pathname !== "/") {
       setShowAuthForm(true);
     }
   }, [pathname]);
+
+  useEffect(() => {
+    if (!user) {
+      setAvatarDataUrl(null);
+      return;
+    }
+
+    try {
+      setAvatarDataUrl(window.localStorage.getItem(avatarStorageKey(user.id)));
+    } catch {
+      setAvatarDataUrl(null);
+    }
+  }, [user]);
+
+  const saveAvatar = (nextAvatar: string | null) => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      const key = avatarStorageKey(user.id);
+      if (nextAvatar) {
+        window.localStorage.setItem(key, nextAvatar);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // 本地存储失败时仍更新当前页面预览。
+    }
+    setAvatarDataUrl(nextAvatar);
+  };
 
   if (loading) {
     return <AuthLoading />;
@@ -56,6 +138,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={() => setProfileOpen((open) => !open)}
+            className="rounded-full transition-transform active:scale-[0.97]"
+            aria-label="打开个人资料"
+            aria-expanded={profileOpen}
+          >
+            <UserAvatar user={user} avatarDataUrl={avatarDataUrl} size="sm" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setProfileOpen((open) => !open)}
             className="hidden min-w-0 rounded-[50px] px-3 py-1 text-left transition-colors hover:bg-black/[0.04] sm:block"
             aria-expanded={profileOpen}
           >
@@ -83,41 +174,75 @@ export function AuthGate({ children }: { children: ReactNode }) {
           >
             退出
           </button>
-          {profileOpen && (
-            <ProfileEditor
-              user={user}
-              onClose={() => setProfileOpen(false)}
-              onSaved={refreshUser}
-            />
-          )}
         </div>
       </div>
+      {profileOpen && (
+        <ProfileEditor
+          user={user}
+          avatarDataUrl={avatarDataUrl}
+          onAvatarChange={saveAvatar}
+          onClose={() => setProfileOpen(false)}
+          onSaved={refreshUser}
+        />
+      )}
     </>
   );
 }
 
 function ProfileEditor({
   user,
+  avatarDataUrl,
+  onAvatarChange,
   onClose,
   onSaved,
 }: {
   user: AuthUser;
+  avatarDataUrl: string | null;
+  onAvatarChange: (nextAvatar: string | null) => void;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
   const [displayName, setDisplayName] = useState(user.display_name);
+  const [draftAvatar, setDraftAvatar] = useState<string | null>(avatarDataUrl);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDisplayName(user.display_name);
-  }, [user.display_name]);
+    setDraftAvatar(avatarDataUrl);
+  }, [avatarDataUrl, user.display_name]);
+
+  const chooseAvatar = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setError("");
+    if (!file.type.startsWith("image/")) {
+      setError("请选择图片文件");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setError("头像图片请控制在 3MB 以内");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDraftAvatar(typeof reader.result === "string" ? reader.result : null);
+    };
+    reader.onerror = () => {
+      setError("头像读取失败，请重新选择");
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    setSaved(false);
 
     const nextDisplayName = displayName.trim();
     if (!nextDisplayName) {
@@ -143,8 +268,9 @@ function ProfileEditor({
         throw new Error(detail || "资料保存失败");
       }
 
+      onAvatarChange(draftAvatar);
       await onSaved();
-      setSaved(true);
+      onClose();
     } catch (caughtError) {
       setError(
         caughtError instanceof Error ? caughtError.message : "资料保存失败",
@@ -155,64 +281,138 @@ function ProfileEditor({
   };
 
   return (
-    <div className="absolute left-0 top-[calc(100%+0.5rem)] w-[min(20rem,calc(100vw-5rem))] rounded-lg border border-gray-700 bg-gray-950 p-4 shadow-2xl shadow-black/40">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-100">个人资料</h2>
-          <p className="mt-1 text-xs text-gray-500">更新工作台显示名称</p>
+    <div
+      className="fixed inset-0 z-[220] flex items-center justify-center bg-gray-950/70 px-4 py-6 backdrop-blur-md"
+      onMouseDown={onClose}
+      role="presentation"
+    >
+      <form
+        className="w-full max-w-[560px] rounded-lg border border-gray-700/70 bg-[#0b1020] p-6 text-gray-100 shadow-2xl shadow-black/50 sm:p-8"
+        onSubmit={submit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-gray-50">
+              编辑个人资料
+            </h2>
+            <p className="mt-2 text-sm text-gray-500">
+              头像和显示名会用于工作台顶部展示。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-gray-700/70 px-3 py-1.5 text-sm text-gray-400 transition-colors hover:border-gray-600 hover:bg-gray-900 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            取消
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md border border-gray-800 px-2 py-1 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
-          关闭
-        </button>
-      </div>
 
-      <form className="space-y-4" onSubmit={submit}>
-        <label className="block">
-          <span className="mb-2 block text-xs font-medium text-gray-400">
-            显示名
-          </span>
+        <div className="mt-10 flex flex-col items-center gap-3">
+          <div className="relative">
+            <UserAvatar user={user} avatarDataUrl={draftAvatar} size="lg" />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute bottom-1 right-1 grid h-10 w-10 place-items-center rounded-full border border-gray-700 bg-gray-950 text-gray-200 shadow-lg shadow-black/40 transition-colors hover:border-teal-500 hover:text-teal-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              aria-label="更换头像"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="19"
+                height="19"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8.5 7.5 10 5.5h4l1.5 2H18a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2h2.5Z" />
+                <circle cx="12" cy="13" r="3.2" />
+              </svg>
+            </button>
+          </div>
           <input
-            required
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-            maxLength={80}
-            className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-600 hover:border-gray-600 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={chooseAvatar}
           />
-        </label>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-full border border-gray-700 px-4 py-1.5 text-sm font-medium text-gray-300 transition-colors hover:border-teal-500 hover:text-teal-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              上传头像
+            </button>
+            {draftAvatar && (
+              <button
+                type="button"
+                onClick={() => setDraftAvatar(null)}
+                className="rounded-full px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-900 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                移除
+              </button>
+            )}
+          </div>
+        </div>
 
-        <label className="block">
-          <span className="mb-2 block text-xs font-medium text-gray-400">
-            邮箱
-          </span>
-          <input
-            readOnly
-            value={user.email}
-            className="w-full cursor-not-allowed rounded-md border border-gray-800 bg-gray-900/50 px-3 py-2 text-sm text-gray-500 outline-none"
-          />
-        </label>
+        <div className="mt-9 space-y-4">
+          <label className="block rounded-lg border border-gray-700 bg-gray-900/70 px-4 py-3 transition-colors focus-within:border-teal-500 focus-within:ring-1 focus-within:ring-teal-500">
+            <span className="block text-sm font-medium text-gray-400">
+              显示名称
+            </span>
+            <input
+              required
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              maxLength={80}
+              className="mt-1 w-full bg-transparent text-lg font-medium text-gray-50 outline-none placeholder:text-gray-600"
+            />
+          </label>
+
+          <label className="block rounded-lg border border-gray-800 bg-gray-950/60 px-4 py-3">
+            <span className="block text-sm font-medium text-gray-500">
+              账号邮箱
+            </span>
+            <input
+              readOnly
+              value={user.email}
+              className="mt-1 w-full cursor-not-allowed bg-transparent text-lg text-gray-500 outline-none"
+            />
+          </label>
+        </div>
+
+        <p className="mt-5 text-center text-sm text-gray-500">
+          个人资料会帮助你在工作台中更容易识别当前账户。
+        </p>
 
         {error && (
-          <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <p className="mt-5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {error}
           </p>
         )}
-        {saved && !error && (
-          <p className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs text-teal-100">
-            已保存
-          </p>
-        )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-md bg-teal-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? "保存中..." : "保存资料"}
-        </button>
+        <div className="mt-7 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-gray-700 px-6 py-2.5 text-sm font-semibold text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-900 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded-full bg-gray-50 px-6 py-2.5 text-sm font-semibold text-gray-950 transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? "保存中..." : "保存"}
+          </button>
+        </div>
       </form>
     </div>
   );

@@ -9,6 +9,12 @@ import AccessReport from './ResearchBlocks/AccessReport';
 import { preprocessOrderedData } from '../utils/dataProcessing';
 import { Data, ResearchHistoryItem } from '../types/data';
 
+type HomeAction = {
+  label?: string;
+  title?: string;
+  onClick: () => void;
+};
+
 interface ResearchResultsProps {
   orderedData: Data[];
   answer: string;
@@ -19,6 +25,7 @@ interface ResearchResultsProps {
   isProcessingChat?: boolean;
   onShareClick?: () => void;
   reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
+  homeAction?: HomeAction;
 }
 
 type SourceItem = { name: string; url: string };
@@ -93,7 +100,8 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
   currentResearchId,
   isProcessingChat = false,
   onShareClick,
-  reportContext
+  reportContext,
+  homeAction
 }) => {
   const groupedData = preprocessOrderedData(orderedData);
   const pathData = groupedData.find(data => data.type === 'path');
@@ -137,7 +145,7 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
 
   return (
     <>
-      {initialQuestion && <Question question={initialQuestion.content} />}
+      {initialQuestion && <Question question={initialQuestion.content} homeAction={homeAction} />}
       {orderedData.length > 0 && (
         <LogsSection
           logs={allLogs}
