@@ -115,7 +115,7 @@ export default function MonitoringPage() {
             <aside className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-gray-100">运行记录</h2>
-                <span className="text-xs text-gray-500">{history.length} runs</span>
+                <span className="text-xs text-gray-500">{history.length} 次运行</span>
               </div>
               <div className="max-h-[calc(100vh-220px)] space-y-2 overflow-y-auto pr-1">
                 {history.map((run) => {
@@ -137,7 +137,9 @@ export default function MonitoringPage() {
                         </p>
                         <StatusBadge status={run.status} />
                       </div>
-                      <p className="mt-2 truncate text-xs text-gray-500">{run.id}</p>
+                      <p className="mt-2 truncate text-xs text-gray-500">
+                        记录编号：{formatRunReference(run.id)}
+                      </p>
                       <p className="mt-1 text-xs text-gray-500">
                         {formatDate(run.timestamp)}
                       </p>
@@ -193,7 +195,9 @@ function RunHeader({
           <h2 className="mt-3 line-clamp-2 text-lg font-semibold text-gray-50">
             {run.question || "未命名运行"}
           </h2>
-          <p className="mt-2 break-all text-xs text-gray-500">Run ID: {run.id}</p>
+          <p className="mt-2 break-all text-xs text-gray-500">
+            运行编号：{formatRunReference(run.id)}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link
@@ -237,7 +241,7 @@ function EvidenceStackedBars({ dashboard }: { dashboard: DashboardData }) {
       subtitle="按竞品对比来源类型，一眼看出一手来源是否充足。"
     >
       {dashboard.evidenceByCompetitor.length === 0 ? (
-        <EmptyPanelText text="当前运行暂无 evidence_index 或 evidence_items。" />
+        <EmptyPanelText text="当前运行暂无可用于绘图的证据来源数据。" />
       ) : (
         <EChart option={option} height={320} />
       )}
@@ -331,6 +335,14 @@ function ChartPanel({
 
 function StatusBadge({ status }: { status?: string }) {
   const normalized = (status || "unknown").toLowerCase();
+  const label =
+    normalized === "completed"
+      ? "已完成"
+      : normalized === "running"
+        ? "运行中"
+        : normalized === "failed" || normalized === "error"
+          ? "运行失败"
+          : "状态未知";
   const className =
     normalized === "completed"
       ? "border-teal-500/50 bg-teal-500/10 text-teal-200"
@@ -342,7 +354,7 @@ function StatusBadge({ status }: { status?: string }) {
 
   return (
     <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] ${className}`}>
-      {status || "unknown"}
+      {label}
     </span>
   );
 }
@@ -352,7 +364,7 @@ function EmptyDashboard() {
     <section className="rounded-lg border border-gray-800 bg-gray-900/60 p-10 text-center">
       <h2 className="text-lg font-semibold text-gray-100">暂无运行数据</h2>
       <p className="mx-auto mt-2 max-w-xl text-sm text-gray-500">
-        完成一次竞品分析后，这里会自动出现对应 run 的证据、声明、质量复核和 Agent 流水线看板。
+        完成一次竞品分析后，这里会自动出现对应运行的证据、声明、质量复核和 Agent 流水线看板。
       </p>
       <Link
         href="/"
@@ -910,4 +922,14 @@ function formatDate(timestamp?: number) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(timestamp));
+}
+
+function formatRunReference(id?: string) {
+  const value = stringValue(id);
+  if (!value) {
+    return "暂无编号";
+  }
+
+  const readableId = value.match(/task_\d+_([a-z0-9]+)$/i)?.[1] || value.slice(-8);
+  return readableId.toUpperCase();
 }

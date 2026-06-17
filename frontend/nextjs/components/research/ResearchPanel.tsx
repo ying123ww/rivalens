@@ -4,6 +4,12 @@ import { Data, ChatBoxSettings, ResearchHistoryItem } from '@/types/data';
 import LoadingDots from '@/components/LoadingDots';
 import Image from 'next/image';
 
+type HomeAction = {
+  label?: string;
+  title?: string;
+  onClick: () => void;
+};
+
 interface ResearchPanelProps {
   orderedData: Data[];
   answer: string;
@@ -18,6 +24,7 @@ interface ResearchPanelProps {
   loading?: boolean;
   toggleSidebar?: () => void;
   reportContext?: Partial<ResearchHistoryItem> | Record<string, any> | null;
+  homeAction?: HomeAction;
 }
 
 const ResearchPanel: React.FC<ResearchPanelProps> = ({
@@ -33,7 +40,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   onNewResearch,
   loading,
   toggleSidebar,
-  reportContext
+  reportContext,
+  homeAction
 }) => {
   // Determine if research is complete (has answer) and copilot should be highlighted
   const researchComplete = Boolean(answer && answer.length > 0);
@@ -117,6 +125,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             currentResearchId={currentResearchId}
             isProcessingChat={loading}
             reportContext={reportContext}
+            homeAction={homeAction}
           />
           
           {/* Loading indicator - show during research */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,18 +9,114 @@ import { useAuth } from "./AuthProvider";
 
 type AuthMode = "login" | "register";
 
+const AVATAR_STORAGE_PREFIX = "rivalens:user-avatar:";
+
+function avatarStorageKey(userId: string) {
+  return `${AVATAR_STORAGE_PREFIX}${userId}`;
+}
+
+function getUserInitials(user: Pick<AuthUser, "display_name" | "email">) {
+  const source = user.display_name || user.email || "R";
+  const letters = source
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2);
+  return letters || "R";
+}
+
+function UserAvatar({
+  user,
+  avatarDataUrl,
+  size = "md",
+}: {
+  user: Pick<AuthUser, "display_name" | "email">;
+  avatarDataUrl?: string | null;
+  size?: "sm" | "md" | "lg";
+}) {
+  const sizeClass =
+    size === "lg"
+      ? "h-32 w-32 text-3xl"
+      : size === "sm"
+        ? "h-9 w-9 text-sm"
+        : "h-10 w-10 text-sm";
+
+  return (
+    <span
+      className={`relative inline-grid shrink-0 place-items-center overflow-hidden rounded-full bg-[linear-gradient(135deg,#0f766e,#34d399)] font-semibold text-white shadow-inner shadow-white/10 ${sizeClass}`}
+    >
+      {avatarDataUrl ? (
+        <img
+          src={avatarDataUrl}
+          alt={`${user.display_name} 的头像`}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span>{getUserInitials(user)}</span>
+      )}
+    </span>
+  );
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { user, loading, refreshUser, logout } = useAuth();
   const pathname = usePathname();
   const isMonitoring = pathname === "/monitoring";
   const [profileOpen, setProfileOpen] = useState(false);
+  const [showAuthForm, setShowAuthForm] = useState(pathname !== "/");
+  const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pathname !== "/") {
+      setShowAuthForm(true);
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!user) {
+      setAvatarDataUrl(null);
+      return;
+    }
+
+    try {
+      setAvatarDataUrl(window.localStorage.getItem(avatarStorageKey(user.id)));
+    } catch {
+      setAvatarDataUrl(null);
+    }
+  }, [user]);
+
+  const saveAvatar = (nextAvatar: string | null) => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      const key = avatarStorageKey(user.id);
+      if (nextAvatar) {
+        window.localStorage.setItem(key, nextAvatar);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // 本地存储失败时仍更新当前页面预览。
+    }
+    setAvatarDataUrl(nextAvatar);
+  };
 
   if (loading) {
     return <AuthLoading />;
   }
 
   if (!user) {
-    return <AuthForm onAuthenticated={refreshUser} />;
+    return showAuthForm ? (
+      <AuthForm
+        onAuthenticated={refreshUser}
+        onBackHome={() => setShowAuthForm(false)}
+      />
+    ) : (
+      <BrandLanding onEnterWorkspace={() => setShowAuthForm(true)} />
+    );
   }
 
   return (
@@ -39,6 +135,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
           Monitoring
         </Link>
         <div className="flex items-center gap-1 rounded-[50px] bg-[#f4ecd6] px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => setProfileOpen((open) => !open)}
+            className="rounded-full transition-transform active:scale-[0.97]"
+            aria-label="打开个人资料"
+            aria-expanded={profileOpen}
+          >
+            <UserAvatar user={user} avatarDataUrl={avatarDataUrl} size="sm" />
+          </button>
           <button
             type="button"
             onClick={() => setProfileOpen((open) => !open)}
@@ -69,41 +174,75 @@ export function AuthGate({ children }: { children: ReactNode }) {
           >
             退出
           </button>
-          {profileOpen && (
-            <ProfileEditor
-              user={user}
-              onClose={() => setProfileOpen(false)}
-              onSaved={refreshUser}
-            />
-          )}
         </div>
       </div>
+      {profileOpen && (
+        <ProfileEditor
+          user={user}
+          avatarDataUrl={avatarDataUrl}
+          onAvatarChange={saveAvatar}
+          onClose={() => setProfileOpen(false)}
+          onSaved={refreshUser}
+        />
+      )}
     </>
   );
 }
 
 function ProfileEditor({
   user,
+  avatarDataUrl,
+  onAvatarChange,
   onClose,
   onSaved,
 }: {
   user: AuthUser;
+  avatarDataUrl: string | null;
+  onAvatarChange: (nextAvatar: string | null) => void;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
   const [displayName, setDisplayName] = useState(user.display_name);
+  const [draftAvatar, setDraftAvatar] = useState<string | null>(avatarDataUrl);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDisplayName(user.display_name);
-  }, [user.display_name]);
+    setDraftAvatar(avatarDataUrl);
+  }, [avatarDataUrl, user.display_name]);
+
+  const chooseAvatar = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setError("");
+    if (!file.type.startsWith("image/")) {
+      setError("请选择图片文件");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setError("头像图片请控制在 3MB 以内");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDraftAvatar(typeof reader.result === "string" ? reader.result : null);
+    };
+    reader.onerror = () => {
+      setError("头像读取失败，请重新选择");
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    setSaved(false);
 
     const nextDisplayName = displayName.trim();
     if (!nextDisplayName) {
@@ -129,8 +268,9 @@ function ProfileEditor({
         throw new Error(detail || "资料保存失败");
       }
 
+      onAvatarChange(draftAvatar);
       await onSaved();
-      setSaved(true);
+      onClose();
     } catch (caughtError) {
       setError(
         caughtError instanceof Error ? caughtError.message : "资料保存失败",
@@ -141,64 +281,138 @@ function ProfileEditor({
   };
 
   return (
-    <div className="absolute left-0 top-[calc(100%+0.5rem)] w-[min(20rem,calc(100vw-5rem))] rounded-lg border border-gray-700 bg-gray-950 p-4 shadow-2xl shadow-black/40">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-100">个人资料</h2>
-          <p className="mt-1 text-xs text-gray-500">更新工作台显示名称</p>
+    <div
+      className="fixed inset-0 z-[220] flex items-center justify-center bg-gray-950/70 px-4 py-6 backdrop-blur-md"
+      onMouseDown={onClose}
+      role="presentation"
+    >
+      <form
+        className="w-full max-w-[560px] rounded-lg border border-gray-700/70 bg-[#0b1020] p-6 text-gray-100 shadow-2xl shadow-black/50 sm:p-8"
+        onSubmit={submit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-gray-50">
+              编辑个人资料
+            </h2>
+            <p className="mt-2 text-sm text-gray-500">
+              头像和显示名会用于工作台顶部展示。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-gray-700/70 px-3 py-1.5 text-sm text-gray-400 transition-colors hover:border-gray-600 hover:bg-gray-900 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            取消
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md border border-gray-800 px-2 py-1 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
-          关闭
-        </button>
-      </div>
 
-      <form className="space-y-4" onSubmit={submit}>
-        <label className="block">
-          <span className="mb-2 block text-xs font-medium text-gray-400">
-            显示名
-          </span>
+        <div className="mt-10 flex flex-col items-center gap-3">
+          <div className="relative">
+            <UserAvatar user={user} avatarDataUrl={draftAvatar} size="lg" />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute bottom-1 right-1 grid h-10 w-10 place-items-center rounded-full border border-gray-700 bg-gray-950 text-gray-200 shadow-lg shadow-black/40 transition-colors hover:border-teal-500 hover:text-teal-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              aria-label="更换头像"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="19"
+                height="19"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8.5 7.5 10 5.5h4l1.5 2H18a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2h2.5Z" />
+                <circle cx="12" cy="13" r="3.2" />
+              </svg>
+            </button>
+          </div>
           <input
-            required
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-            maxLength={80}
-            className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-600 hover:border-gray-600 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={chooseAvatar}
           />
-        </label>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-full border border-gray-700 px-4 py-1.5 text-sm font-medium text-gray-300 transition-colors hover:border-teal-500 hover:text-teal-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              上传头像
+            </button>
+            {draftAvatar && (
+              <button
+                type="button"
+                onClick={() => setDraftAvatar(null)}
+                className="rounded-full px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-900 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                移除
+              </button>
+            )}
+          </div>
+        </div>
 
-        <label className="block">
-          <span className="mb-2 block text-xs font-medium text-gray-400">
-            邮箱
-          </span>
-          <input
-            readOnly
-            value={user.email}
-            className="w-full cursor-not-allowed rounded-md border border-gray-800 bg-gray-900/50 px-3 py-2 text-sm text-gray-500 outline-none"
-          />
-        </label>
+        <div className="mt-9 space-y-4">
+          <label className="block rounded-lg border border-gray-700 bg-gray-900/70 px-4 py-3 transition-colors focus-within:border-teal-500 focus-within:ring-1 focus-within:ring-teal-500">
+            <span className="block text-sm font-medium text-gray-400">
+              显示名称
+            </span>
+            <input
+              required
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              maxLength={80}
+              className="mt-1 w-full bg-transparent text-lg font-medium text-gray-50 outline-none placeholder:text-gray-600"
+            />
+          </label>
+
+          <label className="block rounded-lg border border-gray-800 bg-gray-950/60 px-4 py-3">
+            <span className="block text-sm font-medium text-gray-500">
+              账号邮箱
+            </span>
+            <input
+              readOnly
+              value={user.email}
+              className="mt-1 w-full cursor-not-allowed bg-transparent text-lg text-gray-500 outline-none"
+            />
+          </label>
+        </div>
+
+        <p className="mt-5 text-center text-sm text-gray-500">
+          个人资料会帮助你在工作台中更容易识别当前账户。
+        </p>
 
         {error && (
-          <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <p className="mt-5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {error}
           </p>
         )}
-        {saved && !error && (
-          <p className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs text-teal-100">
-            已保存
-          </p>
-        )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-md bg-teal-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? "保存中..." : "保存资料"}
-        </button>
+        <div className="mt-7 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-gray-700 px-6 py-2.5 text-sm font-semibold text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-900 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded-full bg-gray-50 px-6 py-2.5 text-sm font-semibold text-gray-950 transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? "保存中..." : "保存"}
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -206,7 +420,8 @@ function ProfileEditor({
 
 function AuthLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-black px-6">
+    <main className="rivalens-cosmos flex min-h-screen items-center justify-center px-6">
+      <CosmosBackdrop />
       <div className="w-full max-w-sm space-y-4">
         <div className="mx-auto h-10 w-10 animate-pulse rounded-[50px] bg-white/10" />
         <div className="mx-auto h-5 w-28 animate-pulse rounded-[50px] bg-white/10" />
@@ -217,10 +432,151 @@ function AuthLoading() {
   );
 }
 
+function CosmosBackdrop() {
+  return (
+    <div className="rivalens-cosmos-backdrop" aria-hidden="true">
+      <span className="rivalens-stars" />
+      <span className="rivalens-orbit rivalens-orbit-left" />
+      <span className="rivalens-orbit rivalens-orbit-right" />
+      <span className="rivalens-plane rivalens-plane-left" />
+      <span className="rivalens-plane rivalens-plane-right" />
+      <span className="rivalens-node rivalens-node-left" />
+      <span className="rivalens-node rivalens-node-right" />
+      <span className="rivalens-node rivalens-node-violet" />
+    </div>
+  );
+}
+
+function BrandLanding({
+  onEnterWorkspace,
+}: {
+  onEnterWorkspace: () => void;
+}) {
+  const scrollToWorkflow = () => {
+    document
+      .getElementById("landing-workflow")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  return (
+    <main className="rivalens-cosmos rivalens-landing-screen">
+      <CosmosBackdrop />
+      <header className="rivalens-public-nav">
+        <nav className="rivalens-public-links" aria-label="公开导航">
+          <button type="button" onClick={onEnterWorkspace}>
+            RIVALENS
+          </button>
+          <button type="button" onClick={scrollToWorkflow}>
+            分析流程
+          </button>
+        </nav>
+        <button
+          type="button"
+          onClick={onEnterWorkspace}
+          className="rivalens-wordmark"
+          aria-label="进入 Rivalens 登录页"
+        >
+          RIVALENS
+        </button>
+        <div className="rivalens-public-actions">
+          <Link href="/monitoring" className="rivalens-status-pill">
+            <span />
+            Monitoring
+          </Link>
+          <button
+            type="button"
+            onClick={onEnterWorkspace}
+            className="rivalens-top-action"
+          >
+            开启分析之旅
+          </button>
+        </div>
+      </header>
+
+      <section className="rivalens-hero-stage">
+        <p className="rivalens-eyebrow">
+          <span />
+          可追溯的多 Agent 竞品分析
+        </p>
+        <h1>
+          让每条竞品结论，
+          <br />
+          <strong>都能回到</strong>它的证据。
+        </h1>
+        <p className="rivalens-hero-copy">
+          登录后进入可追溯的多 Agent 竞品分析工作台，
+          <br />
+          完成方向确认、公开证据采集、分析与来源复核。
+        </p>
+        <div className="rivalens-hero-actions">
+          <button
+            type="button"
+            onClick={onEnterWorkspace}
+            className="rivalens-primary-action"
+          >
+            let's start
+            <span aria-hidden="true">→</span>
+          </button>
+          <button
+            type="button"
+            onClick={scrollToWorkflow}
+            className="rivalens-secondary-action"
+          >
+            了解我们
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={scrollToWorkflow}
+          className="rivalens-scroll-cue"
+        >
+          <span>SCROLL</span>
+          <span aria-hidden="true">⌄</span>
+        </button>
+      </section>
+
+      <section id="landing-workflow" className="rivalens-workflow-section">
+        <div className="rivalens-workflow-heading">
+          <p>TRACEABLE WORKFLOW</p>
+          <h2>从问题到结论，每一步都留下证据链。</h2>
+        </div>
+        <div className="rivalens-workflow-grid">
+          {WORKFLOW_STEPS.slice(0, 6).map((item) => (
+            <article key={item.step} className="rivalens-workflow-card">
+              <span>{item.step}</span>
+              <h3>{item.title}</h3>
+              <p>{item.desc}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ProofItem({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rivalens-proof-item">
+      <span aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 3.5v17M3.5 12h17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="12" cy="12" r="5.4" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      </span>
+      <div>
+        <h3>{title}</h3>
+        <p>{text}</p>
+      </div>
+    </div>
+  );
+}
+
 function AuthForm({
   onAuthenticated,
+  onBackHome,
 }: {
   onAuthenticated: () => Promise<void>;
+  onBackHome: () => void;
 }) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [displayName, setDisplayName] = useState("");
@@ -228,7 +584,6 @@ function AuthForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [showWorkflow, setShowWorkflow] = useState(false);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -271,56 +626,49 @@ function AuthForm({
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-black px-5 py-12">
-      {/* Purple block — floating on the right side */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -right-32 top-1/2 -translate-y-1/2 h-[500px] w-[500px] rotate-[-12deg] rounded-[32px] bg-[#5645d4] opacity-[0.12] blur-sm" />
-      </div>
-
-      <section className="relative w-full max-w-5xl overflow-hidden rounded-xl border border-white/10 bg-[#1d1d1f] shadow-[0_24px_48px_-8px_rgba(0,0,0,0.5)] lg:grid lg:grid-cols-[1.1fr_0.9fr]">
-        {/* Left: Brand panel */}
-        <div className="hidden flex-col justify-between bg-[#1d1d1f] p-12 lg:flex">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/50">
-              Rivalens
-            </p>
-            <h1 className="mt-8 max-w-md text-4xl font-semibold leading-tight text-white">
-              知己知彼，
-              <br />
-              决策有据。
-            </h1>
-            <p className="mt-5 max-w-md text-sm leading-7 text-white/40">
-              深度竞品洞察，让每一次商业决策都建立在扎实的事实之上。
-            </p>
-          </div>
-          <div className="space-y-3 text-sm text-white/30">
-            <p>覆盖功能、定价、市场定位等多维对比</p>
-            <p>每条结论绑定原始出处，一键回溯</p>
-            <p>AI 驱动的智能分析，人工可随时介入校准</p>
-          </div>
-
+    <main className="rivalens-cosmos rivalens-auth-screen">
+      <CosmosBackdrop />
+      <header className="rivalens-auth-nav">
+        <button type="button" onClick={onBackHome} className="rivalens-wordmark">
+          RIVALENS
+        </button>
+        <div className="rivalens-public-actions">
+          <Link href="/monitoring" className="rivalens-status-pill">
+            <span />
+            Monitoring
+          </Link>
           <button
             type="button"
-            onClick={() => setShowWorkflow(true)}
-            className="mt-10 inline-flex items-center gap-2 self-start rounded-[50px] border border-white/10 bg-white/[0.04] px-5 py-2.5 text-[14px] font-[480] leading-[1.40] -tracking-[0.10px] text-white/60 backdrop-blur-sm transition-all hover:border-[#5645d4]/40 hover:bg-white/[0.08] hover:text-white active:scale-[0.97]"
+            onClick={onBackHome}
+            className="rivalens-nav-text-action"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            了解我们
+            返回首页
           </button>
         </div>
+      </header>
 
-        {/* Right: Form */}
-        <div className="px-8 py-12 sm:px-12">
-          <div className="mb-8 lg:hidden">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/50">
-              Rivalens
+      <section className="rivalens-auth-card">
+        <aside className="rivalens-auth-brand-panel">
+          <div>
+            <p className="rivalens-panel-kicker">RIVALENS</p>
+            <h1>
+              知己知彼，
+              <br />
+              决策<strong>有据</strong>。
+            </h1>
+            <p>
+              RIVALENS 以可追溯的多 Agent 竞品分析，让每一次商业决策都建立在真实、可靠的证据之上。
             </p>
           </div>
+          <div className="rivalens-proof-list">
+            <ProofItem title="多源数据交叉验证" text="覆盖全网数据，交叉校验，确保真实可靠" />
+            <ProofItem title="智能分析驱动洞察" text="AI 多 Agent 协同分析，深挖关键机会与风险" />
+            <ProofItem title="可追溯的证据链" text="每项结论均可回溯来源，透明可信" />
+          </div>
+        </aside>
 
-          {/* Notion-style segmented tabs */}
-          <div className="mb-8 flex border-b border-white/10">
+        <div className="rivalens-auth-form-panel">
+          <div className="rivalens-auth-tabs">
             {([
               ["login", "登录"],
               ["register", "注册"],
@@ -329,30 +677,23 @@ function AuthForm({
                 key={item}
                 type="button"
                 onClick={() => switchMode(item)}
-                className={`relative px-1 pb-3 text-sm font-medium transition-colors ${
-                  mode === item
-                    ? "text-white"
-                    : "text-white/40 hover:text-white/60"
-                } ${item === "login" ? "mr-6" : ""}`}
+                className={mode === item ? "is-active" : ""}
               >
                 {label}
-                {mode === item && (
-                  <span className="absolute inset-x-0 bottom-0 h-0.5 bg-white" />
-                )}
               </button>
             ))}
           </div>
 
-          <h2 className="text-[22px] font-semibold text-white">
+          <h2>
             {mode === "login" ? "欢迎回来" : "创建分析账户"}
           </h2>
-          <p className="mt-2 text-sm text-white/40">
+          <p className="rivalens-auth-intro">
             {mode === "login"
               ? "使用邮箱继续进入竞品分析工作台。"
               : "只需邮箱、显示名和密码即可开始。"}
           </p>
 
-          <form className="mt-7 space-y-4" onSubmit={submit}>
+          <form className="rivalens-auth-form" onSubmit={submit}>
             {mode === "register" && (
               <AuthField
                 label="显示名"
@@ -385,36 +726,35 @@ function AuthForm({
             />
 
             {error && (
-              <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              <p className="rivalens-auth-error">
                 {error}
               </p>
             )}
 
-            <div className="pt-1">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full rounded-lg bg-[#5645d4] py-3 text-sm font-medium text-white transition-colors hover:bg-[#4534b3] disabled:cursor-not-allowed disabled:bg-white/10"
-              >
-                {submitting
-                  ? "处理中..."
-                  : mode === "login"
-                    ? "Start"
-                    : "创建账户"}
+            {mode === "login" && (
+              <div className="rivalens-auth-options">
+                <label>
+                  <input type="checkbox" defaultChecked />
+                  <span>记住我</span>
+                </label>
+                <button type="button">忘记密码?</button>
+              </div>
+            )}
+
+            <div>
+              <button type="submit" disabled={submitting} className="rivalens-primary-action">
+                {submitting ? "处理中..." : mode === "login" ? "开始探索" : "创建账户"}
+                <span aria-hidden="true">→</span>
               </button>
             </div>
           </form>
 
-          <p className="mt-6 text-center text-xs text-white/20">
-            登录即表示同意我们的服务条款和隐私政策
+          <p className="rivalens-auth-footnote">
+            登录即表示同意我们的 <button type="button">服务条款</button> 和{" "}
+            <button type="button">隐私政策</button>
           </p>
         </div>
       </section>
-
-      {/* Workflow Modal */}
-      {showWorkflow && (
-        <WorkflowModal onClose={() => setShowWorkflow(false)} />
-      )}
     </main>
   );
 }
@@ -508,10 +848,8 @@ function AuthField({
   minLength,
 }: AuthFieldProps) {
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-[13px] font-medium text-white/60">
-        {label}
-      </span>
+    <label className="rivalens-auth-field">
+      <span>{label}</span>
       <input
         required
         name={name}
@@ -521,7 +859,6 @@ function AuthField({
         autoComplete={autoComplete}
         placeholder={placeholder}
         minLength={minLength}
-        className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-[#5645d4] focus:ring-2 focus:ring-[#5645d4]/20"
       />
     </label>
   );

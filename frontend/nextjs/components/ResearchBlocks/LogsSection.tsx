@@ -26,12 +26,32 @@ const WEAK_SUPPORT_STATUSES = new Set([
 ]);
 
 const SUPPORT_STATUS_LABELS: Record<string, string> = {
-  supported: "Supported",
-  weak: "Weak",
-  unverifiable: "Unverifiable",
-  contradicted: "Contradicted",
-  unsupported: "Unsupported",
-  insufficient: "Insufficient",
+  supported: "证据充分",
+  weak: "证据较弱",
+  unverifiable: "暂无法核验",
+  contradicted: "证据冲突",
+  unsupported: "缺少支撑",
+  insufficient: "证据不足",
+  missing_evidence: "缺少来源",
+  low_confidence: "置信度偏低",
+};
+
+const CLAIM_DIMENSION_LABELS: Record<string, string> = {
+  strategic_positioning: "战略定位与差异化",
+  target_users_segments: "目标用户与细分场景",
+  core_product_supply: "核心产品与供给能力",
+  product_experience: "交互与产品体验",
+  ai_capability_application: "AI 能力与应用",
+  business_model_pricing: "商业模式与定价",
+  growth_channels: "增长渠道",
+  operations_fulfillment: "运营与交付",
+  baseline_trust_security_compliance: "基础信任、安全与合规",
+  user_reputation: "用户口碑",
+  moat_resources_team: "护城河、资源与团队",
+  market_trends_opportunities: "市场趋势与机会",
+  integrations_ecosystem: "集成与生态",
+  migration_switching_cost: "迁移与切换成本",
+  sla_reliability: "服务稳定性与可靠性",
 };
 
 const asArray = (value: unknown): GenericRecord[] =>
@@ -160,6 +180,47 @@ const metricAccentClassName = (index: number) => {
 
 const statusLabel = (status: string) =>
   SUPPORT_STATUS_LABELS[status] || status.replace(/_/g, " ");
+
+const friendlyClaimLabel = (claimId: string) => {
+  const numericId = claimId.match(/\d+/)?.[0];
+  return numericId ? `第 ${numericId} 条结论` : "待复核结论";
+};
+
+const evidenceSummaryLabel = (evidenceIds: string[]) => {
+  if (!evidenceIds.length) {
+    return "关联来源：暂未找到可核验来源";
+  }
+  return `关联来源：${evidenceIds.length} 条`;
+};
+
+const humanizeReviewNote = (value: unknown) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (
+    text ===
+    "High-risk claim should be tightened to the cited evidence wording; claim support does not trigger collection."
+  ) {
+    return "这条结论需要更贴近已引用来源的原文表述，避免超过证据能支持的范围。";
+  }
+  if (text === "No evidence id is attached.") {
+    return "这条结论还没有关联到可核验来源。";
+  }
+  const confidence = text.match(/^Confidence\s+(\d+)%\.$/i)?.[1];
+  if (confidence) {
+    return `这条结论的自动置信度为 ${confidence}%，建议进一步核验。`;
+  }
+  return text;
+};
+
+const humanizeClaimText = (value: unknown) => {
+  let text = truncateText(value, 150);
+  Object.entries(CLAIM_DIMENSION_LABELS).forEach(([id, label]) => {
+    text = text.replaceAll(id, label);
+  });
+  text = text.replace(/\bclaim_\d+\b/gi, "这条结论");
+  text = text.replace(/\bev_\d+\b/gi, "相关来源");
+  return text;
+};
 
 const buildTimeline = ({
   context,
@@ -413,11 +474,11 @@ const LogsSection = ({
           )}
         </section>
 
-        <section className="min-w-0 border-t border-gray-800 pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+        <section className="flex min-w-0 flex-col border-t border-gray-800 pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
           <div className="mb-3 flex items-center justify-between">
             <h4 className="text-sm font-semibold text-gray-100">Needs Review</h4>
             <span className="text-xs text-gray-500">
-              {summary.weakItems.length || 0} claims
+              {summary.weakItems.length || 0} 条需复核
             </span>
           </div>
 
@@ -440,8 +501,8 @@ const LogsSection = ({
               </p>
             </div>
           ) : (
-            <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
-              {summary.weakItems.slice(0, 6).map((item) => (
+            <div className="max-h-96 space-y-3 overflow-y-auto pr-1 lg:h-[560px] lg:max-h-[calc(100vh-220px)]">
+              {summary.weakItems.map((item) => (
                 <article
                   key={item.id || item.claimId || item.text}
                   className="rounded-md border border-amber-900/60 bg-amber-950/10 p-3"
@@ -452,16 +513,20 @@ const LogsSection = ({
                     </span>
                     {item.claimId && (
                       <span className="truncate rounded-sm bg-gray-950 px-2 py-0.5 text-[11px] text-gray-400">
-                        {item.claimId}
+                        {friendlyClaimLabel(item.claimId)}
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 text-sm leading-5 text-gray-100">{item.text}</p>
+                  <p className="mt-2 text-sm leading-5 text-gray-100">
+                    {humanizeClaimText(item.text)}
+                  </p>
                   {item.note && (
-                    <p className="mt-2 text-xs leading-5 text-gray-500">{item.note}</p>
+                    <p className="mt-2 text-xs leading-5 text-gray-500">
+                      {humanizeReviewNote(item.note)}
+                    </p>
                   )}
                   <p className="mt-2 text-[11px] leading-5 text-gray-500">
-                    Evidence ids: {item.evidenceIds.length ? item.evidenceIds.join(", ") : "none"}
+                    {evidenceSummaryLabel(item.evidenceIds)}
                   </p>
                 </article>
               ))}

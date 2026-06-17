@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from "react-hot-toast";
 import { markdownToHtml } from '../../helpers/markdownHelper';
+import { formatTraceTextForDisplay } from '../../helpers/displayText';
 import '../../styles/markdown.css';
 import Sources from './Sources';
 
@@ -41,7 +42,7 @@ export default function ChatResponse({ answer, metadata }: ChatResponseProps) {
 
     useEffect(() => {
       if (answer) {
-        markdownToHtml(answer).then((html) => setHtmlContent(html));
+        markdownToHtml(formatTraceTextForDisplay(answer)).then((html) => setHtmlContent(html));
       }
     }, [answer]);
     

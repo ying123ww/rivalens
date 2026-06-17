@@ -1013,24 +1013,20 @@ function IndustryDirectionDialog({
   const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>(
     directions.map((direction) => direction.direction_id)
   );
-  const finalDirectionIds = [
-    ...selectedDirectionIds,
-    ...customDirectionText
-      .replace(/^我还想重点看|^还想重点看|^重点看|^我还想看/, "")
-      .split(/\n|,|，|;|；|以及|还有|和|与|、/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .map((item, index) => customDirectionPreviewId(item, index)),
+  const selectedDirections = directions.filter((direction) =>
+    selectedDirectionIds.includes(direction.direction_id)
+  );
+  const customDirectionNames = parseDirectionPreviewNames(customDirectionText);
+  const finalDirectionNames = [
+    ...selectedDirections.map((direction) => direction.name),
+    ...customDirectionNames,
   ];
+  const selectedPlannerAddedDirections = plannerAddedDirections.filter(
+    (direction) => selectedDirectionIds.includes(direction.direction_id)
+  );
   const detectedCompetitors = plan.detected_competitors || [];
   const suggestedCompetitors = plan.suggested_competitors || [];
   const shouldSuggestCompetitors = detectedCompetitors.length < 2;
-  const requiredDirectionIds = visibleBaseDirections
-    .filter((direction) => direction.required)
-    .map((direction) => direction.direction_id);
-  const plannerAddedDirectionIds = plannerAddedDirections.map(
-    (direction) => direction.direction_id
-  );
 
   const toggleDirection = (directionId: string) => {
     const direction = directions.find(
@@ -1083,14 +1079,11 @@ function IndustryDirectionDialog({
                 </span>
               </label>
               <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
-                {direction.direction_id}
-              </span>
-              <span className="shrink-0 rounded-sm bg-gray-800 px-2 py-1 text-[11px] text-gray-300">
                 {direction.origin === "planner_suggested"
-                  ? "Planner补充"
+                  ? "Agent补充"
                   : direction.required
-                    ? "必选"
-                    : "可选"}
+                    ? "建议保留"
+                    : "可取消"}
               </span>
             </div>
             <p className="mt-2 text-sm leading-6 text-gray-300">
@@ -1139,21 +1132,41 @@ function IndustryDirectionDialog({
 
           <section className="rounded-md border border-gray-800 bg-gray-950/50 p-4">
             <h3 className="text-sm font-semibold text-gray-100">
-              已分析出的行业与 direction_id
+              已识别的行业与分析范围
             </h3>
-            <div className="mt-3 space-y-3 text-xs leading-5 text-gray-300">
+            <div className="mt-3 space-y-3 text-sm leading-6 text-gray-300">
               <p>
-                <span className="text-gray-500">industry:</span>{" "}
-                {plan.industry.industry_id} / {plan.detected_industry || plan.industry.name}
+                <span className="text-gray-500">行业：</span>
+                <span className="font-semibold text-gray-100">
+                  {plan.detected_industry || plan.industry.name}
+                </span>
               </p>
-              <p className="break-words font-mono">
-                <span className="font-sans text-gray-500">必备 direction_id:</span>{" "}
-                [{requiredDirectionIds.map((id) => `"${id}"`).join(", ")}]
+              <p>
+                <span className="text-gray-500">建议分析：</span>
+                系统将围绕 {visibleBaseDirections.length} 个行业基础方向展开
+                {selectedPlannerAddedDirections.length > 0
+                  ? `，并加入 ${selectedPlannerAddedDirections.length} 个 Agent 补充方向`
+                  : "，当前没有额外补充方向"}
+                。
               </p>
-              <p className="break-words font-mono">
-                <span className="font-sans text-gray-500">Agent 补充 direction_id:</span>{" "}
-                [{plannerAddedDirectionIds.map((id) => `"${id}"`).join(", ")}]
-              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {visibleBaseDirections.map((direction) => (
+                  <span
+                    key={direction.direction_id}
+                    className="rounded-sm bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-200"
+                  >
+                    {direction.name}
+                  </span>
+                ))}
+                {selectedPlannerAddedDirections.map((direction) => (
+                  <span
+                    key={direction.direction_id}
+                    className="rounded-sm bg-teal-500/10 px-2.5 py-1 text-xs font-medium text-teal-100"
+                  >
+                    {direction.name}
+                  </span>
+                ))}
+              </div>
             </div>
           </section>
 
@@ -1183,7 +1196,7 @@ function IndustryDirectionDialog({
           {showCustomDirections && (
             <label className="mt-4 block">
               <span className="text-sm font-medium text-gray-200">
-                还需要增加 direction_id 吗？需要的话直接输入方向即可。
+                还需要增加分析方向吗？需要的话直接输入想重点看的内容即可。
               </span>
               <textarea
                 value={customDirectionText}
@@ -1194,13 +1207,20 @@ function IndustryDirectionDialog({
             </label>
           )}
 
-          <div className="mt-4 rounded-md border border-gray-800 bg-gray-950/50 p-3">
-            <p className="text-xs uppercase tracking-[0.16em] text-gray-500">
-              final_directions
+          <div className="mt-4 rounded-md border border-teal-500/20 bg-teal-500/10 p-4">
+            <p className="text-sm font-semibold text-teal-100">
+              本次确认后将分析 {finalDirectionNames.length} 个方向
             </p>
-            <p className="mt-2 break-words font-mono text-xs text-gray-300">
-              [{finalDirectionIds.map((id) => `"${id}"`).join(", ")}]
-            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {finalDirectionNames.map((name, index) => (
+                <span
+                  key={`${name}-${index}`}
+                  className="rounded-sm bg-gray-950/60 px-2.5 py-1 text-xs text-gray-200"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1235,20 +1255,10 @@ function IndustryDirectionDialog({
   );
 }
 
-function customDirectionPreviewId(value: string, index: number) {
-  const text = value.trim().replace(/[。.]/g, "");
-  const lowered = text.toLowerCase();
-  if (lowered.includes("ai") || text.includes("人工智能")) {
-    return "ai_capability";
-  }
-  if (text.includes("私有化") || text.includes("私有部署")) {
-    return "private_deployment";
-  }
-  const slug = text
-    .split("")
-    .map((character) => (/^[a-z0-9]$/i.test(character) ? character.toLowerCase() : "_"))
-    .join("")
-    .replace(/^_+|_+$/g, "")
-    .replace(/_+/g, "_");
-  return slug || `user_direction_${index + 1}`;
+function parseDirectionPreviewNames(value: string) {
+  return value
+    .replace(/^我还想重点看|^还想重点看|^重点看|^我还想看/, "")
+    .split(/\n|,|，|;|；|以及|还有|和|与|、/)
+    .map((item) => item.trim().replace(/[。.]/g, ""))
+    .filter(Boolean);
 }
