@@ -623,6 +623,8 @@ RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
 
 系统处理竞品研究查询、公开网页证据和生成的分析内容。演示、测试和截图时请使用非敏感的竞品场景。如启用追踪或第三方模型服务，需要根据部署场景确认数据留存和审计要求。
 
+数据采集功能应由使用者在授权范围内使用，并遵守目标网站的 `robots.txt`、服务条款及适用法律法规。
+
 认证使用 scrypt 密码哈希加每用户独立盐值。JWT access token 具有可配置的 TTL，由 Next.js 前端存储在 HTTP-only cookie 中。带 `user_id` 的运行仅对其所有者或管理员可见。
 
 ## 许可证
