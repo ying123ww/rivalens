@@ -40,7 +40,7 @@ Rivalens 是一个基于 LangGraph 的可溯源多智能体竞品分析系统。
 - **收集质量闭环** — `EvidenceQualityReviewer` 逐源接受/拒绝证据，`CoverageReviewer` 追踪成功标准覆盖缺口，跟进分支解决覆盖不足
 - **确定性知识提取** — 基于规则的事实归一化与原子化（如定价证据拆分为免费版、套餐价、按量计费等），再交由 LLM 分析
 - **论断支撑门禁** — `ClaimSupportReviewer` 在写作前验证引用支撑；无支撑的论断可修订一次或直接抑制
-- **行业方向规划** — GICS 行业匹配配合 L0/L1/L2 分层模板，模糊行业自动回退至 LLM 判定
+- **行业方向规划** — GICS 行业匹配配合 L0/L1/L2 分层模板；竞品提取不依赖已选行业模板；覆盖半导体、GPU 与 AI 芯片；无行业信号时显式返回“待确认”
 - **多检索器搜索** — 每个收集任务可配置检索器链（Tavily、UniFuncs DeepSearch、Serper、Exa、DuckDuckGo 等）
 - **PostgreSQL + pgvector** — 用户认证、会话持久化、溯源追踪及证据嵌入向量 RAG
 - **结构化智能体消息** — 经验证的 JSON 消息（`research_plan`、`evidence`、`schema`、`analysis`、`claim_support`、`report`、`publish`）取代自由文本
@@ -218,6 +218,26 @@ rivalens/
 | **追踪** | LangSmith |
 | **容器化** | Docker, Docker Compose |
 
+## 前端体验
+
+Next.js 应用提供三个主要用户入口：
+
+| 路由 | 用途 |
+|------|------|
+| `/` | 品牌入口、登录注册、竞品输入、行业方向确认与分析工作台 |
+| `/research/{id}` | 历史报告查看、基于来源的报告问答、分享及返回工作台 |
+| `/monitoring` | 跨运行记录的监控与溯源看板 |
+
+Monitoring 看板直接使用报告接口返回的结构化上下文，提供以下能力：
+
+- 展示证据、结论、一手来源、支撑复核、置信度和 Agent 流水线进度；
+- 与上一轮运行对比，识别新增来源、新增结论、支撑状态变化和置信度波动；
+- 通过关键词、复核状态和分析维度筛选 Claim Explorer 结论库；
+- 按“竞品 → 分析维度 → 结论 → 来源 URL”查看证据关系；
+- 完整展示待复核结论，并使用面向用户的自然语言标签；底层追踪数据仍保留原始结论与证据标识。
+
+登录用户可通过 `/api/auth/me` 修改显示名称。个人资料弹窗还支持不超过 3 MB 的可选头像，头像按用户保存在浏览器 `localStorage` 中并显示于工作台顶部，不会上传到后端。
+
 ## 快速开始
 
 ### 环境要求
@@ -351,7 +371,22 @@ python -m pytest tests/ -v
 
 ## API 接口
 
-所有路由定义在 `backend/server/app.py`。后端使用 FastAPI 搭配 JWT Bearer Token 认证。Next.js 前端将 access token 存储在 HTTP-only cookie 中。
+后端路由定义在 `backend/server/app.py`。后端使用 FastAPI 搭配 JWT Bearer Token 认证。Next.js 应用通过 `frontend/nextjs/app/api` 提供同源 Route Handler，并将 access token 存储在 HTTP-only cookie 中。
+
+### Next.js Route Handler
+
+| 方法 | 前端路径 | 代理的后端能力 |
+|------|----------|----------------|
+| POST | `/api/auth/register` | 注册用户并建立浏览器登录会话 |
+| POST | `/api/auth/login` | 完成认证并设置 access-token cookie |
+| POST | `/api/auth/logout` | 清除浏览器登录会话 |
+| GET、PATCH | `/api/auth/me` | 获取或更新当前用户资料 |
+| GET、POST | `/api/reports` | 获取报告列表或创建/更新报告 |
+| GET、PUT、DELETE | `/api/reports/{id}` | 获取、更新或删除单个报告 |
+| GET | `/api/reports/{id}/status` | 查询报告生成状态 |
+| GET、POST | `/api/reports/{id}/chat` | 获取或追加报告问答消息 |
+| POST | `/api/industry-directions` | 预览识别出的行业与分析方向 |
+| POST | `/api/chat` | 提交基于报告与证据的问答请求 |
 
 ### 认证
 
@@ -418,7 +453,7 @@ python -m pytest tests/ -v
 
 ### 智能体角色
 
-**scope_planner**（PlanningAgent）端到端负责规划阶段：归一化竞品输入，使用 GICS 行业匹配（L0/L1/L2 分层模板）选择行业，组合确认的分析方向，并向 `source_collection` 发送 `research_plan` 消息。当最高规则得分低于配置阈值时，自动回退至 `INDUSTRY_FALLBACK_LLM` 配置的 LLM。
+**scope_planner**（PlanningAgent）端到端负责规划阶段：归一化竞品输入，从查询文本中独立提取明确的竞品组合，使用 GICS 行业匹配（L0/L1/L2 分层模板）选择行业，组合确认的分析方向，并向 `source_collection` 发送 `research_plan` 消息。完全没有确定性行业信号时，系统返回带通用 L0 分析方向的“待确认”计划，不再继承首个行业模板。
 
 **source_collection**（CollectionAgent）将确认的分析维度展开为"竞品 × 维度"收集分支，通过 `ResearchEngineEvidenceCollector` 并发执行。为每个选定竞品创建 `competitor_profile` 任务，确保报告信息卡片有明确的公开资料证据支撑。
 

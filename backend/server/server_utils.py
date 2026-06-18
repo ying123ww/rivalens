@@ -605,6 +605,12 @@ async def handle_start_command(
                 ),
             },
         })
+        # 先保存正文和结构化上下文，避免文件导出卡住时前端一直停留在 running。
+        await upsert_run_report(
+            "completed",
+            report=report,
+            structured_response=report_payload if isinstance(report_payload, dict) else None,
+        )
         # Send predicted artifact paths immediately so the frontend
         # renders Print/View/Download buttons without waiting for
         # file generation (PDF rendering is slow).
@@ -617,19 +623,41 @@ async def handle_start_command(
             "research_id": research_id,
         }
         await send_file_paths(logs_handler, predicted_paths)
-        file_paths = await generate_report_files(
-            report,
-            research_id,
-            quote_paths=True,
-            include_legacy_md_key=True,
-        )
-        file_paths["research_id"] = research_id
-        await upsert_run_report(
-            "completed",
-            report=report,
-            artifacts=file_paths,
-            structured_response=report_payload if isinstance(report_payload, dict) else None,
-        )
+        try:
+            file_paths = await generate_report_files(
+                report,
+                research_id,
+                quote_paths=True,
+                include_legacy_md_key=True,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Report %s was persisted, but artifact export failed",
+                research_id,
+            )
+            await logs_handler.send_json({
+                "type": "logs",
+                "content": "artifact_export_failed",
+                "output": f"Report is available, but some download files failed: {exc}",
+                "metadata": {
+                    "research_id": research_id,
+                    "status": "completed",
+                },
+            })
+            await logs_handler.flush_log_batch()
+            await upsert_run_report(
+                "completed",
+                report=report,
+                structured_response=report_payload if isinstance(report_payload, dict) else None,
+            )
+        else:
+            file_paths["research_id"] = research_id
+            await upsert_run_report(
+                "completed",
+                report=report,
+                artifacts=file_paths,
+                structured_response=report_payload if isinstance(report_payload, dict) else None,
+            )
     except Exception as exc:
         await logs_handler.send_json({
             "type": "logs",

@@ -10,7 +10,10 @@ from rivalens.agents.industry_llm_fallback import (
     IndustryLLMFallback,
     normalize_fallback_directions,
 )
-from rivalens.industry_templates import INDUSTRY_DIRECTION_TEMPLATES
+from rivalens.industry_templates import (
+    INDUSTRY_DIRECTION_TEMPLATES,
+    L0_COMMON_DIRECTIONS,
+)
 from rivalens.schema import (
     AnalysisDirection,
     Competitor,
@@ -95,6 +98,26 @@ def validate_query_no_direction_limits(
 
 DEFAULT_SOURCE_HINTS = ["official_site", "pricing_page", "docs", "news", "review"]
 USER_DIRECTION_SOURCE_HINTS = ["official_site", "news", "review"]
+UNCONFIRMED_INDUSTRY_ID = "industry_unconfirmed"
+
+_QUERY_COMPETITOR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?:分析|对比|比较|研究)\s*"
+        r"(?P<left>[A-Za-z0-9\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff .&+_-]{0,49}?)"
+        r"\s*(?:和|与|、|vs\.?|versus)\s*"
+        r"(?P<right>[A-Za-z0-9\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff .&+_-]{0,49}?)"
+        r"(?=\s*(?:的|之间|竞争|竞品|对比|比较|分析|$))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:compare|analyze|analysis of)\s+"
+        r"(?P<left>[A-Za-z0-9][A-Za-z0-9 .&+_-]{0,49}?)"
+        r"\s+(?:and|vs\.?|versus)\s+"
+        r"(?P<right>[A-Za-z0-9][A-Za-z0-9 .&+_-]{0,49}?)"
+        r"(?=\s*(?:competitive|competition|analysis|$))",
+        re.IGNORECASE,
+    ),
+)
 
 PLANNER_COVERAGE_DIRECTIONS: tuple[dict[str, Any], ...] = (
     {
@@ -176,6 +199,7 @@ class IndustryDirectionTemplate:
     display_name: str
     aliases: tuple[str, ...]
     known_competitors: tuple[str, ...]
+    competitor_aliases: tuple[tuple[str, tuple[str, ...]], ...]
     gics_sector: str
     archetypes: tuple[str, ...]
     regulated_domains: tuple[str, ...]
@@ -195,6 +219,16 @@ def _load_templates(
                 aliases=tuple(str(item) for item in raw.get("aliases", [])),
                 known_competitors=tuple(
                     str(item) for item in raw.get("known_competitors", [])
+                ),
+                competitor_aliases=tuple(
+                    (
+                        str(competitor),
+                        tuple(str(alias) for alias in aliases),
+                    )
+                    for competitor, aliases in raw.get(
+                        "competitor_aliases",
+                        {},
+                    ).items()
                 ),
                 gics_sector=str(raw.get("gics_sector", "")),
                 archetypes=tuple(str(item) for item in raw.get("archetypes", [])),
@@ -251,6 +285,11 @@ class IndustryDirectionSkill:
         user_confirmed: bool = False,
     ) -> IndustryDirectionPlan:
         candidate_industries = self.rank_industries(query, competitors or [])
+        selection_method = (
+            "rule_unconfirmed"
+            if candidate_industries[0]["industry_id"] == UNCONFIRMED_INDUSTRY_ID
+            else "rule_facet_template"
+        )
         return self._build_template_plan(
             query=query,
             competitors=competitors or [],
@@ -258,7 +297,7 @@ class IndustryDirectionSkill:
             selected_direction_ids=selected_direction_ids,
             user_confirmed=user_confirmed,
             candidate_industries=candidate_industries,
-            selection_method="rule_facet_template",
+            selection_method=selection_method,
         )
 
     async def build_plan_with_fallback(
@@ -270,6 +309,17 @@ class IndustryDirectionSkill:
         user_confirmed: bool = False,
     ) -> IndustryDirectionPlan:
         candidate_industries = self.rank_industries(query, competitors or [])
+        if candidate_industries[0]["industry_id"] == UNCONFIRMED_INDUSTRY_ID:
+            return self._build_template_plan(
+                query=query,
+                competitors=competitors or [],
+                user_directions=user_directions or [],
+                selected_direction_ids=selected_direction_ids,
+                user_confirmed=user_confirmed,
+                candidate_industries=candidate_industries,
+                selection_method="rule_unconfirmed",
+                fallback_reason="No deterministic industry signals were found.",
+            )
         top_confidence = (
             candidate_industries[0].get("confidence", 0)
             if candidate_industries
@@ -347,11 +397,16 @@ class IndustryDirectionSkill:
         fallback_model: str = "",
     ) -> IndustryDirectionPlan:
         selected = candidate_industries[0]
-        template = self._template_for(selected["industry_id"]) or self.templates[0]
+        template = (
+            self._unconfirmed_template()
+            if selected["industry_id"] == UNCONFIRMED_INDUSTRY_ID
+            else self._template_for(selected["industry_id"])
+        )
+        if template is None:
+            raise ValueError(f"Unknown industry template: {selected['industry_id']}")
         detected_competitors = self._detected_competitors(
             query,
             competitors or [],
-            template,
         )
         suggested_competitors = self._suggested_competitors(
             template,
@@ -531,9 +586,20 @@ class IndustryDirectionSkill:
         for template in self.templates:
             signals = [
                 signal
-                for signal in (*template.aliases, *template.known_competitors)
-                if signal.lower() in haystack
+                for signal in template.aliases
+                if self._contains_signal(haystack, signal)
             ]
+            for _, aliases in self._competitor_alias_groups(template):
+                matched_alias = next(
+                    (
+                        alias
+                        for alias in aliases
+                        if self._contains_signal(haystack, alias)
+                    ),
+                    None,
+                )
+                if matched_alias:
+                    signals.append(matched_alias)
             confidence = min(0.35 + 0.1 * len(signals), 0.95) if signals else 0.2
             candidates.append(
                 {
@@ -543,6 +609,16 @@ class IndustryDirectionSkill:
                     "signals": signals[:8],
                 }
             )
+
+        if not any(candidate.get("signals") for candidate in candidates):
+            return [
+                {
+                    "industry_id": UNCONFIRMED_INDUSTRY_ID,
+                    "name": "待确认",
+                    "confidence": 0.0,
+                    "signals": [],
+                }
+            ]
 
         return sorted(
             candidates,
@@ -555,6 +631,32 @@ class IndustryDirectionSkill:
             if template.industry == industry_id:
                 return template
         return None
+
+    def _unconfirmed_template(self) -> IndustryDirectionTemplate:
+        return IndustryDirectionTemplate(
+            industry=UNCONFIRMED_INDUSTRY_ID,
+            display_name="待确认",
+            aliases=(),
+            known_competitors=(),
+            competitor_aliases=(),
+            gics_sector="",
+            archetypes=(),
+            regulated_domains=(),
+            direction_model="generic_l0",
+            default_directions=tuple(
+                {
+                    "direction_id": str(direction["direction_id"]),
+                    "name": str(direction["name"]),
+                    "reason": str(direction.get("reason", "")),
+                    "source_hints": [
+                        str(source_hint)
+                        for source_hint in direction.get("source_hints", [])
+                    ],
+                    "required": bool(direction.get("required", True)),
+                }
+                for direction in L0_COMMON_DIRECTIONS
+            ),
+        )
 
     def _direction_composition(
         self,
@@ -576,7 +678,6 @@ class IndustryDirectionSkill:
         self,
         query: str,
         competitors: list[Competitor] | list[dict[str, Any]],
-        template: IndustryDirectionTemplate,
     ) -> list[str]:
         detected = []
         for competitor in competitors:
@@ -587,11 +688,79 @@ class IndustryDirectionSkill:
             if name:
                 detected.append(name)
 
+        detected.extend(self._query_competitor_names(query))
         haystack = query.lower()
-        for competitor in template.known_competitors:
-            if competitor.lower() in haystack:
-                detected.append(competitor)
-        return self._dedupe_text(detected)
+        for template in self.templates:
+            for canonical_name, aliases in self._competitor_alias_groups(template):
+                if any(self._contains_signal(haystack, alias) for alias in aliases):
+                    detected.append(canonical_name)
+        return self._dedupe_competitors(detected)
+
+    def _query_competitor_names(self, query: str) -> list[str]:
+        for pattern in _QUERY_COMPETITOR_PATTERNS:
+            match = pattern.search(query)
+            if not match:
+                continue
+            return [
+                cleaned
+                for value in (match.group("left"), match.group("right"))
+                if (cleaned := self._clean_competitor_name(value))
+            ]
+        return []
+
+    def _clean_competitor_name(self, value: str) -> str:
+        return value.strip(" \t\r\n\"'“”‘’()（）[]【】,，.。:：;；")
+
+    def _competitor_alias_groups(
+        self,
+        template: IndustryDirectionTemplate,
+    ) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        configured = dict(template.competitor_aliases)
+        return tuple(
+            (
+                competitor,
+                self._dedupe_aliases(
+                    (competitor, *configured.get(competitor, ())),
+                ),
+            )
+            for competitor in template.known_competitors
+        )
+
+    def _dedupe_aliases(self, aliases: tuple[str, ...]) -> tuple[str, ...]:
+        deduped: dict[str, str] = {}
+        for alias in aliases:
+            cleaned = alias.strip()
+            if cleaned:
+                deduped[cleaned.lower()] = cleaned
+        return tuple(deduped.values())
+
+    def _contains_signal(self, haystack: str, signal: str) -> bool:
+        normalized = signal.strip().lower()
+        if not normalized:
+            return False
+        if re.fullmatch(r"[a-z0-9][a-z0-9 ._+-]*", normalized):
+            pattern = rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])"
+            return re.search(pattern, haystack) is not None
+        return normalized in haystack
+
+    def _dedupe_competitors(self, values: list[str]) -> list[str]:
+        alias_to_canonical: dict[str, str] = {}
+        canonical_names: dict[str, str] = {}
+        for template in self.templates:
+            for canonical_name, aliases in self._competitor_alias_groups(template):
+                canonical_key = canonical_name.lower()
+                canonical_names[canonical_key] = canonical_name
+                for alias in aliases:
+                    alias_to_canonical[alias.lower()] = canonical_key
+
+        deduped: dict[str, str] = {}
+        for value in values:
+            cleaned = value.strip()
+            if not cleaned:
+                continue
+            key = alias_to_canonical.get(cleaned.lower(), cleaned.lower())
+            deduped.setdefault(key, canonical_names.get(key, cleaned))
+        return list(deduped.values())
 
     def _suggested_competitors(
         self,
