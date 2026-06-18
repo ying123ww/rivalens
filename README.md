@@ -623,6 +623,8 @@ Default configuration documents the structure needed to run the project. Product
 
 The system processes competitor research queries, public web evidence, and generated analysis. Demonstrations, tests, and screenshots should use non-confidential competitor scenarios. If tracing or third-party model services are enabled, review data retention and audit requirements for your deployment context.
 
+Data collection features must be used within the user's authorized scope and in compliance with target websites' `robots.txt` files, terms of service, and applicable laws and regulations.
+
 Authentication uses scrypt password hashing with unique per-user salts. JWT access tokens have configurable TTL and are stored in HTTP-only cookies by the Next.js frontend. Runs with a `user_id` are visible only to their owner or an admin.
 
 ## License
