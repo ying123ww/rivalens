@@ -106,6 +106,19 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
   const groupedData = preprocessOrderedData(orderedData);
   const pathData = groupedData.find(data => data.type === 'path');
   const initialQuestion = groupedData.find(data => data.type === 'question');
+  const reportRecord = reportContext as GenericRecord | null | undefined;
+  const storedArtifacts =
+    reportRecord?.report_artifacts && typeof reportRecord.report_artifacts === 'object'
+      ? reportRecord.report_artifacts
+      : reportRecord?.artifacts && typeof reportRecord.artifacts === 'object'
+        ? reportRecord.artifacts
+        : {};
+  const accessData = pathData?.output || storedArtifacts;
+  const hasAccessData = Boolean(
+    accessData &&
+      typeof accessData === 'object' &&
+      ['pdf', 'docx', 'html', 'md', 'markdown'].some((key) => accessData[key])
+  );
 
   const chatComponents = groupedData
     .filter(data => {
@@ -161,8 +174,15 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
       )}
       {sourceComponents}
       {imageComponents}
-      {pathData && <AccessReport accessData={pathData.output} report={answer} chatBoxSettings={chatBoxSettings} onShareClick={onShareClick} />}
+      {hasAccessData && (
+        <AccessReport
+          accessData={accessData}
+          report={answer}
+          chatBoxSettings={chatBoxSettings}
+          onShareClick={onShareClick}
+        />
+      )}
       {chatComponents}
     </>
   );
-}; 
+};

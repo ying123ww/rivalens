@@ -667,6 +667,7 @@ class IndustryProfile(TypedDict, total=False):
     display_name: str
     aliases: list[str]
     known_competitors: list[str]
+    competitor_aliases: dict[str, list[str]]
     default_directions: list[IndustryProfileDirection]
 
 
@@ -906,6 +907,7 @@ class IndustryProfilePayload(StrictPayloadModel):
     display_name: str
     aliases: list[str] = Field(default_factory=list)
     known_competitors: list[str] = Field(default_factory=list)
+    competitor_aliases: dict[str, list[str]] = Field(default_factory=dict)
     default_directions: list[IndustryProfileDirectionPayload] = Field(
         default_factory=list,
     )

@@ -40,7 +40,7 @@ The main package `rivalens` is organized into these domains:
 - **Collection quality loop** — `EvidenceQualityReviewer` accepts/rejects per-source, `CoverageReviewer` tracks success-criteria gaps, follow-up branches resolve coverage gaps
 - **Deterministic knowledge extraction** — rule-based fact normalization and atomization (pricing split into free-tier, plan-price, usage-based-billing, etc.) before LLM analysis
 - **Claim support gate** — `ClaimSupportReviewer` validates citation support before writing; unsupported claims are revised once or suppressed
-- **Industry direction planning** — GICS sector matching with L0/L1/L2 facet templates, LLM fallback for ambiguous industries
+- **Industry direction planning** — GICS sector matching with L0/L1/L2 facet templates, explicit competitor extraction independent of the selected template, semiconductor/GPU/AI-chip coverage, and an unconfirmed state when no industry signal is present
 - **Multi-retriever search** — configurable retriever chain (Tavily, UniFuncs DeepSearch, Serper, Exa, DuckDuckGo, and more) per collection task
 - **PostgreSQL + pgvector** — user auth, session persistence, traceability provenance, and evidence embedding RAG
 - **Structured agent messages** — validated JSON handoffs (`research_plan`, `evidence`, `schema`, `analysis`, `claim_support`, `report`, `publish`) replace free-form text between agents
@@ -218,6 +218,26 @@ rivalens/
 | **Tracing** | LangSmith |
 | **Containerization** | Docker, Docker Compose |
 
+## Frontend Experience
+
+The Next.js application exposes three primary user-facing routes:
+
+| Route | Purpose |
+|-------|---------|
+| `/` | Brand entry, authentication, competitor input, industry-direction confirmation, and research workspace |
+| `/research/{id}` | Historical report review, source-aware report chat, sharing, and return-to-workspace action |
+| `/monitoring` | Cross-run monitoring and traceability dashboard |
+
+The monitoring dashboard uses the structured context returned by the report APIs to provide:
+
+- run-level metrics for evidence, claims, primary sources, support review, confidence, and Agent pipeline progress;
+- comparison against the previous run, including new sources, new claims, changed support status, and confidence movement;
+- a searchable Claim Explorer filtered by keyword, review status, and analysis dimension;
+- an evidence relationship view from competitor and analysis dimension to claim and source URL;
+- a complete review queue with user-facing labels while stored trace data retains the original claim and evidence identifiers.
+
+Authenticated users can edit their display name through `/api/auth/me`. The profile dialog also supports an optional avatar image up to 3 MB. Avatar data is stored per user in browser `localStorage` and displayed in the workspace header; it is not uploaded to the backend.
+
 ## Getting Started
 
 ### Prerequisites
@@ -351,7 +371,22 @@ python -m pytest tests/ -v
 
 ## API
 
-All routes are defined in `backend/server/app.py`. The backend uses FastAPI with JWT Bearer token authentication. The Next.js frontend stores the access token in an HTTP-only cookie.
+Backend routes are defined in `backend/server/app.py`. The backend uses FastAPI with JWT Bearer token authentication. The Next.js application exposes same-origin route handlers under `frontend/nextjs/app/api` and stores the access token in an HTTP-only cookie.
+
+### Next.js Route Handlers
+
+| Method | Frontend path | Proxied backend capability |
+|--------|---------------|----------------------------|
+| POST | `/api/auth/register` | Register a user and create the authenticated browser session |
+| POST | `/api/auth/login` | Authenticate and set the access-token cookie |
+| POST | `/api/auth/logout` | Clear the browser session |
+| GET, PATCH | `/api/auth/me` | Read or update the current user profile |
+| GET, POST | `/api/reports` | List reports or create/update a report |
+| GET, PUT, DELETE | `/api/reports/{id}` | Read, update, or delete one report |
+| GET | `/api/reports/{id}/status` | Poll report generation status |
+| GET, POST | `/api/reports/{id}/chat` | Read or append report chat messages |
+| POST | `/api/industry-directions` | Preview the detected industry and analysis directions |
+| POST | `/api/chat` | Submit report-grounded chat requests |
 
 ### Authentication
 
@@ -418,7 +453,7 @@ All routes are defined in `backend/server/app.py`. The backend uses FastAPI with
 
 ### Agent Roles
 
-**scope_planner** (PlanningAgent) owns planning end-to-end: normalizes competitor inputs, selects an industry using GICS sector matching with L0/L1/L2 facet templates, composes confirmed analysis directions, and emits a `research_plan` handoff to `source_collection`. When the top rule score is below the configured threshold, it falls back to the LLM configured by `INDUSTRY_FALLBACK_LLM`.
+**scope_planner** (PlanningAgent) owns planning end-to-end: normalizes competitor inputs, extracts explicit competitor pairs from the query independently of industry selection, selects an industry using GICS sector matching with L0/L1/L2 facet templates, composes confirmed analysis directions, and emits a `research_plan` handoff to `source_collection`. Queries with no deterministic industry signal return an explicit unconfirmed industry plan with generic L0 directions instead of inheriting the first configured industry template.
 
 **source_collection** (CollectionAgent) expands confirmed analysis dimensions into competitor × dimension collection branches and runs them concurrently through `ResearchEngineEvidenceCollector`. It creates a `competitor_profile` task for each selected competitor so report information cards are backed by explicit public profile evidence.
 
