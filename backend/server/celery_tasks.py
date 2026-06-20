@@ -4,10 +4,12 @@ import asyncio
 import logging
 import time
 from typing import Any
+from uuid import uuid4
 
 from celery.exceptions import SoftTimeLimitExceeded
 
 from .celery_app import celery_app
+from .celery_task_lock import ReportTaskLock
 from .evidence_vector_store import EvidenceVectorStore
 from .report_store import ReportStore
 from .rivalens_runner import set_trace_store
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _report_store = ReportStore()
 _evidence_vector_store = EvidenceVectorStore()
+_report_task_lock = ReportTaskLock()
 set_trace_store(TraceStore())
 
 
@@ -257,6 +260,19 @@ async def _generate_report_task(
     research_id: str,
     celery_task_id: str,
 ) -> dict[str, Any]:
+    existing = await _report_store.get_report(research_id) or {}
+    if existing.get("status") == "completed":
+        logger.info(
+            "Skipping already completed report generation task %s for %s",
+            celery_task_id,
+            research_id,
+        )
+        return {
+            "research_id": research_id,
+            "status": "already_completed",
+            "celery_task_id": celery_task_id,
+        }
+
     await _upsert_report_generation_record(
         research_id,
         research_request,
@@ -291,12 +307,44 @@ def generate_report_task(
     research_request: dict[str, Any],
     research_id: str,
 ) -> dict[str, Any]:
+    celery_task_id = str(self.request.id or uuid4())
+    try:
+        acquired, lock_owner_task_id = _report_task_lock.try_acquire(
+            research_id,
+            celery_task_id,
+        )
+    except Exception as exc:
+        asyncio.run(
+            _upsert_report_generation_record(
+                research_id,
+                research_request,
+                "failed",
+                error=str(exc),
+                celery_task_id=celery_task_id,
+            )
+        )
+        raise
+
+    if not acquired:
+        logger.info(
+            "Skipping duplicate report generation task %s for %s; lock owner is %s",
+            celery_task_id,
+            research_id,
+            lock_owner_task_id,
+        )
+        return {
+            "research_id": research_id,
+            "status": "duplicate_skipped",
+            "celery_task_id": celery_task_id,
+            "lock_owner_task_id": lock_owner_task_id or "",
+        }
+
     try:
         return asyncio.run(
             _generate_report_task(
                 research_request,
                 research_id,
-                str(self.request.id or ""),
+                celery_task_id,
             )
         )
     except SoftTimeLimitExceeded:
@@ -306,7 +354,16 @@ def generate_report_task(
                 research_request,
                 "failed",
                 error="Celery task exceeded soft time limit",
-                celery_task_id=str(self.request.id or ""),
+                celery_task_id=celery_task_id,
             )
         )
         raise
+    finally:
+        try:
+            _report_task_lock.release(research_id, celery_task_id)
+        except Exception:
+            logger.exception(
+                "Failed to release report generation lock for %s owned by %s",
+                research_id,
+                celery_task_id,
+            )

@@ -322,6 +322,11 @@ docker compose up -d
 - `postgres` PostgreSQL 16 + pgvector，端口 5433
 - `redis` Redis 7，端口 6380
 
+Celery 报告任务使用 `research_id` 级 Redis 幂等锁，防止多个 Worker
+同时生成和写入同一报告。锁默认在任务硬超时后额外保留 300 秒，可通过
+`RIVALENS_CELERY_REPORT_LOCK_TTL_SECONDS` 调整；释放锁时会校验 Celery
+任务 ID，旧任务不能删除新任务持有的锁。
+
 **仅后端（开发模式）：**
 
 ```bash
