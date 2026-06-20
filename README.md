@@ -322,6 +322,12 @@ This starts five services:
 - `postgres` PostgreSQL 16 + pgvector on port 5433
 - `redis` Redis 7 on port 6380
 
+Celery report jobs use a Redis idempotency lock scoped by `research_id`, so
+multiple workers cannot generate and persist the same report concurrently.
+The lock TTL defaults to the Celery hard time limit plus 300 seconds and can be
+overridden with `RIVALENS_CELERY_REPORT_LOCK_TTL_SECONDS`. Lock release verifies
+the Celery task ID, preventing an older task from deleting a newer task's lock.
+
 **Backend only (development):**
 
 ```bash
