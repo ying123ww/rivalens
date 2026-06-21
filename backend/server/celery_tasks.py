@@ -16,6 +16,7 @@ from .rivalens_runner import set_trace_store
 from .trace_store import TraceStore
 from .websocket_manager import run_agent
 from rivalens.report_export import generate_report_files
+from rivalens.research.utils.llm_rate_limiter import get_llm_rate_limiter
 from rivalens.research.utils.enum import Tone
 
 
@@ -301,6 +302,27 @@ async def _generate_report_task(
         raise
 
 
+async def _run_generate_report_task(
+    research_request: dict[str, Any],
+    research_id: str,
+    celery_task_id: str,
+) -> dict[str, Any]:
+    try:
+        return await _generate_report_task(
+            research_request,
+            research_id,
+            celery_task_id,
+        )
+    finally:
+        try:
+            await get_llm_rate_limiter().aclose()
+        except Exception:
+            logger.exception(
+                "Failed to close async Redis rate limiter for task %s",
+                celery_task_id,
+            )
+
+
 @celery_app.task(bind=True, name="backend.server.celery_tasks.generate_report_task")
 def generate_report_task(
     self,
@@ -341,7 +363,7 @@ def generate_report_task(
 
     try:
         return asyncio.run(
-            _generate_report_task(
+            _run_generate_report_task(
                 research_request,
                 research_id,
                 celery_task_id,

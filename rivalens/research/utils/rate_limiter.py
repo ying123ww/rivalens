@@ -6,6 +6,7 @@ not just per-pool. This prevents multiple concurrent researchers from overwhelmi
 rate-limited APIs like Firecrawl.
 """
 import asyncio
+import threading
 import time
 from typing import ClassVar
 
@@ -19,7 +20,7 @@ class GlobalRateLimiter:
     """
 
     _instance: ClassVar['GlobalRateLimiter'] = None
-    _lock: ClassVar[asyncio.Lock] = None
+    _lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -35,18 +36,6 @@ class GlobalRateLimiter:
         self.last_request_time = 0.0
         self.rate_limit_delay = 0.0
         self._initialized = True
-
-        # Create lock at class level to ensure it's shared across all instances
-        if GlobalRateLimiter._lock is None:
-            # Note: This will be properly initialized when first accessed in an async context
-            GlobalRateLimiter._lock = None
-
-    @classmethod
-    def get_lock(cls):
-        """Get or create the async lock (must be called from async context)."""
-        if cls._lock is None:
-            cls._lock = asyncio.Lock()
-        return cls._lock
 
     def configure(self, rate_limit_delay: float):
         """
@@ -67,16 +56,15 @@ class GlobalRateLimiter:
         if self.rate_limit_delay <= 0:
             return  # No rate limiting
 
-        lock = self.get_lock()
-        async with lock:
-            current_time = time.time()
-            time_since_last = current_time - self.last_request_time
-
-            if time_since_last < self.rate_limit_delay:
+        while True:
+            with self._lock:
+                current_time = time.monotonic()
+                time_since_last = current_time - self.last_request_time
                 sleep_time = self.rate_limit_delay - time_since_last
-                await asyncio.sleep(sleep_time)
-
-            self.last_request_time = time.time()
+                if sleep_time <= 0:
+                    self.last_request_time = current_time
+                    return
+            await asyncio.sleep(sleep_time)
 
     def reset(self):
         """Reset the rate limiter state (useful for testing)."""

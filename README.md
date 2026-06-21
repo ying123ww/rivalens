@@ -190,8 +190,6 @@ rivalens/
 │       ├── hooks/                   # Custom hooks
 │       ├── helpers/                 # Utility functions
 │       └── config/                  # Frontend configuration
-├── tests/                           # Test suite (8 test files)
-├── docs/                            # Architecture & design docs
 ├── scripts/                         # Utility scripts
 │   ├── run_agent_flow.py            # Agent-only local run
 │   └── langsmith_smoke.py           # LangSmith connectivity test
@@ -519,7 +517,12 @@ RIVALENS_MAX_BRANCH_DEPTH=0          # 0 disables follow-up collection branches
 RIVALENS_MAX_EXPANSION_BRANCHES=0    # max follow-up branches from coverage gaps
 RIVALENS_MAX_CONCURRENT_COLLECTIONS=3 # concurrent collection branches
 RIVALENS_MAX_SUBQUERY_CONCURRENCY=2  # per-branch sub-query processing
+RIVALENS_SCRAPER_PROCESS_WORKERS=24  # shared scraper hard limit per process
 ```
+
+All `ResearchEngine` instances in one process share this scraper executor.
+Each engine retains its local semaphore, while synchronous and asynchronous
+scrapers also pass through the same process-level hard limit.
 
 ### Scraped Source Cache
 
@@ -611,6 +614,12 @@ RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
 ```
 
 Failed packages fall back to rule-generated claims.
+
+LLM requests share a Redis-backed token bucket across API and Celery processes.
+The limiter uses the asynchronous Redis client, so Redis waits do not block
+other collection, analysis, or writing coroutines in the same event loop.
+`RIVALENS_LLM_PROCESS_CONCURRENCY=12` additionally caps in-flight LLM calls per
+process across planning, knowledge extraction, analysis, and report writing.
 
 ## Report Export
 

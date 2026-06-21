@@ -518,7 +518,11 @@ RIVALENS_MAX_BRANCH_DEPTH=0          # 设为 0 禁用跟进收集分支
 RIVALENS_MAX_EXPANSION_BRANCHES=0    # 覆盖缺口产生的最大跟进分支数
 RIVALENS_MAX_CONCURRENT_COLLECTIONS=3 # 并发收集分支数
 RIVALENS_MAX_SUBQUERY_CONCURRENCY=2  # 每分支子查询并发数
+RIVALENS_SCRAPER_PROCESS_WORKERS=24  # 每进程共享抓取硬上限
 ```
+
+同一进程内的所有 `ResearchEngine` 共享这个抓取 Executor。每个引擎仍保留
+自己的局部 Semaphore，同时同步和异步抓取都会经过同一个进程级硬上限。
 
 ### 爬取来源缓存
 
@@ -610,6 +614,12 @@ RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
 ```
 
 失败的包回退至规则生成的论断。
+
+LLM 请求通过 Redis 令牌桶在 API 与 Celery 进程之间共享限流状态。限流器
+使用异步 Redis 客户端，因此等待 Redis 时不会阻塞同一事件循环中的其他
+采集、分析或写作协程。
+`RIVALENS_LLM_PROCESS_CONCURRENCY=12` 进一步限制每个进程中的 LLM 在途请求，
+规划、知识抽取、分析和报告写作共享这一硬上限。
 
 ## 报告导出
 
