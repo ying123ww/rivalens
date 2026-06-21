@@ -190,8 +190,6 @@ rivalens/
 │       ├── hooks/                   # 自定义 Hooks
 │       ├── helpers/                 # 工具函数
 │       └── config/                  # 前端配置
-├── tests/                           # 测试套件（8 个测试文件）
-├── docs/                            # 架构与设计文档
 ├── scripts/                         # 工具脚本
 │   ├── run_agent_flow.py            # 仅智能体的本地运行
 │   └── langsmith_smoke.py           # LangSmith 连通性测试
