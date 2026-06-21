@@ -190,8 +190,6 @@ rivalens/
 │       ├── hooks/                   # Custom hooks
 │       ├── helpers/                 # Utility functions
 │       └── config/                  # Frontend configuration
-├── tests/                           # Test suite (8 test files)
-├── docs/                            # Architecture & design docs
 ├── scripts/                         # Utility scripts
 │   ├── run_agent_flow.py            # Agent-only local run
 │   └── langsmith_smoke.py           # LangSmith connectivity test
