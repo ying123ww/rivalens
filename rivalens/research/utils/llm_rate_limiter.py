@@ -88,6 +88,7 @@ class LLMRateLimiter:
             return
         self._initialized = True
         self._redis: Any = None
+        self._redis_loop: asyncio.AbstractEventLoop | None = None
         self._redis_init_attempted = False
         self._script: Any = None
         self._lock = asyncio.Lock()
@@ -121,7 +122,7 @@ class LLMRateLimiter:
         if rpm <= 0:
             return True  # rate limiting disabled for this provider
 
-        r = self._get_redis()
+        r = await self._get_redis()
         if r is None:
             return True  # Redis unavailable — allow through
 
@@ -132,7 +133,7 @@ class LLMRateLimiter:
 
         while True:
             try:
-                allowed, _tokens_left, wait_ms = self._script(
+                allowed, _tokens_left, wait_ms = await self._script(
                     keys=[f"llm:rate_limit:{provider}"],
                     args=[str(capacity), str(rate), "1"],
                 )
@@ -158,6 +159,13 @@ class LLMRateLimiter:
 
             await asyncio.sleep(min(wait_s, remaining))
 
+    async def aclose(self) -> None:
+        """Close the async Redis pool owned by the current event loop."""
+        client = self._redis
+        self._reset_redis_state()
+        if client is not None:
+            await client.aclose()
+
     # ── internal ───────────────────────────────────────────────
 
     def _resolve_rpm(self, provider: str, model: str | None = None) -> int:
@@ -172,22 +180,49 @@ class LLMRateLimiter:
                 pass
         return int(os.getenv("RIVALENS_LLM_RPM_LIMIT", "0"))
 
-    def _get_redis(self) -> Any | None:
+    async def _get_redis(self) -> Any | None:
+        current_loop = asyncio.get_running_loop()
+        if self._redis_loop is not None and self._redis_loop is not current_loop:
+            self._reset_redis_state()
+            self._lock = asyncio.Lock()
+
         if self._redis_init_attempted:
             return self._redis
-        self._redis_init_attempted = True
 
-        redis_url = os.getenv("REDIS_URL", DEFAULT_REDIS_URL)
-        try:
-            import redis as _redis
+        async with self._lock:
+            if self._redis_init_attempted:
+                return self._redis
+            self._redis_init_attempted = True
+            self._redis_loop = current_loop
 
-            self._redis = _redis.from_url(redis_url, decode_responses=True)
-            self._redis.ping()
-            self._script = self._redis.register_script(_LUA_TOKEN_BUCKET)
-        except Exception:
-            logger.warning("Redis unavailable for LLM rate limiter, disabling")
-            self._redis = None
-        return self._redis
+            redis_url = os.getenv("REDIS_URL", DEFAULT_REDIS_URL)
+            client = None
+            try:
+                from redis import asyncio as redis_async
+
+                client = redis_async.from_url(redis_url, decode_responses=True)
+                await client.ping()
+                self._script = client.register_script(_LUA_TOKEN_BUCKET)
+                self._redis = client
+            except Exception:
+                logger.warning("Redis unavailable for LLM rate limiter, disabling")
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        logger.debug(
+                            "Failed to close unavailable Redis client",
+                            exc_info=True,
+                        )
+                self._redis = None
+                self._script = None
+            return self._redis
+
+    def _reset_redis_state(self) -> None:
+        self._redis = None
+        self._redis_loop = None
+        self._redis_init_attempted = False
+        self._script = None
 
 
 # ── singleton access ──────────────────────────────────────────────

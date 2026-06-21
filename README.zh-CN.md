@@ -611,6 +611,10 @@ RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
 
 失败的包回退至规则生成的论断。
 
+LLM 请求通过 Redis 令牌桶在 API 与 Celery 进程之间共享限流状态。限流器
+使用异步 Redis 客户端，因此等待 Redis 时不会阻塞同一事件循环中的其他
+采集、分析或写作协程。
+
 ## 报告导出
 
 报告通过 `backend/report_type/` 和 `rivalens/report_export.py` 以多种格式导出：

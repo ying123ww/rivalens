@@ -612,6 +612,10 @@ RIVALENS_ANALYSIS_LLM_FACTS_PER_PACKAGE=18
 
 Failed packages fall back to rule-generated claims.
 
+LLM requests share a Redis-backed token bucket across API and Celery processes.
+The limiter uses the asynchronous Redis client, so Redis waits do not block
+other collection, analysis, or writing coroutines in the same event loop.
+
 ## Report Export
 
 Reports are exported in multiple formats via `backend/report_type/` and `rivalens/report_export.py`:
