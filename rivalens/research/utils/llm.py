@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import Any
 import asyncio
 
@@ -18,7 +19,46 @@ from rivalens.research.llm_provider.generic.base import (
 
 from ..trace_context import RIVALENS_TRACE_CONTEXT_KEY, compact_trace_context
 from .costs import estimate_llm_cost
+from .concurrency import ProcessConcurrencyLimiter
 from .llm_rate_limiter import get_llm_rate_limiter
+
+
+_DEFAULT_LLM_PROCESS_CONCURRENCY = 12
+_llm_process_limiter_lock = threading.Lock()
+_llm_process_limiter: ProcessConcurrencyLimiter | None = None
+_llm_process_limiter_pid: int | None = None
+
+
+def get_llm_process_limiter() -> ProcessConcurrencyLimiter:
+    """返回当前进程所有 LLM 请求共享的并发闸门。"""
+    global _llm_process_limiter
+    global _llm_process_limiter_pid
+
+    current_pid = os.getpid()
+    with _llm_process_limiter_lock:
+        concurrency = _llm_process_concurrency()
+        if (
+            _llm_process_limiter is None
+            or _llm_process_limiter_pid != current_pid
+            or _llm_process_limiter.limit != concurrency
+        ):
+            _llm_process_limiter = ProcessConcurrencyLimiter(
+                concurrency,
+                name="llm",
+            )
+            _llm_process_limiter_pid = current_pid
+        return _llm_process_limiter
+
+
+def _llm_process_concurrency() -> int:
+    raw_value = os.getenv(
+        "RIVALENS_LLM_PROCESS_CONCURRENCY",
+        str(_DEFAULT_LLM_PROCESS_CONCURRENCY),
+    )
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        return _DEFAULT_LLM_PROCESS_CONCURRENCY
 
 
 def _provider_runtime_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -149,9 +189,13 @@ async def create_chat_completion(
     log_suffix = f"; {log_context}" if log_context else ""
     for attempt in range(1, max_attempts + 1):
         try:
-            response = await provider.get_chat_response(
-                messages, stream, websocket, **provider_runtime_kwargs
-            )
+            async with get_llm_process_limiter().slot():
+                response = await provider.get_chat_response(
+                    messages,
+                    stream,
+                    websocket,
+                    **provider_runtime_kwargs,
+                )
         except Exception as exc:
             last_exception = exc
             logging.getLogger(__name__).warning(
