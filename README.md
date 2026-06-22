@@ -236,6 +236,13 @@ The monitoring dashboard uses the structured context returned by the report APIs
 
 Authenticated users can edit their display name through `/api/auth/me`. The profile dialog also supports an optional avatar image up to 3 MB. Avatar data is stored per user in browser `localStorage` and displayed in the workspace header; it is not uploaded to the backend.
 
+The Preferences dialog supports uploaded-file analysis when `My Documents` or
+`Hybrid` is selected. Uploaded server paths are validated against `DOC_PATH`,
+passed into the Rivalens workflow, converted into local `EvidenceItem` records,
+and retained in the same evidence-to-claim traceability chain as web sources.
+Current lightweight file-context ingestion supports CSV, Excel, JSON, and
+common screenshot/image formats.
+
 ## Getting Started
 
 ### Prerequisites
@@ -451,6 +458,7 @@ Backend routes are defined in `backend/server/app.py`. The backend uses FastAPI 
 | POST | `/upload/` | Upload a file to the document path |
 | DELETE | `/files/{filename}` | Delete a file from the document path |
 | GET | `/files/` | List uploaded files |
+| GET | `/files/{filename}` | Download an uploaded file referenced by local evidence |
 | WebSocket | `/ws` | Real-time workflow communication |
 
 ## Agent Workflow

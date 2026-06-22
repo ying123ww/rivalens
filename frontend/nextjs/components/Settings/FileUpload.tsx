@@ -3,42 +3,57 @@ import axios from 'axios';
 import { useDropzone } from 'react-dropzone';
 import {getHost} from "@/helpers/getHost"
 
-const FileUpload = () => {
-  const [files, setFiles] = useState([]);
+interface UploadedFile {
+  name: string;
+  path: string;
+}
+
+interface FileUploadProps {
+  onFilesChange: (filePaths: string[]) => void;
+}
+
+const FileUpload = ({ onFilesChange }: FileUploadProps) => {
+  const [files, setFiles] = useState<UploadedFile[]>([]);
   const host = getHost();
 
   const fetchFiles = useCallback(async () => {
     try {
       const response = await axios.get(`${host}/files/`);
-      setFiles(response.data.files);
+      const names: string[] = response.data.files || [];
+      const paths: string[] = response.data.file_paths || [];
+      const uploadedFiles = names.map((name, index) => ({
+        name,
+        path: paths[index] || name,
+      }));
+      setFiles(uploadedFiles);
+      onFilesChange(uploadedFiles.map(file => file.path));
     } catch (error) {
       console.error('Error fetching files:', error);
     }
-  }, [host]);
+  }, [host, onFilesChange]);
 
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
 
   const onDrop = async (acceptedFiles: any[]) => {
-    const formData = new FormData();
-    acceptedFiles.forEach(file => {
-      formData.append('file', file);
-    });
-    
     try {
-      await axios.post(`${host}/upload/`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
+      await Promise.all(acceptedFiles.map(file => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return axios.post(`${host}/upload/`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+      }));
       fetchFiles();
     } catch (error) {
       console.error('Error uploading files:', error);
     }
   };
 
-  const deleteFile = async (filename: never) => {
+  const deleteFile = async (filename: string) => {
     try {
       await axios.delete(`${host}/files/${filename}`);
       fetchFiles();
@@ -60,9 +75,9 @@ const FileUpload = () => {
             <h2 className={"text-gray-900 mt-2 text-xl"}>Uploaded Files</h2>
             <ul role={"list"} className={"my-2 divide-y divide-gray-100"}>
               {files.map(file => (
-                <li key={file} className={"flex justify-between gap-x-6 py-1"}>
-                  <span className={"flex-1"}>{file}</span>
-                  <button onClick={(e) => { e.preventDefault(); deleteFile(file) }}>
+                <li key={file.path} className={"flex justify-between gap-x-6 py-1"}>
+                  <span className={"flex-1"}>{file.name}</span>
+                  <button onClick={(e) => { e.preventDefault(); deleteFile(file.name) }}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5"
                         stroke="currentColor" className="size-6">
                       <path strokeLinecap="round" strokeLinejoin="round"

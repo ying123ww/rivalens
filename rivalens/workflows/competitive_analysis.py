@@ -228,6 +228,7 @@ async def run_competitive_analysis_task(
         ),
         "query": query,
         "competitors": kwargs.get("competitors", []),
+        "report_source": kwargs.get("report_source", "web"),
         "files": kwargs.get("files", kwargs.get("file_paths", [])),
         "attachments": kwargs.get("attachments", []),
         "industry_direction_plan": kwargs.get("industry_direction_plan"),

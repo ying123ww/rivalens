@@ -178,6 +178,8 @@ class EvidenceCollectionTask(TypedDict, total=False):
     success_criteria: list[SuccessCriterion]
     task_context: str
     file_rag_context: str
+    file_context_chunks: list[dict[str, Any]]
+    report_source: str
 
 
 class EvidenceCollectionResult(TypedDict, total=False):

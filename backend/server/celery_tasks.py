@@ -161,6 +161,9 @@ async def _write_report(
         industry_direction_plan=research_request.get("industry_direction_plan"),
         run_id=research_id,
         user_id=research_request.get("user_id"),
+        files=research_request.get("files")
+        or research_request.get("file_paths")
+        or [],
     )
 
     if report_type != "rivalens":

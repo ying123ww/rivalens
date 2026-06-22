@@ -90,6 +90,13 @@ export default function ResearchForm({
     }));
   };
 
+  const onFilesChange = React.useCallback((filePaths: string[]) => {
+    setChatBoxSettings(prevSettings => ({
+      ...prevSettings,
+      file_paths: filePaths,
+    }));
+  }, [setChatBoxSettings]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (onFormSubmit) {
@@ -135,7 +142,7 @@ export default function ResearchForm({
       
 
       {report_source === "local" || report_source === "hybrid" ? (
-        <FileUpload />
+        <FileUpload onFilesChange={onFilesChange} />
       ) : null}
       
       <ToneSelector tone={tone} onToneChange={onToneChange} />

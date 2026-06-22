@@ -46,6 +46,7 @@ def build_file_context(file_references: list[Any]) -> dict[str, Any]:
                     **chunk,
                     "source_id": source["id"],
                     "source_name": source["name"],
+                    "source_path": source["path"],
                     "source_type": source["type"],
                 }
             )
