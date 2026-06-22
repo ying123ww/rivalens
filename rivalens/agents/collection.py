@@ -11,7 +11,7 @@ from rivalens.agents.messages import create_agent_message, latest_message_for
 from rivalens.agents.search_query_builder import SearchQueryBuilder
 from rivalens.agents.source_metrics import SourceMetricsBuilder
 from rivalens.agents.success_criteria import normalize_success_criteria
-from rivalens.file_context import format_rag_context
+from rivalens.file_context import format_rag_context, retrieve_file_chunks
 from rivalens.report_routing import primary_report_section_id
 from rivalens.research import ResearchEngineEvidenceCollector, ResearchMode
 from rivalens.research.evidence_collector import _trace_collection_task
@@ -85,6 +85,7 @@ class CollectionAgent:
         query = task.get("query", "")
         competitors = state.get("competitors") or task.get("competitors") or []
         verbose = bool(task.get("verbose", True))
+        report_source = str(task.get("report_source") or "web")
 
         evidence_items = list(state.get("evidence_items", []))
         research_artifacts = list(state.get("research_artifacts", []))
@@ -129,12 +130,18 @@ class CollectionAgent:
                 for branch, research_task in zip(active_frontier, planned_tasks, strict=True)
             ]
             for collection_task in collection_tasks:
+                collection_task["report_source"] = report_source
                 file_rag_context = self._file_rag_context(
                     collection_task["query"],
                     file_context,
                 )
                 if file_rag_context:
                     collection_task["file_rag_context"] = file_rag_context
+                    collection_task["file_context_chunks"] = retrieve_file_chunks(
+                        file_context,
+                        collection_task["query"],
+                        limit=4,
+                    )
 
             collection_semaphore = asyncio.Semaphore(self.max_concurrent_collections)
             results = await asyncio.gather(
@@ -471,6 +478,7 @@ class CollectionAgent:
         return await collect(
             collection_task=collection_task,
             mode=self._research_mode_for_task(collection_task),
+            source=collection_task.get("report_source", "web"),
             source_urls=collection_task.get("target_urls", []),
             verbose=verbose,
             **kwargs,

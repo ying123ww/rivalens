@@ -1,8 +1,10 @@
 """Evidence collection adapter for Rivalens collection workflows."""
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 from langsmith import traceable
 
@@ -135,31 +137,43 @@ class ResearchEngineEvidenceCollector:
         """Run evidence collection for one schema-aware collection task."""
         mode = ResearchMode(mode)
         trace_context = _trace_collection_task(collection_task)
-        researcher = ResearchEngine(
-            query=collection_task["query"],
-            report_type=REPORT_TYPE_BY_MODE[mode],
-            report_source=source,
-            tone=self.tone,
-            source_urls=source_urls,
-            verbose=verbose,
-            websocket=self.websocket,
-            headers=self.headers,
-            query_domains=query_domains,
-            **{
-                RIVALENS_SEARCH_QUERIES_KEY: collection_task.get("search_queries", []),
-                RIVALENS_TRACE_CONTEXT_KEY: trace_context,
-                RIVALENS_EXCLUDED_CANONICAL_URLS_KEY: collection_task.get(
-                    "excluded_canonical_urls",
-                    [],
-                ),
-            },
-        )
+        file_context = str(collection_task.get("file_rag_context") or "")
+        evidence_items = self._file_evidence_items(collection_task)
+        costs = 0.0
 
-        collected_context = await researcher.conduct_research()
-        evidence_items = self._to_evidence_items(
-            collection_task=collection_task,
-            sources=researcher.get_research_sources(),
-        )
+        if source != ReportSource.Local.value:
+            researcher = ResearchEngine(
+                query=collection_task["query"],
+                report_type=REPORT_TYPE_BY_MODE[mode],
+                report_source=ReportSource.Web.value,
+                tone=self.tone,
+                source_urls=source_urls,
+                verbose=verbose,
+                websocket=self.websocket,
+                headers=self.headers,
+                query_domains=query_domains,
+                **{
+                    RIVALENS_SEARCH_QUERIES_KEY: collection_task.get("search_queries", []),
+                    RIVALENS_TRACE_CONTEXT_KEY: trace_context,
+                    RIVALENS_EXCLUDED_CANONICAL_URLS_KEY: collection_task.get(
+                        "excluded_canonical_urls",
+                        [],
+                    ),
+                },
+            )
+            collected_context = await researcher.conduct_research()
+            evidence_items = self._to_evidence_items(
+                collection_task=collection_task,
+                sources=researcher.get_research_sources(),
+            ) + evidence_items
+            costs = researcher.get_costs()
+        else:
+            collected_context = ""
+
+        if file_context:
+            collected_context = "\n\n".join(
+                part for part in (collected_context, file_context) if part
+            )
 
         return {
             "task": dict(collection_task),
@@ -167,8 +181,58 @@ class ResearchEngineEvidenceCollector:
             "query": collection_task["query"],
             "context": collected_context,
             "evidence_items": evidence_items,
-            "costs": researcher.get_costs(),
+            "costs": costs,
         }
+
+    def _file_evidence_items(
+        self,
+        collection_task: EvidenceCollectionTask,
+    ) -> list[EvidenceItem]:
+        retrieved_at = datetime.now(timezone.utc).isoformat()
+        evidence_items: list[EvidenceItem] = []
+
+        for chunk in collection_task.get("file_context_chunks", []):
+            excerpt = self._clean_text(chunk.get("text", ""))
+            source_name = self._clean_text(chunk.get("source_name", "uploaded file"))
+            if not excerpt:
+                continue
+            source_url = f"/files/{quote(source_name)}"
+            evidence_items.append(
+                {
+                    "competitor": collection_task.get("competitor", ""),
+                    "branch_id": collection_task.get(
+                        "branch_id",
+                        collection_task.get("id", ""),
+                    ),
+                    "parent_branch_id": collection_task.get("parent_branch_id"),
+                    "collection_task_id": collection_task.get("id", ""),
+                    "research_task_id": collection_task.get("research_task_id", ""),
+                    "dimension_id": collection_task.get("dimension_id", ""),
+                    "dimension_name": collection_task.get("dimension_name", ""),
+                    "title": (
+                        f"{source_name}: "
+                        f"{self._clean_text(chunk.get('title', 'file excerpt'))}"
+                    ),
+                    "url": source_url,
+                    "canonical_url": source_url,
+                    "source_domain": "local-upload",
+                    "source_type": "other",
+                    "retrieved_at": retrieved_at,
+                    "excerpt": excerpt,
+                    "scraped_content_sha256": hashlib.sha256(
+                        excerpt.encode("utf-8")
+                    ).hexdigest(),
+                    "source_cache": {
+                        "origin": "user_upload",
+                        "source_name": source_name,
+                    },
+                    "source_priority": SOURCE_TYPE_PRIORITY["other"],
+                    "is_primary_source": False,
+                    "confidence": 0.85,
+                }
+            )
+
+        return evidence_items
 
     def _to_evidence_items(
         self,

@@ -76,6 +76,7 @@ export interface IndustryDirectionPlan {
 export interface ChatBoxSettings {
   report_type: string;
   report_source: string;
+  file_paths?: string[];
   tone: string;
   domains: string[];
   defaultReportType: string;

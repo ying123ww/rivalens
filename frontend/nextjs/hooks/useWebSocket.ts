@@ -195,7 +195,8 @@ export const useWebSocket = (
           mcp_enabled,
           mcp_configs,
           mcp_strategy,
-          industry_direction_plan
+          industry_direction_plan,
+          file_paths
         } = chatBoxSettings;
         
         // Start a new research
@@ -212,7 +213,10 @@ export const useWebSocket = (
             mcp_enabled: mcp_enabled || false,
             mcp_strategy: mcp_strategy || "fast",
             mcp_configs: mcp_configs || [],
-            industry_direction_plan
+            industry_direction_plan,
+            file_paths: report_source === "local" || report_source === "hybrid"
+              ? file_paths || []
+              : []
           };
           
           // Make sure we have a properly formatted command with a space after start

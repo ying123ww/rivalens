@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # Add the parent directory to sys.path to make sure we can import from server
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -26,7 +26,8 @@ from server.websocket_manager import WebSocketManager
 from server.server_utils import (
     get_config_dict, sanitize_filename,
     update_environment_variables, handle_file_upload, handle_file_deletion,
-    execute_rivalens_workflow, handle_websocket_communication
+    execute_rivalens_workflow, handle_websocket_communication,
+    resolve_uploaded_file_paths,
 )
 
 from server.websocket_manager import run_agent
@@ -76,6 +77,7 @@ class ResearchRequest(BaseModel):
     task: str
     report_type: str
     report_source: str
+    file_paths: List[str] = Field(default_factory=list)
     tone: str
     headers: dict | None = None
     repo_name: str
@@ -835,6 +837,7 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
         config_path="",
         return_researcher=True,
         run_id=research_id,
+        files=research_request.file_paths,
     )
 
     if research_request.report_type != "rivalens":
@@ -897,6 +900,12 @@ async def write_report(research_request: ResearchRequest, research_id: str = Non
 
 @app.post("/report/")
 async def generate_report(research_request: ResearchRequest, background_tasks: BackgroundTasks):
+    research_request.file_paths = resolve_uploaded_file_paths(
+        research_request.file_paths
+        if research_request.report_source in {"local", "hybrid"}
+        else [],
+        DOC_PATH,
+    )
     research_id = sanitize_filename(f"task_{int(time.time())}_{research_request.task}")
     await _upsert_report_generation_record(research_id, research_request, "running")
 
@@ -928,11 +937,20 @@ async def generate_report(research_request: ResearchRequest, background_tasks: B
 
 @app.get("/files/")
 async def list_files():
-    if not os.path.exists(DOC_PATH):
-        os.makedirs(DOC_PATH, exist_ok=True)
-    files = os.listdir(DOC_PATH)
-    print(f"Files in {DOC_PATH}: {files}")
-    return {"files": files}
+    root = Path(DOC_PATH).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    files = sorted(path.name for path in root.iterdir() if path.is_file())
+    file_paths = [str(Path(DOC_PATH) / filename) for filename in files]
+    print(f"Files in {root}: {files}")
+    return {"files": files, "file_paths": file_paths}
+
+
+@app.get("/files/{filename}")
+async def download_uploaded_file(filename: str):
+    file_path = Path(
+        resolve_uploaded_file_paths([os.path.basename(filename)], DOC_PATH)[0]
+    )
+    return FileResponse(file_path, filename=file_path.name)
 
 
 @app.post("/api/rivalens")

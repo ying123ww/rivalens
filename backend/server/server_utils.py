@@ -8,7 +8,6 @@ import shutil
 import traceback
 from typing import Awaitable, Dict, List, Any
 from fastapi.responses import JSONResponse, FileResponse
-from rivalens.research.document.document import DocumentLoader
 from rivalens.research import ResearchEngine
 from pathlib import Path
 from datetime import datetime
@@ -351,6 +350,37 @@ def sanitize_filename(filename: str) -> str:
     return re.sub(r"[^\w\s-]", "", sanitized).strip()
 
 
+def resolve_uploaded_file_paths(
+    file_paths: list[str] | None,
+    doc_path: str,
+) -> list[str]:
+    root = Path(doc_path).resolve()
+    resolved_paths: list[str] = []
+
+    for value in file_paths or []:
+        raw_path = Path(str(value))
+        if raw_path.is_absolute():
+            candidate = raw_path.resolve()
+        elif raw_path.parent == Path("."):
+            candidate = (root / raw_path.name).resolve()
+        else:
+            candidate = raw_path.resolve()
+
+        if not candidate.is_relative_to(root):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded file path is outside DOC_PATH: {value}",
+            )
+        if not candidate.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded file does not exist: {value}",
+            )
+        resolved_paths.append(str(candidate))
+
+    return list(dict.fromkeys(resolved_paths))
+
+
 async def handle_start_command(
     websocket,
     data: str,
@@ -373,7 +403,12 @@ async def handle_start_command(
         mcp_configs,
         max_search_results,
         industry_direction_plan,
+        file_paths,
     ) = extract_command_data(json_data)
+    file_paths = resolve_uploaded_file_paths(
+        file_paths if report_source in {"local", "hybrid"} else [],
+        os.getenv("DOC_PATH", "./my-docs"),
+    )
 
     if not task or not report_type:
         print("Error: Missing task or report_type")
@@ -504,6 +539,7 @@ async def handle_start_command(
                 "mcp_configs": mcp_configs or [],
                 "max_search_results": max_search_results,
                 "industry_direction_plan": industry_direction_plan,
+                "files": file_paths,
                 "user_id": user_id,
             }
             async_result = generate_report_task.delay(research_request, research_id)
@@ -585,7 +621,8 @@ async def handle_start_command(
             mcp_configs,
             max_search_results,
             industry_direction_plan,
-            user_id,
+            user_id=user_id,
+            files=file_paths,
         )
         report = (
             str(report_payload.get("report", ""))
@@ -845,15 +882,15 @@ def update_environment_variables(config: Dict[str, str]):
 
 
 async def handle_file_upload(file, DOC_PATH: str) -> Dict[str, str]:
-    file_path = os.path.join(DOC_PATH, os.path.basename(file.filename))
-    with open(file_path, "wb") as buffer:
+    root = Path(DOC_PATH).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    filename = os.path.basename(file.filename)
+    file_path = root / filename
+    with file_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     print(f"File uploaded to {file_path}")
 
-    document_loader = DocumentLoader(DOC_PATH)
-    await document_loader.load()
-
-    return {"filename": file.filename, "path": file_path}
+    return {"filename": file.filename, "path": str(Path(DOC_PATH) / filename)}
 
 
 async def handle_file_deletion(filename: str, DOC_PATH: str) -> JSONResponse:
@@ -1030,4 +1067,5 @@ def extract_command_data(json_data: Dict) -> tuple:
         json_data.get("mcp_configs", []),
         json_data.get("max_search_results"),
         json_data.get("industry_direction_plan"),
+        json_data.get("file_paths", []),
     )
